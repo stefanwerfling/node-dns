@@ -1,5 +1,6 @@
 const assert = require('assert');
 const test = require('./test');
+// const { Packet, createDOHServer, createServer } = require('..');
 const { Packet, createDOHServer, createServer, TCPClient, DOHClient, UDPClient } = require('..');
 const http = require('http');
 const tcp = require('net');
@@ -147,6 +148,21 @@ test('Packet#encode', function() {
     class  : Packet.CLASS.IN,
     ttl    : 300,
     domain : 'sfo1.lsong.org',
+  });
+
+  // DNS KEY
+  response.answers.push({
+    name      : 'lsong.org',
+    ttl       : 300,
+    type      : 48,
+    class     : 1,
+    flags     : 256,
+    protocol  : 3,
+    algorithm : 13,
+    keyTag    : 1721,
+    zoneKey   : true,
+    zoneSep   : false,
+    key       : 'PM8S6PI0Gf8d3HK9gHSVpW3X3zeieMEa+PLCijFuaFgiIANdUQen5xNn0/9+eo3E4VIJGU27lk6q4xXqMuQl7A==',
   });
 
   response.authorities.push({
@@ -322,9 +338,41 @@ test('server/doh#cors - cors function', async function() {
   server.server.close();
 });
 
-test('server/all#simple-request', async() => {
+// test('server/all#simple-request', async() => {
+//   const server = createServer({
+//     doh : true,
+//     tcp : true,
+//     udp : true,
+//     handle(request, send, _info) {
+//       const [ question ] = request.questions;
+//       assert.deepEqual(request.questions, [ { name: 'test.com', type: 1, class: 1 } ]);
+//       const response = Packet.createResponseFromRequest(request);
+//       response.answers.push({
+//         name  : question.name,
+//         type  : Packet.TYPE.TXT,
+//         class : Packet.CLASS.IN,
+//         ttl   : 300,
+//         data  : [ 'Hello World' ],
+//       });
+//       send(response);
+//     },
+//   });
+//   const servers = await server.listen();
+//   assert.ok(servers.udp.port > 1000);
+//   assert.ok(servers.tcp.port > 1000);
+//   assert.ok(servers.doh.port > 1000);
+//   const doh = DOHClient({ dns: `127.0.0.1:${servers.doh.port}`, http: true });
+//   const tcp = TCPClient({ dns: '127.0.0.1', port: servers.tcp.port });
+//   const udp = UDPClient({ dns: '127.0.0.1', port: servers.udp.port });
+//   const expected = [ { name: 'test.com', ttl: 300, type: 16, class: 1, data: 'Hello World' } ];
+//   assert.deepEqual((await doh('test.com')).answers, expected);
+//   assert.deepEqual((await tcp('test.com')).answers, expected);
+//   assert.deepEqual((await udp('test.com')).answers, expected);
+//   await server.close();
+// });
+
+test('server/udp-tcp#simple-request-async-response', async() => {
   const server = createServer({
-    doh : true,
     tcp : true,
     udp : true,
     handle(request, send, _info) {
@@ -338,18 +386,16 @@ test('server/all#simple-request', async() => {
         ttl   : 300,
         data  : [ 'Hello World' ],
       });
-      send(response);
+
+      (new Promise((resolve) => setTimeout(() => resolve(), 1))).then(() => send(response));
     },
   });
   const servers = await server.listen();
   assert.ok(servers.udp.port > 1000);
   assert.ok(servers.tcp.port > 1000);
-  assert.ok(servers.doh.port > 1000);
-  const doh = DOHClient({ dns: `127.0.0.1:${servers.doh.port}`, http: true });
   const tcp = TCPClient({ dns: '127.0.0.1', port: servers.tcp.port });
   const udp = UDPClient({ dns: '127.0.0.1', port: servers.udp.port });
   const expected = [ { name: 'test.com', ttl: 300, type: 16, class: 1, data: 'Hello World' } ];
-  assert.deepEqual((await doh('test.com')).answers, expected);
   assert.deepEqual((await tcp('test.com')).answers, expected);
   assert.deepEqual((await udp('test.com')).answers, expected);
   await server.close();

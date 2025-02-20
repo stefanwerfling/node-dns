@@ -19,6 +19,14 @@ const fromIPv6 = (address) => {
   if (digits[digits.length - 1] === '') {
     digits.pop();
   }
+  // node js 10 does not support Array.prototype.flatMap
+  if (!Array.prototype.flatMap) {
+    // eslint-disable-next-line no-extend-native
+    Array.prototype.flatMap = function(f, ctx) {
+      return this.reduce((r, x, i, a) => r.concat(f.call(ctx, x, i, a)), []);
+    };
+  }
+
   // CAVEAT we have to take into account
   // the extra space used by the empty string
   const missingFields = 8 - digits.length + 1;
@@ -76,31 +84,32 @@ function Packet(data) {
  * @docs https://tools.ietf.org/html/rfc1035#section-3.2.2
  */
 Packet.TYPE = {
-  A     : 0x01,
-  NS    : 0x02,
-  MD    : 0x03,
-  MF    : 0x04,
-  CNAME : 0x05,
-  SOA   : 0x06,
-  MB    : 0x07,
-  MG    : 0x08,
-  MR    : 0x09,
-  NULL  : 0x0A,
-  WKS   : 0x0B,
-  PTR   : 0x0C,
-  HINFO : 0x0D,
-  MINFO : 0x0E,
-  MX    : 0x0F,
-  TXT   : 0x10,
-  AAAA  : 0x1C,
-  SRV   : 0x21,
-  EDNS  : 0x29,
-  SPF   : 0x63,
-  AXFR  : 0xFC,
-  MAILB : 0xFD,
-  MAILA : 0xFE,
-  ANY   : 0xFF,
-  CAA   : 0x101,
+  A      : 0x01,
+  NS     : 0x02,
+  MD     : 0x03,
+  MF     : 0x04,
+  CNAME  : 0x05,
+  SOA    : 0x06,
+  MB     : 0x07,
+  MG     : 0x08,
+  MR     : 0x09,
+  NULL   : 0x0A,
+  WKS    : 0x0B,
+  PTR    : 0x0C,
+  HINFO  : 0x0D,
+  MINFO  : 0x0E,
+  MX     : 0x0F,
+  TXT    : 0x10,
+  AAAA   : 0x1C,
+  SRV    : 0x21,
+  EDNS   : 0x29,
+  SPF    : 0x63,
+  AXFR   : 0xFC,
+  MAILB  : 0xFD,
+  MAILA  : 0xFE,
+  ANY    : 0xFF,
+  CAA    : 0x101,
+  DNSKEY : 0x30,
 };
 /**
  * [QUERY_CLASS description]
@@ -785,21 +794,30 @@ Packet.Resource.EDNS.ECS.decode = function(reader, length) {
   rdata.scopePrefixLength = reader.read(8);
   length -= 4;
 
-  if (rdata.family !== 1) {
-    debug('node-dns > unimplemented address family');
-    reader.read(length * 8); // Ignore data that doesn't understand
-    return rdata;
+  if (rdata.family === 1) {
+    const ipv4Octets = [];
+    while (length--) {
+      const octet = reader.read(8);
+      ipv4Octets.push(octet);
+    }
+    while (ipv4Octets.length < 4) {
+      ipv4Octets.push(0);
+    }
+    rdata.ip = ipv4Octets.join('.');
   }
 
-  const ipv4Octets = [];
-  while (length--) {
-    const octet = reader.read(8);
-    ipv4Octets.push(octet);
+  if (rdata.family === 2) {
+    const ipv6Segments = [];
+    for (; length; length -= 2) {
+      const segment = reader.read(16).toString(16);
+      ipv6Segments.push(segment);
+    }
+    while (ipv6Segments.length < 8) {
+      ipv6Segments.push('0');
+    }
+    rdata.ip = ipv6Segments.join(':');
   }
-  while (ipv4Octets.length < 4) {
-    ipv4Octets.push(0);
-  }
-  rdata.ip = ipv4Octets.join('.');
+
   return rdata;
 };
 
@@ -827,6 +845,110 @@ Packet.Resource.CAA = {
       writer.write(c, 8);
     });
     return writer.toBuffer();
+  },
+};
+
+/**
+ * @type {{decode: (function(*, *): Packet.Resource.DNSKEY)}}
+ * @link https://tools.ietf.org/html/rfc4034
+ * @link https://www.iana.org/assignments/dns-sec-alg-numbers/dns-sec-alg-numbers.xhtml#table-dns-sec-alg-numbers-1
+ */
+Packet.Resource.DNSKEY = {
+  decode: function(reader, length) {
+    const RData = [];
+    while (RData.length < length) {
+      RData.push(reader.read(8));
+    }
+    this.flags = RData[0] << 8 | RData[1];
+    this.protocol = RData[2];
+    this.algorithm = RData[3];
+    // for key tag
+    let ac = 0;
+    for (let i = 0; i < length; ++i) {
+      ac += (i & 1) ? RData[i] : RData[i] << 8;
+    }
+    ac += (ac >> 16) & 0xFFFF;
+    this.keyTag = ac & 0XFFFF;
+
+    //  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 = 16
+    // convert binary flags
+    let binFlags = this.flags.toString(2);
+    // add left padding until 16 chars
+    while (binFlags.length < 16) {
+      binFlags = '0' + binFlags;
+    }
+    this.zoneKey = binFlags[7] === '1';
+    this.zoneSep = binFlags[15] === '1';
+    this.key = Buffer.from(RData.slice(4)).toString('base64');
+    return this;
+  },
+  encode: function(record, writer) {
+    writer = writer || new Packet.Writer();
+    const buffer = Buffer.from(record.key, 'base64');
+    writer.write(4 + buffer.length, 16);
+    writer.write(record.flags, 16);
+    writer.write(record.protocol, 8);
+    writer.write(record.algorithm, 8);
+    buffer.forEach(function(c) {
+      writer.write(c, 8);
+    });
+    return writer.toBuffer();
+  },
+};
+
+/**
+ * RRSIG just support decode
+ * test with dns.resolveRRSIG('example.com')
+ *
+ * @type {{decode: (function(*, *): Packet.Resource.RRSIG)}}
+ */
+Packet.Resource.RRSIG = {
+  decode: function(reader, length) {
+    function dateForSig(date) {
+      // javascript date is from millisecond
+      date = new Date(date * 1000);
+      const definitions = {
+        month   : (date.getUTCMonth() + 1),
+        date    : date.getUTCDate(),
+        hour    : date.getUTCHours(),
+        minutes : date.getUTCMinutes(),
+        seconds : date.getUTCSeconds(),
+      };
+      let i;
+      for (i in definitions) {
+        // if less than 10 > single
+        if (definitions[i] < 10) {
+          definitions[i] = '0' + '' + definitions[i];
+        }
+      }
+      return date.getFullYear() + '' +
+        definitions.month + '' +
+        definitions.date + '' +
+        definitions.hour + '' +
+        definitions.minutes + '' +
+        definitions.seconds;
+    }
+
+    // calculate max-offset uint8
+    const maxOffset = reader.offset + (length * 8);
+    /*
+     * Stuff sign contains 18 octets
+     */
+    this.sigType = reader.read(16); // 2
+    this.algorithm = reader.read(8); // 1
+    this.labels = reader.read(8); // 1
+    this.originalTtl = reader.read(32); // 4
+    this.expiration = dateForSig(reader.read(32)); // 4
+    this.inception = dateForSig(reader.read(32)); // 4
+    this.keyTag = reader.read(16); // 2
+    this.signer = Packet.Name.decode(reader);
+    const maxLength = (maxOffset - reader.offset) / 8;
+    const signature = [];
+    while (signature.length < maxLength) {
+      signature.push(reader.read(8));
+    }
+    this.signature = Buffer.from(signature).toString('base64');
+    return this;
   },
 };
 
