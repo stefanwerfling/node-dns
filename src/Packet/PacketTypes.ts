@@ -1,4 +1,8 @@
-export enum TYPE {
+/**
+ * Packet Types
+ * @docs https://tools.ietf.org/html/rfc1035#section-3.2.2
+ */
+export enum PacketTypes {
     A = 0x01,
     NS = 0x02,
     MD = 0x03,

@@ -5,6 +5,21 @@
 
 > A DNS Server and Client Implementation in Pure JavaScript with no dependencies.
 
+<hr>
+
+### Update to TypeScript (Fork)
+
+I switched the Pure JavaScript version to TypeScript (working on it):
+- Now the types are fixed from TypeScript and not just a definition (*.d.ts). The source code is now more understandable.
+- The translation can now be done in all JS versions, if desired, it is important to me that an ESM is included.
+- I can then carry out the modification to store an OnEvent function on the servers, which in turn process the received packet before the encode. (remove reverse proxy header and note the real client IP), I requested the feature but haven't received an answer to date
+
+
+In the second step, I will further adapt the architecture of the classes. There are inconsistencies and in the middle of them I noticed errors that, although they have no effect on the function (because JS is tolerant) but raised questions.
+I will also question the names of methods again and perhaps make some small changes to the naming.
+
+<hr>
+
 ### Features
 
 + Server and Client

@@ -20,7 +20,7 @@ export class BufferReader {
      * @param {Buffer} buffer
      * @param {number} offset
      */
-    public constructor(buffer: Buffer, offset: number) {
+    public constructor(buffer: Buffer, offset: number = 0) {
         this._buffer = buffer;
         this._offset = offset || 0;
     }
@@ -76,4 +76,21 @@ export class BufferReader {
         this._offset += size;
         return val;
     }
+
+    /**
+     * Return the current offset
+     * @return {number}
+     */
+    public getOffset(): number {
+        return this._offset;
+    }
+
+    /**
+     * Set the current offset
+     * @param {number} offset
+     */
+    public setOffset(offset: number): void {
+        this._offset = offset;
+    }
+
 }
