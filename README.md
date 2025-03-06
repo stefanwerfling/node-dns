@@ -1,4 +1,4 @@
-# dns2 
+# dns2ts 
 
 ![NPM version](https://img.shields.io/npm/v/dns2.svg?style=flat)
 [![Node.js CI](https://github.com/song940/node-dns/actions/workflows/node.js.yml/badge.svg)](https://github.com/song940/node-dns/actions/workflows/node.js.yml)
@@ -8,6 +8,8 @@
 <hr>
 
 ### Update to TypeScript (Fork)
+
+#### Real Types, real fun
 
 I switched the Pure JavaScript version to TypeScript (working on it):
 - Now the types are fixed from TypeScript and not just a definition (*.d.ts). The source code is now more understandable.
@@ -30,7 +32,7 @@ I will also question the names of methods again and perhaps make some small chan
 ### Installation
 
 ```bash
-$ npm install dns2
+$ npm install git+https://github.com/stefanwerfling/node-dns.git#ts
 ```
 
 ### DNS Client (default UDP)
