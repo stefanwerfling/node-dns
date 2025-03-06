@@ -1,8 +1,9 @@
 {
-  "name": "dns2",
+  "name": "dns2ts",
   "version": "2.1.0",
   "description": "A DNS Server and Client Implementation in Pure JavaScript with no dependencies.",
-  "main": "index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
     "test": "node test",
     "lint": "eslint .",
@@ -23,7 +24,8 @@
   "contributors": [
     "Andris Reinman <andris.reinman@gmail.com>",
     "Eviltik <eviltik@gmail.com>",
-    "Martin Heidegger <martin.heidegger@gmail.com>"
+    "Martin Heidegger <martin.heidegger@gmail.com>",
+    "Stefan Werfling <stefan.werfling@googlemail.com>"
   ],
   "license": "MIT",
   "repository": {
@@ -35,9 +37,13 @@
   },
   "homepage": "https://github.com/song940/node-dns#readme",
   "devDependencies": {
-    "eslint": "^7.28.0",
-    "eslint-config-semistandard": "^15.0.1",
-    "eslint-plugin-node": "^11.1.0",
-    "eslint-plugin-promise": "^4.2.1"
+    "@stylistic/eslint-plugin-ts": "^4.1.0",
+    "@types/node": "^22.13.5",
+    "@typescript-eslint/eslint-plugin": "^8.25.0",
+    "@typescript-eslint/parser": "^8.25.0",
+    "eslint": "^9.21.0",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-prefer-arrow": "^1.2.3",
+    "typescript": "^5.7.3"
   }
 }

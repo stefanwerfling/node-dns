@@ -22,10 +22,12 @@ export class BufferWriter {
 
     /**
      * Write buffer to buffer
-     * @param {number[]} buffer
+     * @param {number[]|Buffer} buffer
      */
-    public writeBuffer(buffer: number[]): void {
-        this._buffer = this._buffer.concat(buffer);
+    public writeBuffer(buffer: number[]|Buffer): void {
+        const tBuffer = buffer instanceof Buffer ? [...buffer] : buffer;
+
+        this._buffer = this._buffer.concat(tBuffer);
     }
 
     /**

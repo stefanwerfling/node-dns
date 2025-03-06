@@ -1,51 +1,43 @@
-import {BufferReader} from '../Lib/BufferReader.js';
-import {BufferWriter} from '../Lib/BufferWriter.js';
-import {PacketHeader} from './PacketHeader.js';
-import {PacketQuestion} from './PacketQuestion.js';
-import {PacketResource} from './PacketResource.js';
-import {debuglog} from 'util';
-
-const debug = debuglog('dns2');
-
-export class Packet {
-
-    public header: PacketHeader;
-
-    public questions: PacketQuestion[] = [];
-
-    public answers: PacketResource[] = [];
-
-    public authorities: PacketResource[] = [];
-
-    public additionals: PacketResource[] = [];
-
-    public constructor(data: Packet|PacketHeader|null = null) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Packet = void 0;
+const BufferReader_js_1 = require("../Lib/BufferReader.js");
+const BufferWriter_js_1 = require("../Lib/BufferWriter.js");
+const PacketHeader_js_1 = require("./PacketHeader.js");
+const PacketQuestion_js_1 = require("./PacketQuestion.js");
+const PacketResource_js_1 = require("./PacketResource.js");
+const util_1 = require("util");
+const debug = (0, util_1.debuglog)('dns2');
+class Packet {
+    header;
+    questions = [];
+    answers = [];
+    authorities = [];
+    additionals = [];
+    constructor(data = null) {
         if (data instanceof Packet) {
             this.header = data.header;
-        } else if (data instanceof PacketHeader) {
+        }
+        else if (data instanceof PacketHeader_js_1.PacketHeader) {
             this.header = data;
-        } else {
-            this.header = new PacketHeader();
+        }
+        else {
+            this.header = new PacketHeader_js_1.PacketHeader();
         }
     }
-
-    public toBuffer(writer: BufferWriter|null = null): Buffer {
-        const twriter = writer === null ? new BufferWriter() : writer;
-
+    toBuffer(writer = null) {
+        const twriter = writer === null ? new BufferWriter_js_1.BufferWriter() : writer;
         this.header.qdcount = this.questions.length;
         this.header.ancount = this.answers.length;
         this.header.nscount = this.authorities.length;
         this.header.arcount = this.additionals.length;
-
         this.header.toBuffer(writer);
-
-        const list: string[] = [
+        const list = [
             'questions',
             'answers',
             'authorities',
             'additionals'
         ];
-
         for (const section of list) {
             switch (section) {
                 case 'questions':
@@ -53,19 +45,16 @@ export class Packet {
                         resource.toBuffer(writer);
                     });
                     break;
-
                 case 'answers':
                     this.answers.map((resource) => {
                         resource.toBuffer(writer);
                     });
                     break;
-
                 case 'authorities':
                     this.authorities.map((resource) => {
                         resource.toBuffer(writer);
                     });
                     break;
-
                 case 'additionals':
                     this.additionals.map((resource) => {
                         resource.toBuffer(writer);
@@ -73,58 +62,43 @@ export class Packet {
                     break;
             }
         }
-
         return twriter.toBuffer();
     }
-
-    /**
-     * Parse a buffer
-     * @param {Buffer} buffer
-     * @return {Packet}
-     */
-    public static parse(buffer: Buffer): Packet {
+    static parse(buffer) {
         const packet = new Packet();
-        const reader = new BufferReader(buffer);
-
-        packet.header = PacketHeader.parse(reader);
-
-        const list: Map<string, number> = new Map([
+        const reader = new BufferReader_js_1.BufferReader(buffer);
+        packet.header = PacketHeader_js_1.PacketHeader.parse(reader);
+        const list = new Map([
             ['questions', packet.header.qdcount],
             ['answers', packet.header.ancount],
             ['authorities', packet.header.nscount],
             ['additionals', packet.header.arcount]
         ]);
-
         for (const [section, count] of list.entries()) {
             let tcount = count;
-
             while (tcount--) {
                 try {
                     switch (section) {
                         case 'questions':
-                            packet.questions.push(PacketQuestion.decode(reader));
+                            packet.questions.push(PacketQuestion_js_1.PacketQuestion.decode(reader));
                             break;
-
                         case 'answers':
-                            packet.answers.push(PacketResource.decode(reader));
+                            packet.answers.push(PacketResource_js_1.PacketResource.decode(reader));
                             break;
-
                         case 'authorities':
-                            packet.authorities.push(PacketResource.decode(reader));
+                            packet.authorities.push(PacketResource_js_1.PacketResource.decode(reader));
                             break;
-
                         case 'additionals':
-                            packet.authorities.push(PacketResource.decode(reader));
+                            packet.authorities.push(PacketResource_js_1.PacketResource.decode(reader));
                             break;
                     }
-                } catch (e) {
-                    // TODO Error
-
+                }
+                catch (e) {
                 }
             }
         }
-
         return packet;
     }
-
 }
+exports.Packet = Packet;
+//# sourceMappingURL=Packet.js.map

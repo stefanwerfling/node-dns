@@ -1,81 +1,54 @@
-import {BufferReader} from '../Lib/BufferReader.js';
-import {BufferWriter} from '../Lib/BufferWriter.js';
-
-export class PacketName {
-
-    public static COPY = 0xc0;
-
-    /**
-     * Decode the name
-     * @param {BufferReader|Buffer} reader
-     * @return {string}
-     */
-    public static decode(reader: BufferReader|Buffer): string {
-        const treader = reader instanceof Buffer ? new BufferReader(reader) : reader;
-
-        const name: string[] = [];
-
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.PacketName = void 0;
+const BufferReader_js_1 = require("../Lib/BufferReader.js");
+const BufferWriter_js_1 = require("../Lib/BufferWriter.js");
+class PacketName {
+    static COPY = 0xc0;
+    static decode(reader) {
+        const treader = reader instanceof Buffer ? new BufferReader_js_1.BufferReader(reader) : reader;
+        const name = [];
         let o;
         let len = treader.read(8);
-
         while (len) {
             if ((len & PacketName.COPY) === PacketName.COPY) {
                 len -= PacketName.COPY;
                 len = len << 8;
-
                 const pos = len + treader.read(8);
-
                 if (!o) {
-                    o = treader.getOffset()
+                    o = treader.getOffset();
                 }
-
                 treader.setOffset(pos * 8);
-
                 len = treader.read(8);
-            } else {
+            }
+            else {
                 let part = '';
-
                 while (len--) {
                     part += String.fromCharCode(treader.read(8));
                 }
-
                 name.push(part);
                 len = treader.read(8);
             }
         }
-
         if (o) {
             treader.setOffset(0);
         }
-
         return name.join('.');
     }
-
-    /**
-     * Encode the name
-     * @param {string} domain
-     * @param {BufferWriter|null} writer
-     */
-    public static encode(domain: string, writer: BufferWriter|null = null): Buffer {
-        const twriter = writer === null ? new BufferWriter() : writer;
-
-        // TODO: domain name compress
-
+    static encode(domain, writer = null) {
+        const twriter = writer === null ? new BufferWriter_js_1.BufferWriter() : writer;
         domain.split('.').filter((part) => {
             return !!part;
         }).forEach((part) => {
             twriter.write(part.length, 8);
-
             part.split('').map((c) => {
                 twriter.write(c.charCodeAt(0), 8);
-
                 return c.charCodeAt(0);
             });
         });
-
         twriter.write(0, 8);
-
         return twriter.toBuffer();
     }
-
 }
+exports.PacketName = PacketName;
+//# sourceMappingURL=PacketName.js.map
