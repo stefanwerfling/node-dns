@@ -1,26 +1,19 @@
 {
-  "compileOnSave": true,
   "compilerOptions": {
     "allowSyntheticDefaultImports": true,
     "baseUrl": "./",
+    "composite": true,
     "declaration": true,
-    "module": "NodeNext",
-    "target": "ES2022",
-    "strict": true,
-    "outDir": "dist",
-    "sourceMap": true,
-    "removeComments": true,
-    "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "importHelpers": true,
     "esModuleInterop": true,
-
-    "types": [
-      "node"
-    ],
-    "typeRoots": [
-      "node_modules/@types"
-    ]
+    "experimentalDecorators": true,
+    "importHelpers": true,
+    "module": "NodeNext",
+    "outDir": "dist",
+    "removeComments": true,
+    "sourceMap": true,
+    "strict": true,
+    "target": "ES2022"
   },
   "include": [
     "./src/**/*.ts"
