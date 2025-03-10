@@ -117,14 +117,9 @@ export class PacketHeader {
      * @return {PacketHeader}
      */
     public static parse(reader: BufferReader|Buffer): PacketHeader {
+        const tReader = reader instanceof BufferReader ? reader : new BufferReader(reader);
+
         const header = new PacketHeader();
-
-        let tReader = reader;
-
-        if (tReader instanceof Buffer) {
-            tReader = new BufferReader(tReader);
-        }
-
         header.id = tReader.read(16);
         header.qr = tReader.read(1);
         header.opcode = tReader.read(4);

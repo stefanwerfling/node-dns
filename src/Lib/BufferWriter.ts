@@ -27,7 +27,7 @@ export class BufferWriter {
     public writeBuffer(buffer: number[]|Buffer): void {
         const tBuffer = buffer instanceof Buffer ? [...buffer] : buffer;
 
-        this._buffer = this._buffer.concat(tBuffer);
+        this._buffer = [...this._buffer, ...tBuffer];
     }
 
     /**

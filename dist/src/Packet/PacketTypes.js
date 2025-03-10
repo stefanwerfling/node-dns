@@ -1,0 +1,32 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.PacketTypes = void 0;
+var PacketTypes;
+(function (PacketTypes) {
+    PacketTypes[PacketTypes["A"] = 1] = "A";
+    PacketTypes[PacketTypes["NS"] = 2] = "NS";
+    PacketTypes[PacketTypes["MD"] = 3] = "MD";
+    PacketTypes[PacketTypes["MF"] = 4] = "MF";
+    PacketTypes[PacketTypes["CNAME"] = 5] = "CNAME";
+    PacketTypes[PacketTypes["SOA"] = 6] = "SOA";
+    PacketTypes[PacketTypes["MB"] = 7] = "MB";
+    PacketTypes[PacketTypes["MG"] = 8] = "MG";
+    PacketTypes[PacketTypes["MR"] = 9] = "MR";
+    PacketTypes[PacketTypes["NULL"] = 10] = "NULL";
+    PacketTypes[PacketTypes["WKS"] = 11] = "WKS";
+    PacketTypes[PacketTypes["PTR"] = 12] = "PTR";
+    PacketTypes[PacketTypes["HINFO"] = 13] = "HINFO";
+    PacketTypes[PacketTypes["MINFO"] = 14] = "MINFO";
+    PacketTypes[PacketTypes["MX"] = 15] = "MX";
+    PacketTypes[PacketTypes["TXT"] = 16] = "TXT";
+    PacketTypes[PacketTypes["AAAA"] = 28] = "AAAA";
+    PacketTypes[PacketTypes["SRV"] = 33] = "SRV";
+    PacketTypes[PacketTypes["EDNS"] = 41] = "EDNS";
+    PacketTypes[PacketTypes["SPF"] = 99] = "SPF";
+    PacketTypes[PacketTypes["AXFR"] = 252] = "AXFR";
+    PacketTypes[PacketTypes["MAILB"] = 253] = "MAILB";
+    PacketTypes[PacketTypes["MAILA"] = 254] = "MAILA";
+    PacketTypes[PacketTypes["ANY"] = 255] = "ANY";
+    PacketTypes[PacketTypes["CAA"] = 257] = "CAA";
+})(PacketTypes || (exports.PacketTypes = PacketTypes = {}));
+//# sourceMappingURL=PacketTypes.js.map

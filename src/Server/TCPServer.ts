@@ -7,7 +7,7 @@ import {ServerOptions} from './ServerOptions.js';
  * TCP Server Events
  */
 export type TCPServerEvents = {
-    request: (msgRequest: Packet, send: (message: Packet) => void, client: tcp.Socket) => void;
+    request: (msgRequest: Packet, send: (request: Packet) => void, client: tcp.Socket) => void;
     requestError: (error: Error) => void;
 };
 

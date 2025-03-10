@@ -69,7 +69,7 @@ export class PacketQuestion {
      * @return {PacketQuestion}
      */
     public static decode(reader: BufferReader|Buffer): PacketQuestion {
-        const treader = reader instanceof Buffer ? new BufferReader(reader) : reader;
+        const treader = reader instanceof BufferReader ? reader: new BufferReader(reader);
 
         const question = new PacketQuestion();
         question.name = PacketName.decode(treader);

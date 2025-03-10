@@ -5,6 +5,7 @@ import {A} from './Types/A.js';
 import {AAAA} from './Types/AAAA.js';
 import {MX} from './Types/MX.js';
 import {NS} from './Types/NS.js';
+import {SRV} from './Types/SRV.js';
 
 export type PacketTypeRegistryType = { new(): PacketType;
     decode(reader: BufferReader, length: number): PacketType;
@@ -34,6 +35,7 @@ export class PacketTypeRegistry {
             PacketTypeRegistry._instance.registerPacket(PacketTypes.MX, MX);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.AAAA, AAAA);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.NS, NS);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.SRV, SRV);
         }
 
         return PacketTypeRegistry._instance;

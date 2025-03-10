@@ -1,11 +1,10 @@
-import * as util from 'node:util';
+import util from 'util';
 import {BufferReader} from '../Lib/BufferReader.js';
 import {BufferWriter} from '../Lib/BufferWriter.js';
 import {PacketClass} from './PacketClass.js';
 import {PacketName} from './PacketName.js';
 import {PacketType} from './PacketType.js';
 import {PacketTypeRegistry} from './PacketTypeRegistry.js';
-import {PacketTypes} from './PacketTypes.js';
 
 /**
  * Resource record format
@@ -13,14 +12,33 @@ import {PacketTypes} from './PacketTypes.js';
  */
 export class PacketResource {
 
+    /**
+     * Name
+     */
     public name: string;
 
+    /**
+     * PacketType
+     */
     public packetType: PacketType;
 
+    /**
+     * Class
+     */
     public class: PacketClass|number;
 
+    /**
+     * Ttl
+     */
     public ttl: number;
 
+    /**
+     * Constructor
+     * @param {string} name
+     * @param {PacketType} packetType
+     * @param {PacketClass|number} cls
+     * @param {number} ttl
+     */
     public constructor(
         name: string,
         packetType: PacketType,
@@ -33,14 +51,20 @@ export class PacketResource {
         this.ttl = ttl;
     }
 
+    /**
+     * Return a Buffer
+     * @param {BufferWriter|null} writer
+     * @return {Buffer}
+     */
     public toBuffer(writer: BufferWriter|null = null): Buffer {
         return PacketResource.encode(this, writer);
     }
 
     /**
      * Encode
-     * @param resource
-     * @param writer
+     * @param {PacketResource} resource
+     * @param {BufferWriter|null} writer
+     * @return {Buffer}
      */
     public static encode(resource: PacketResource, writer: BufferWriter|null = null): Buffer {
         const twriter = writer === null ? new BufferWriter() : writer;
@@ -60,7 +84,7 @@ export class PacketResource {
      * @return {PacketResource}
      */
     public static decode(reader: BufferReader|Buffer): PacketResource {
-        const treader = reader instanceof Buffer ? new BufferReader(reader) : reader;
+        const treader = reader instanceof BufferReader ? reader : new BufferReader(reader);
 
         const name = PacketName.decode(treader);
         const type = treader.read(16);
