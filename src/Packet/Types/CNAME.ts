@@ -1,0 +1,57 @@
+import {BufferReader} from '../../Lib/BufferReader.js';
+import {BufferWriter} from '../../Lib/BufferWriter.js';
+import {PacketName} from '../PacketName.js';
+import {PacketResource} from '../PacketResource.js';
+import {PacketType} from '../PacketType.js';
+import {PacketTypes} from '../PacketTypes.js';
+
+/**
+ * CNAME
+ * @docs https://tools.ietf.org/html/rfc1035#section-3.3.1
+ */
+export class CNAME extends PacketType {
+
+    /**
+     * Domain
+     */
+    public domain: string;
+
+    /**
+     * constructor
+     * @param {string} domain
+     */
+    public constructor(domain: string = '') {
+        super(PacketTypes.CNAME);
+        this.domain = domain;
+    }
+
+    /**
+     * Encode CNAME Packet
+     * @param {PacketResource} resource
+     * @param {BufferWriter|null} writer
+     * @return {Buffer}
+     */
+    public encode(resource: PacketResource, writer: BufferWriter|null = null): Buffer {
+        const twriter = writer === null ? new BufferWriter() : writer;
+
+        const buffer = PacketName.encode(this.domain);
+
+        twriter.write(buffer.length, 16);
+        twriter.writeBuffer(buffer);
+
+        return twriter.toBuffer();
+    }
+
+    /**
+     * Decode the Buffer to CNAME Packet
+     * @param {BufferReader} reader
+     * @param {number} length
+     * @return {PacketType}
+     */
+    public static decode(reader: BufferReader, length: number): PacketType {
+        const ns = PacketName.decode(reader);
+
+        return new CNAME(ns);
+    }
+
+}

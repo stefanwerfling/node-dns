@@ -4,8 +4,10 @@ exports.PacketTypeRegistry = void 0;
 const PacketTypes_js_1 = require("./PacketTypes.js");
 const A_js_1 = require("./Types/A.js");
 const AAAA_js_1 = require("./Types/AAAA.js");
+const CNAME_js_1 = require("./Types/CNAME.js");
 const MX_js_1 = require("./Types/MX.js");
 const NS_js_1 = require("./Types/NS.js");
+const PTR_js_1 = require("./Types/PTR.js");
 const SRV_js_1 = require("./Types/SRV.js");
 class PacketTypeRegistry {
     static _instance = null;
@@ -16,6 +18,8 @@ class PacketTypeRegistry {
             PacketTypeRegistry._instance.registerPacket(PacketTypes_js_1.PacketTypes.MX, MX_js_1.MX);
             PacketTypeRegistry._instance.registerPacket(PacketTypes_js_1.PacketTypes.AAAA, AAAA_js_1.AAAA);
             PacketTypeRegistry._instance.registerPacket(PacketTypes_js_1.PacketTypes.NS, NS_js_1.NS);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes_js_1.PacketTypes.CNAME, CNAME_js_1.CNAME);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes_js_1.PacketTypes.PTR, PTR_js_1.PTR);
             PacketTypeRegistry._instance.registerPacket(PacketTypes_js_1.PacketTypes.SRV, SRV_js_1.SRV);
         }
         return PacketTypeRegistry._instance;

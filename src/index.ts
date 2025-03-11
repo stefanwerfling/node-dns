@@ -20,11 +20,21 @@ export {A} from './Packet/Types/A.js';
 export {AAAA} from './Packet/Types/AAAA.js';
 export {MX} from './Packet/Types/MX.js';
 export {NS} from './Packet/Types/NS.js';
+export {CNAME} from './Packet/Types/CNAME.js';
+export {PTR} from './Packet/Types/PTR.js';
 export {SRV} from './Packet/Types/SRV.js'
 
 // Server
 export {ServerOptions} from './Server/ServerOptions.js';
 export {TCPServerEvents, TCPServer} from './Server/TCPServer.js';
+
+// Client
+export {AClient} from './Client/AClient.js';
+export {ClientOptionsProtocol, ClientOptions} from './Client/ClientOptions.js';
+export {ClientRequestOptions, ClientRequest} from './Client/ClientRequest.js';
+export {ClientCreateResolver} from './Client/ClientCreateResolver.js';
+export {TCPClient} from './Client/TCPClient.js';
+export {UDPClient} from './Client/UDPClient.js';
 
 // DNS
 export {DNSOptions, DNS} from './DNS.js';
