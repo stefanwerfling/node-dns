@@ -27,7 +27,7 @@ class SRV extends PacketType_js_1.PacketType {
         twriter.writeBuffer(targetBuffer);
         return twriter.toBuffer();
     }
-    static decode(reader, length) {
+    static decode(reader) {
         const priority = reader.read(16);
         const weight = reader.read(16);
         const port = reader.read(16);

@@ -21,7 +21,7 @@ class MX extends PacketType_js_1.PacketType {
         twriter.writeBuffer(buffer);
         return twriter.toBuffer();
     }
-    static decode(reader, length) {
+    static decode(reader) {
         const priority = reader.read(16);
         const exchange = PacketName_js_1.PacketName.decode(reader);
         return new MX(exchange, priority);

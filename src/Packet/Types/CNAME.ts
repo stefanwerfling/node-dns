@@ -45,10 +45,9 @@ export class CNAME extends PacketType {
     /**
      * Decode the Buffer to CNAME Packet
      * @param {BufferReader} reader
-     * @param {number} length
      * @return {PacketType}
      */
-    public static decode(reader: BufferReader, length: number): PacketType {
+    public static decode(reader: BufferReader): PacketType {
         const ns = PacketName.decode(reader);
 
         return new CNAME(ns);

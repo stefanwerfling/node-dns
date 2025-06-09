@@ -7,5 +7,5 @@ import {ClientRequest} from './ClientRequest.js';
  */
 export type ClientCreateResolver = {
     new(): AClient;
-    request(option: ClientOptions): ClientRequest
-}
+    request(option: ClientOptions): ClientRequest;
+};

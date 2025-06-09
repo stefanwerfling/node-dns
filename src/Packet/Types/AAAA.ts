@@ -39,7 +39,7 @@ export class AAAA extends PacketType {
         twriter.write(parts.length * 2, 16);
 
         parts.forEach((part) => {
-           twriter.write(parseInt(`${part}`, 16), 16);
+            twriter.write(parseInt(`${part}`, 16), 16);
         });
 
         return twriter.toBuffer();
@@ -53,9 +53,10 @@ export class AAAA extends PacketType {
      */
     public static decode(reader: BufferReader, length: number): PacketType {
         const parts: number[] = [];
+        let tlength = length;
 
-        while (length) {
-            length -= 2;
+        while (tlength) {
+            tlength -= 2;
             parts.push(reader.read(16));
         }
 

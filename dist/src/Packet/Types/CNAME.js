@@ -18,7 +18,7 @@ class CNAME extends PacketType_js_1.PacketType {
         twriter.writeBuffer(buffer);
         return twriter.toBuffer();
     }
-    static decode(reader, length) {
+    static decode(reader) {
         const ns = PacketName_js_1.PacketName.decode(reader);
         return new CNAME(ns);
     }

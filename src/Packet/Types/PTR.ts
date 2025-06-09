@@ -45,10 +45,9 @@ export class PTR extends PacketType {
     /**
      * Decode the Buffer to PTR Packet
      * @param {BufferReader} reader
-     * @param {number} length
      * @return {PacketType}
      */
-    public static decode(reader: BufferReader, length: number): PacketType {
+    public static decode(reader: BufferReader): PacketType {
         const ns = PacketName.decode(reader);
 
         return new PTR(ns);

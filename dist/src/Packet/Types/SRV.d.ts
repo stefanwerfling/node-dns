@@ -9,5 +9,5 @@ export declare class SRV extends PacketType {
     target: string;
     constructor(priority?: number, weight?: number, port?: number, target?: string);
     encode(resource: PacketResource, writer?: BufferWriter | null): Buffer;
-    static decode(reader: BufferReader, length: number): PacketType;
+    static decode(reader: BufferReader): PacketType;
 }

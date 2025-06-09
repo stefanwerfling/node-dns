@@ -56,13 +56,13 @@ export class MX extends PacketType {
     /**
      * Decode the Buffer to MX Packet
      * @param {BufferReader} reader
-     * @param {number} length
      * @return {PacketType}
      */
-    public static decode(reader: BufferReader, length: number): PacketType {
+    public static decode(reader: BufferReader): PacketType {
         const priority = reader.read(16);
         const exchange = PacketName.decode(reader);
 
         return new MX(exchange, priority);
     }
+
 }

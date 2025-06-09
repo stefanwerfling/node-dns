@@ -22,8 +22,9 @@ class AAAA extends PacketType_js_1.PacketType {
     }
     static decode(reader, length) {
         const parts = [];
-        while (length) {
-            length -= 2;
+        let tlength = length;
+        while (tlength) {
+            tlength -= 2;
             parts.push(reader.read(16));
         }
         const address = IP_js_1.IP.toIPv6(parts);

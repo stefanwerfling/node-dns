@@ -61,7 +61,7 @@ export class SRV extends PacketType {
         twriter.write(this.priority, 16);
         twriter.write(this.weight, 16);
         twriter.write(this.port, 16);
-        twriter.writeBuffer(targetBuffer)
+        twriter.writeBuffer(targetBuffer);
 
         return twriter.toBuffer();
     }
@@ -69,11 +69,10 @@ export class SRV extends PacketType {
     /**
      * decode
      * @param {BufferReader} reader
-     * @param {length} length
      * @return {PacketType}
      * @exception {Error}
      */
-    public static decode(reader: BufferReader, length: number): PacketType {
+    public static decode(reader: BufferReader): PacketType {
         const priority = reader.read(16);
         const weight = reader.read(16);
         const port = reader.read(16);

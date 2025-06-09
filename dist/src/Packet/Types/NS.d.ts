@@ -6,5 +6,5 @@ export declare class NS extends PacketType {
     ns: string;
     constructor(ns?: string);
     encode(resource: PacketResource, writer?: BufferWriter | null): Buffer;
-    static decode(reader: BufferReader, length: number): PacketType;
+    static decode(reader: BufferReader): PacketType;
 }
