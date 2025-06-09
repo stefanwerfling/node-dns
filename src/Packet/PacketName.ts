@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import {BufferReader} from '../Lib/BufferReader.js';
 import {BufferWriter} from '../Lib/BufferWriter.js';
 
@@ -19,14 +20,16 @@ export class PacketName {
         let len = treader.read(8);
 
         while (len) {
+            // eslint-disable-next-line no-bitwise
             if ((len & PacketName.COPY) === PacketName.COPY) {
                 len -= PacketName.COPY;
-                len = len << 8;
+                // eslint-disable-next-line no-bitwise
+                len <<= 8;
 
                 const pos = len + treader.read(8);
 
                 if (!o) {
-                    o = treader.getOffset()
+                    o = treader.getOffset();
                 }
 
                 treader.setOffset(pos * 8);
@@ -62,7 +65,7 @@ export class PacketName {
         // TODO: domain name compress
 
         domain.split('.').filter((part) => {
-            return !!part;
+            return Boolean(part);
         }).forEach((part) => {
             twriter.write(part.length, 8);
 

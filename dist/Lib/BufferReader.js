@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.BufferReader = void 0;
-class BufferReader {
+export class BufferReader {
     _buffer;
     _offset = 0;
     constructor(buffer, offset = 0) {
@@ -16,16 +13,22 @@ class BufferReader {
         const t = (n) => {
             const r = [0, 0, 0, 0, 0, 0, 0, 0];
             for (let i = 7; i >= 0; i--) {
-                r[7 - i] = n & Math.pow(2, i) ? 1 : 0;
+                if (n & 2 ** i) {
+                    r[7 - i] = 1;
+                }
+                else {
+                    r[7 - i] = 0;
+                }
             }
             a = a.concat(r);
         };
-        const p = (a) => {
+        const p = (ta) => {
             let n = 0;
-            const f = a.length - 1;
+            const f = ta.length - 1;
             for (let i = f; i >= 0; i--) {
-                if (a[f - i])
-                    n += Math.pow(2, i);
+                if (ta[f - i]) {
+                    n += 2 ** i;
+                }
             }
             return n;
         };
@@ -46,5 +49,4 @@ class BufferReader {
         this._offset = offset;
     }
 }
-exports.BufferReader = BufferReader;
 //# sourceMappingURL=BufferReader.js.map

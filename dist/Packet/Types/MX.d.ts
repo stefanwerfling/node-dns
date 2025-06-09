@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import { BufferReader } from '../../Lib/BufferReader.js';
 import { BufferWriter } from '../../Lib/BufferWriter.js';
 import { PacketResource } from '../PacketResource.js';
@@ -6,6 +7,6 @@ export declare class MX extends PacketType {
     exchange: string;
     priority: number;
     constructor(exchange?: string, priority?: number);
-    encode(resource: PacketResource, writer?: BufferWriter | null): Buffer;
-    static decode(reader: BufferReader, length: number): PacketType;
+    encode(_resource: PacketResource, writer?: BufferWriter | null): Buffer;
+    static decode(reader: BufferReader): PacketType;
 }

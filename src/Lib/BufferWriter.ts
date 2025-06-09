@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer';
+
 /**
  * Buffer Writer
  */
@@ -16,7 +18,8 @@ export class BufferWriter {
      */
     public write(d: number, size: number): void {
         for (let i = 0; i < size; i++) {
-            this._buffer.push((d & Math.pow(2, size - i - 1)) ? 1 : 0);
+            // eslint-disable-next-line no-bitwise
+            this._buffer.push(d & 2**(size - i - 1) ? 1 : 0);
         }
     }
 

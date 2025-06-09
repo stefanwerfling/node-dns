@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import {BufferReader} from '../Lib/BufferReader.js';
 import {BufferWriter} from '../Lib/BufferWriter.js';
 import {PacketClass} from './PacketClass.js';

@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import tcp from 'net';
 
 /**
@@ -17,7 +18,7 @@ export class SocketReader {
         let expected: number|null = null;
 
         return new Promise<Buffer>((resolve, reject) => {
-            const processMessage = () => {
+            const processMessage = (): void => {
                 if (received) {
                     return;
                 }

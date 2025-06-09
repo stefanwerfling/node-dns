@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PacketType = void 0;
-class PacketType {
+export class PacketType {
     type;
     constructor(type) {
         this.type = type;
@@ -13,5 +10,4 @@ class PacketType {
         throw new Error('decode() is not implemented');
     }
 }
-exports.PacketType = PacketType;
 //# sourceMappingURL=PacketType.js.map

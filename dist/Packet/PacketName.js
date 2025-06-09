@@ -1,19 +1,16 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PacketName = void 0;
-const BufferReader_js_1 = require("../Lib/BufferReader.js");
-const BufferWriter_js_1 = require("../Lib/BufferWriter.js");
-class PacketName {
+import { BufferReader } from '../Lib/BufferReader.js';
+import { BufferWriter } from '../Lib/BufferWriter.js';
+export class PacketName {
     static COPY = 0xc0;
     static decode(reader) {
-        const treader = reader instanceof Buffer ? new BufferReader_js_1.BufferReader(reader) : reader;
+        const treader = reader instanceof BufferReader ? reader : new BufferReader(reader);
         const name = [];
         let o;
         let len = treader.read(8);
         while (len) {
             if ((len & PacketName.COPY) === PacketName.COPY) {
                 len -= PacketName.COPY;
-                len = len << 8;
+                len <<= 8;
                 const pos = len + treader.read(8);
                 if (!o) {
                     o = treader.getOffset();
@@ -36,9 +33,9 @@ class PacketName {
         return name.join('.');
     }
     static encode(domain, writer = null) {
-        const twriter = writer === null ? new BufferWriter_js_1.BufferWriter() : writer;
+        const twriter = writer === null ? new BufferWriter() : writer;
         domain.split('.').filter((part) => {
-            return !!part;
+            return Boolean(part);
         }).forEach((part) => {
             twriter.write(part.length, 8);
             part.split('').map((c) => {
@@ -50,5 +47,4 @@ class PacketName {
         return twriter.toBuffer();
     }
 }
-exports.PacketName = PacketName;
 //# sourceMappingURL=PacketName.js.map

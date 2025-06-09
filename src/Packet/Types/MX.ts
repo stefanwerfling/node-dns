@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import {BufferReader} from '../../Lib/BufferReader.js';
 import {BufferWriter} from '../../Lib/BufferWriter.js';
 import {PacketName} from '../PacketName.js';
@@ -18,7 +19,7 @@ export class MX extends PacketType {
     public exchange: string;
 
     /**
-     * A 16 bit integer which specifies the preference given to
+     * A 16-bit integer which specifies the preference given to
      * this RR among others at the same owner.  Lower values
      * are preferred.
      */
@@ -37,11 +38,11 @@ export class MX extends PacketType {
 
     /**
      * Encode MX Packet
-     * @param {PacketResource} resource
+     * @param {PacketResource} _resource
      * @param {BufferWriter|null} writer
      * @return {Buffer}
      */
-    public encode(resource: PacketResource, writer: BufferWriter|null = null): Buffer {
+    public encode(_resource: PacketResource, writer: BufferWriter|null = null): Buffer {
         const twriter = writer === null ? new BufferWriter() : writer;
 
         const buffer = PacketName.encode(this.exchange, null);

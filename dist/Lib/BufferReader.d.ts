@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 export declare class BufferReader {
     protected _buffer: Buffer;
     protected _offset: number;

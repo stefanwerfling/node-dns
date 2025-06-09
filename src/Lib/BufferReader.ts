@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer';
+
 /**
  * Buffer Reader
  */
@@ -42,7 +44,8 @@ export class BufferReader {
             const r = [ 0, 0, 0, 0, 0, 0, 0, 0 ];
 
             for (let i = 7; i >= 0; i--) {
-                if (n & Math.pow(2, i)) {
+                // eslint-disable-next-line no-bitwise
+                if (n & 2**i) {
                     r[7 - i] = 1;
                 } else {
                     r[7 - i] = 0;

@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import {BufferReader} from '../Lib/BufferReader.js';
 import {BufferWriter} from '../Lib/BufferWriter.js';
 
@@ -92,22 +93,22 @@ export class PacketHeader {
     public rcode: number = 0;
 
     /**
-     * QDCOUNT an unsigned 16 bit integer specifying the number of entries in the question section.
+     * QDCOUNT an unsigned 16-bit integer specifying the number of entries in the question section.
      */
     public qdcount: number = 0;
 
     /**
-     * ANCOUNT an unsigned 16 bit integer specifying the number of resource records in the answer section.
+     * ANCOUNT an unsigned 16-bit integer specifying the number of resource records in the answer section.
      */
     public ancount: number = 0;
 
     /**
-     * NSCOUNT an unsigned 16 bit integer specifying the number of name server resource records in the authority records section.
+     * NSCOUNT an unsigned 16-bit integer specifying the number of name server resource records in the authority records section.
      */
     public nscount: number = 0;
 
     /**
-     * ARCOUNT an unsigned 16 bit integer specifying the number of resource records in the additional records section.
+     * ARCOUNT an unsigned 16-bit integer specifying the number of resource records in the additional records section.
      */
     public arcount: number = 0;
 

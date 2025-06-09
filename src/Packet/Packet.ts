@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import {BufferReader} from '../Lib/BufferReader.js';
 import {BufferWriter} from '../Lib/BufferWriter.js';
 import {PacketHeader} from './PacketHeader.js';
@@ -8,6 +9,9 @@ import {PacketType} from './PacketType.js';
 
 const debug = debuglog('dns2');
 
+/**
+ * Packet
+ */
 export class Packet {
 
     public header: PacketHeader;
@@ -59,25 +63,25 @@ export class Packet {
         for (const section of list) {
             switch (section) {
                 case 'questions':
-                    this.questions.map((resource) => {
+                    this.questions.forEach((resource) => {
                         resource.toBuffer(writer);
                     });
                     break;
 
                 case 'answers':
-                    this.answers.map((resource) => {
+                    this.answers.forEach((resource) => {
                         resource.toBuffer(writer);
                     });
                     break;
 
                 case 'authorities':
-                    this.authorities.map((resource) => {
+                    this.authorities.forEach((resource) => {
                         resource.toBuffer(writer);
                     });
                     break;
 
                 case 'additionals':
-                    this.additionals.map((resource) => {
+                    this.additionals.forEach((resource) => {
                         resource.toBuffer(writer);
                     });
                     break;
@@ -128,8 +132,11 @@ export class Packet {
                             break;
                     }
                 } catch (e) {
-                    // TODO Error
-
+                    if (e instanceof Error) {
+                        debug('node-dns > parse %s error:', section, e.message);
+                    } else {
+                        debug('node-dns > parse %s error: Unknown error', section, e);
+                    }
                 }
             }
         }
@@ -163,4 +170,5 @@ export class Packet {
             300
         );
     }
+
 }

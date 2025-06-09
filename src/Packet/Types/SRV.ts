@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import {BufferReader} from '../../Lib/BufferReader.js';
 import {BufferWriter} from '../../Lib/BufferWriter.js';
 import {PacketName} from '../PacketName.js';
@@ -48,12 +49,12 @@ export class SRV extends PacketType {
 
     /**
      * encode
-     * @param {PacketResource} resource
+     * @param {PacketResource} _resource
      * @param {BufferWriter|null} writer
      * @return {Buffer}
      * @exception {Error}
      */
-    public encode(resource: PacketResource, writer: BufferWriter|null = null): Buffer {
+    public encode(_resource: PacketResource, writer: BufferWriter|null = null): Buffer {
         const twriter = writer === null ? new BufferWriter() : writer;
         const targetBuffer = PacketName.encode(this.target);
 

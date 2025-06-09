@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import { BufferReader } from '../Lib/BufferReader.js';
 import { BufferWriter } from '../Lib/BufferWriter.js';
 export declare class PacketName {

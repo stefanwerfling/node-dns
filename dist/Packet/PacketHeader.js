@@ -1,9 +1,6 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PacketHeader = void 0;
-const BufferReader_js_1 = require("../Lib/BufferReader.js");
-const BufferWriter_js_1 = require("../Lib/BufferWriter.js");
-class PacketHeader {
+import { BufferReader } from '../Lib/BufferReader.js';
+import { BufferWriter } from '../Lib/BufferWriter.js';
+export class PacketHeader {
     id = 0;
     qr = 0;
     opcode = 0;
@@ -18,11 +15,8 @@ class PacketHeader {
     nscount = 0;
     arcount = 0;
     static parse(reader) {
+        const tReader = reader instanceof BufferReader ? reader : new BufferReader(reader);
         const header = new PacketHeader();
-        let tReader = reader;
-        if (tReader instanceof Buffer) {
-            tReader = new BufferReader_js_1.BufferReader(tReader);
-        }
         header.id = tReader.read(16);
         header.qr = tReader.read(1);
         header.opcode = tReader.read(4);
@@ -39,7 +33,7 @@ class PacketHeader {
         return header;
     }
     toBuffer(writer = null) {
-        const tWriter = writer === null ? new BufferWriter_js_1.BufferWriter() : writer;
+        const tWriter = writer === null ? new BufferWriter() : writer;
         tWriter.write(this.id, 16);
         tWriter.write(this.qr, 1);
         tWriter.write(this.opcode, 4);
@@ -56,5 +50,4 @@ class PacketHeader {
         return tWriter.toBuffer();
     }
 }
-exports.PacketHeader = PacketHeader;
 //# sourceMappingURL=PacketHeader.js.map

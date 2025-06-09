@@ -1,1 +1,1 @@
-{"version":3,"file":"PacketClass.js","sourceRoot":"","sources":["../../src/Packet/PacketClass.ts"],"names":[],"mappings":";;;AAIA,IAAY,WAMX;AAND,WAAY,WAAW;IACnB,yCAAS,CAAA;IACT,yCAAS,CAAA;IACT,yCAAS,CAAA;IACT,yCAAS,CAAA;IACT,6CAAU,CAAA;AACd,CAAC,EANW,WAAW,2BAAX,WAAW,QAMtB"}
+{"version":3,"file":"PacketClass.js","sourceRoot":"","sources":["../../src/Packet/PacketClass.ts"],"names":[],"mappings":"AAIA,MAAM,CAAN,IAAY,WAMX;AAND,WAAY,WAAW;IACnB,yCAAS,CAAA;IACT,yCAAS,CAAA;IACT,yCAAS,CAAA;IACT,yCAAS,CAAA;IACT,6CAAU,CAAA;AACd,CAAC,EANW,WAAW,KAAX,WAAW,QAMtB"}

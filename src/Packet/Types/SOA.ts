@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import {BufferReader} from '../../Lib/BufferReader.js';
 import {BufferWriter} from '../../Lib/BufferWriter.js';
 import {PacketName} from '../PacketName.js';
@@ -11,18 +12,39 @@ import {PacketTypes} from '../PacketTypes.js';
  */
 export class SOA extends PacketType {
 
+    /**
+     * Primary
+     */
     public primary: string;
 
+    /**
+     * Admin
+     */
     public admin: string;
 
+    /**
+     * Serial
+     */
     public serial: number;
 
+    /**
+     * Refresh
+     */
     public refresh: number;
 
+    /**
+     * Retry
+     */
     public retry: number;
 
+    /**
+     * Expiration
+     */
     public expiration: number;
 
+    /**
+     * Minimum
+     */
     public minimum: number;
 
     /**
@@ -56,11 +78,11 @@ export class SOA extends PacketType {
 
     /**
      * Encode SOA Packet
-     * @param {PacketResource} resource
+     * @param {PacketResource} _resource
      * @param {BufferWriter|null} writer
      * @return {Buffer}
      */
-    public encode(resource: PacketResource, writer: BufferWriter|null = null): Buffer {
+    public encode(_resource: PacketResource, writer: BufferWriter|null = null): Buffer {
         const twriter = writer === null ? new BufferWriter() : writer;
 
         const namePrimary = PacketName.encode(this.primary);

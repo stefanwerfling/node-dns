@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import {BufferReader} from '../../Lib/BufferReader.js';
 import {BufferWriter} from '../../Lib/BufferWriter.js';
 import {PacketResource} from '../PacketResource.js';
@@ -26,11 +27,11 @@ export class A extends PacketType {
 
     /**
      * Encode A Packet
-     * @param {PacketResource} resource
+     * @param {PacketResource} _resource
      * @param {BufferWriter|null} writer
      * @return {Buffer}
      */
-    public encode(resource: PacketResource, writer: BufferWriter|null = null): Buffer {
+    public encode(_resource: PacketResource, writer: BufferWriter|null = null): Buffer {
         const twriter = writer === null ? new BufferWriter() : writer;
 
         const parts = this.address.split('.');
@@ -52,11 +53,13 @@ export class A extends PacketType {
      */
     public static decode(reader: BufferReader, length: number): PacketType {
         const parts = [];
+        let tLength = length;
 
-        while (length--) {
+        while (tLength--) {
             parts.push(reader.read(8));
         }
 
         return new A(parts.join('.'));
     }
+
 }

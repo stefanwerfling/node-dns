@@ -31,7 +31,7 @@ export class TCPServer extends tcp.Server {
 
         this._options = options;
 
-        super.on('connection', this._handle.bind(this));
+        super.on('connection', this._handle);
     }
 
     /**

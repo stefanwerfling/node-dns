@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import util from 'util';
 import {BufferReader} from '../Lib/BufferReader.js';
 import {BufferWriter} from '../Lib/BufferWriter.js';
@@ -102,4 +103,5 @@ export class PacketResource {
 
         return new PacketResource(name, packet, cls, ttl);
     }
+
 }

@@ -1,14 +1,11 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Packet = void 0;
-const BufferReader_js_1 = require("../Lib/BufferReader.js");
-const BufferWriter_js_1 = require("../Lib/BufferWriter.js");
-const PacketHeader_js_1 = require("./PacketHeader.js");
-const PacketQuestion_js_1 = require("./PacketQuestion.js");
-const PacketResource_js_1 = require("./PacketResource.js");
-const util_1 = require("util");
-const debug = (0, util_1.debuglog)('dns2');
-class Packet {
+import { BufferReader } from '../Lib/BufferReader.js';
+import { BufferWriter } from '../Lib/BufferWriter.js';
+import { PacketHeader } from './PacketHeader.js';
+import { PacketQuestion } from './PacketQuestion.js';
+import { PacketResource } from './PacketResource.js';
+import { debuglog } from 'util';
+const debug = debuglog('dns2');
+export class Packet {
     header;
     questions = [];
     answers = [];
@@ -18,15 +15,15 @@ class Packet {
         if (data instanceof Packet) {
             this.header = data.header;
         }
-        else if (data instanceof PacketHeader_js_1.PacketHeader) {
+        else if (data instanceof PacketHeader) {
             this.header = data;
         }
         else {
-            this.header = new PacketHeader_js_1.PacketHeader();
+            this.header = new PacketHeader();
         }
     }
     toBuffer(writer = null) {
-        const twriter = writer === null ? new BufferWriter_js_1.BufferWriter() : writer;
+        const twriter = writer === null ? new BufferWriter() : writer;
         this.header.qdcount = this.questions.length;
         this.header.ancount = this.answers.length;
         this.header.nscount = this.authorities.length;
@@ -41,22 +38,22 @@ class Packet {
         for (const section of list) {
             switch (section) {
                 case 'questions':
-                    this.questions.map((resource) => {
+                    this.questions.forEach((resource) => {
                         resource.toBuffer(writer);
                     });
                     break;
                 case 'answers':
-                    this.answers.map((resource) => {
+                    this.answers.forEach((resource) => {
                         resource.toBuffer(writer);
                     });
                     break;
                 case 'authorities':
-                    this.authorities.map((resource) => {
+                    this.authorities.forEach((resource) => {
                         resource.toBuffer(writer);
                     });
                     break;
                 case 'additionals':
-                    this.additionals.map((resource) => {
+                    this.additionals.forEach((resource) => {
                         resource.toBuffer(writer);
                     });
                     break;
@@ -66,8 +63,8 @@ class Packet {
     }
     static parse(buffer) {
         const packet = new Packet();
-        const reader = new BufferReader_js_1.BufferReader(buffer);
-        packet.header = PacketHeader_js_1.PacketHeader.parse(reader);
+        const reader = new BufferReader(buffer);
+        packet.header = PacketHeader.parse(reader);
         const list = new Map([
             ['questions', packet.header.qdcount],
             ['answers', packet.header.ancount],
@@ -80,25 +77,39 @@ class Packet {
                 try {
                     switch (section) {
                         case 'questions':
-                            packet.questions.push(PacketQuestion_js_1.PacketQuestion.decode(reader));
+                            packet.questions.push(PacketQuestion.decode(reader));
                             break;
                         case 'answers':
-                            packet.answers.push(PacketResource_js_1.PacketResource.decode(reader));
+                            packet.answers.push(PacketResource.decode(reader));
                             break;
                         case 'authorities':
-                            packet.authorities.push(PacketResource_js_1.PacketResource.decode(reader));
+                            packet.authorities.push(PacketResource.decode(reader));
                             break;
                         case 'additionals':
-                            packet.authorities.push(PacketResource_js_1.PacketResource.decode(reader));
+                            packet.authorities.push(PacketResource.decode(reader));
                             break;
                     }
                 }
                 catch (e) {
+                    if (e instanceof Error) {
+                        debug('node-dns > parse %s error:', section, e.message);
+                    }
+                    else {
+                        debug('node-dns > parse %s error: Unknown error', section, e);
+                    }
                 }
             }
         }
         return packet;
     }
+    static createResponseFromRequest(request) {
+        const response = new Packet(request);
+        response.header.qr = 1;
+        response.additionals = [];
+        return response;
+    }
+    static createResourceFromQuestion(base, record) {
+        return new PacketResource(base.name, record, base.class, 300);
+    }
 }
-exports.Packet = Packet;
 //# sourceMappingURL=Packet.js.map

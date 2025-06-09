@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.IP = void 0;
-class IP {
+export class IP {
     static toIPv6(buffer) {
         const str = buffer.map((part) => {
             return part > 0 ? part.toString(16) : '0';
@@ -25,5 +22,4 @@ class IP {
         });
     }
 }
-exports.IP = IP;
 //# sourceMappingURL=IP.js.map

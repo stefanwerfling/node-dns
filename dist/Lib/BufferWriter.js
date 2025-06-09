@@ -1,16 +1,14 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.BufferWriter = void 0;
-class BufferWriter {
+import { Buffer } from 'buffer';
+export class BufferWriter {
     _buffer = [];
     write(d, size) {
         for (let i = 0; i < size; i++) {
-            this._buffer.push((d & Math.pow(2, size - i - 1)) ? 1 : 0);
+            this._buffer.push(d & 2 ** (size - i - 1) ? 1 : 0);
         }
     }
     writeBuffer(buffer) {
         const tBuffer = buffer instanceof Buffer ? [...buffer] : buffer;
-        this._buffer = this._buffer.concat(tBuffer);
+        this._buffer = [...this._buffer, ...tBuffer];
     }
     toBuffer() {
         const arr = [];
@@ -21,5 +19,4 @@ class BufferWriter {
         return Buffer.from(arr);
     }
 }
-exports.BufferWriter = BufferWriter;
 //# sourceMappingURL=BufferWriter.js.map

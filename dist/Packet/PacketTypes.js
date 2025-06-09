@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PacketTypes = void 0;
-var PacketTypes;
+export var PacketTypes;
 (function (PacketTypes) {
     PacketTypes[PacketTypes["A"] = 1] = "A";
     PacketTypes[PacketTypes["NS"] = 2] = "NS";
@@ -28,5 +25,5 @@ var PacketTypes;
     PacketTypes[PacketTypes["MAILA"] = 254] = "MAILA";
     PacketTypes[PacketTypes["ANY"] = 255] = "ANY";
     PacketTypes[PacketTypes["CAA"] = 257] = "CAA";
-})(PacketTypes || (exports.PacketTypes = PacketTypes = {}));
+})(PacketTypes || (PacketTypes = {}));
 //# sourceMappingURL=PacketTypes.js.map

@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import {BufferReader} from '../Lib/BufferReader.js';
 import {BufferWriter} from '../Lib/BufferWriter.js';
 import {PacketResource} from './PacketResource.js';
@@ -29,6 +30,7 @@ export abstract class PacketType {
      * @return {Buffer}
      * @exception {Error}
      */
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     public encode(resource: PacketResource, writer: BufferWriter|null = null): Buffer {
         throw new Error('encode() is not implemented');
     }
@@ -40,7 +42,9 @@ export abstract class PacketType {
      * @return {PacketType}
      * @exception {Error}
      */
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     public static decode(reader: BufferReader, length: number): PacketType {
         throw new Error('decode() is not implemented');
     }
+
 }

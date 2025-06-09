@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import {BufferReader} from '../../Lib/BufferReader.js';
 import {BufferWriter} from '../../Lib/BufferWriter.js';
 import {PacketResource} from '../PacketResource.js';
@@ -27,11 +28,11 @@ export class TXT extends PacketType {
 
     /**
      * Encode TXT Packet
-     * @param {PacketResource} resource
+     * @param {PacketResource} _resource
      * @param {BufferWriter|null} writer
      * @return {Buffer}
      */
-    public encode(resource: PacketResource, writer: BufferWriter|null = null): Buffer {
+    public encode(_resource: PacketResource, writer: BufferWriter|null = null): Buffer {
         const twriter = writer === null ? new BufferWriter() : writer;
 
         // make sure that resource data is an array of strings
