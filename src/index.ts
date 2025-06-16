@@ -22,11 +22,12 @@ export {MX} from './Packet/Types/MX.js';
 export {NS} from './Packet/Types/NS.js';
 export {CNAME} from './Packet/Types/CNAME.js';
 export {PTR} from './Packet/Types/PTR.js';
-export {SRV} from './Packet/Types/SRV.js'
+export {SRV} from './Packet/Types/SRV.js';
 
 // Server
 export {ServerOptions} from './Server/ServerOptions.js';
 export {TCPServerEvents, TCPServer} from './Server/TCPServer.js';
+export {UDPServer} from './Server/UDPServer.js';
 
 // Client
 export {AClient} from './Client/AClient.js';

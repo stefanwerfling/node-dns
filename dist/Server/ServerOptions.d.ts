@@ -1,1 +1,3 @@
-export type ServerOptions = {};
+export type ServerOptions = {
+    udpType?: 'udp4' | 'udp6';
+};

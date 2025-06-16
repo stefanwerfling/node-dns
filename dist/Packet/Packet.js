@@ -28,7 +28,7 @@ export class Packet {
         this.header.ancount = this.answers.length;
         this.header.nscount = this.authorities.length;
         this.header.arcount = this.additionals.length;
-        this.header.toBuffer(writer);
+        this.header.toBuffer(twriter);
         const list = [
             'questions',
             'answers',
@@ -39,22 +39,22 @@ export class Packet {
             switch (section) {
                 case 'questions':
                     this.questions.forEach((resource) => {
-                        resource.toBuffer(writer);
+                        resource.toBuffer(twriter);
                     });
                     break;
                 case 'answers':
                     this.answers.forEach((resource) => {
-                        resource.toBuffer(writer);
+                        resource.toBuffer(twriter);
                     });
                     break;
                 case 'authorities':
                     this.authorities.forEach((resource) => {
-                        resource.toBuffer(writer);
+                        resource.toBuffer(twriter);
                     });
                     break;
                 case 'additionals':
                     this.additionals.forEach((resource) => {
-                        resource.toBuffer(writer);
+                        resource.toBuffer(twriter);
                     });
                     break;
             }
@@ -108,8 +108,8 @@ export class Packet {
         response.additionals = [];
         return response;
     }
-    static createResourceFromQuestion(base, record) {
-        return new PacketResource(base.name, record, base.class, 300);
+    static createResourceFromQuestion(base, record, tls = 300) {
+        return new PacketResource(base.name, record, base.class, tls);
     }
 }
 //# sourceMappingURL=Packet.js.map

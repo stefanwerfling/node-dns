@@ -14,14 +14,29 @@ const debug = debuglog('dns2');
  */
 export class Packet {
 
+    /**
+     * Header
+     */
     public header: PacketHeader;
 
+    /**
+     * Questions
+     */
     public questions: PacketQuestion[] = [];
 
+    /**
+     * Answers
+     */
     public answers: PacketResource[] = [];
 
+    /**
+     * Authorities
+     */
     public authorities: PacketResource[] = [];
 
+    /**
+     * Additionals
+     */
     public additionals: PacketResource[] = [];
 
     /**
@@ -51,7 +66,7 @@ export class Packet {
         this.header.nscount = this.authorities.length;
         this.header.arcount = this.additionals.length;
 
-        this.header.toBuffer(writer);
+        this.header.toBuffer(twriter);
 
         const list: string[] = [
             'questions',
@@ -64,25 +79,25 @@ export class Packet {
             switch (section) {
                 case 'questions':
                     this.questions.forEach((resource) => {
-                        resource.toBuffer(writer);
+                        resource.toBuffer(twriter);
                     });
                     break;
 
                 case 'answers':
                     this.answers.forEach((resource) => {
-                        resource.toBuffer(writer);
+                        resource.toBuffer(twriter);
                     });
                     break;
 
                 case 'authorities':
                     this.authorities.forEach((resource) => {
-                        resource.toBuffer(writer);
+                        resource.toBuffer(twriter);
                     });
                     break;
 
                 case 'additionals':
                     this.additionals.forEach((resource) => {
-                        resource.toBuffer(writer);
+                        resource.toBuffer(twriter);
                     });
                     break;
             }
@@ -160,14 +175,19 @@ export class Packet {
      * Create a Resource from Question
      * @param {PacketQuestion} base
      * @param {PacketType} record
+     * @param {number} tls
      * @return {PacketResource}
      */
-    public static createResourceFromQuestion(base: PacketQuestion, record: PacketType): PacketResource {
+    public static createResourceFromQuestion(
+        base: PacketQuestion,
+        record: PacketType,
+        tls: number = 300
+    ): PacketResource {
         return  new PacketResource(
             base.name,
             record,
             base.class,
-            300
+            tls
         );
     }
 

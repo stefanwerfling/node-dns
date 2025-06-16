@@ -1,32 +1,36 @@
 import tcp from 'net';
 import { SocketReader } from '../Lib/SocketReader.js';
 import { Packet } from '../Packet/Packet.js';
-export class TCPServer extends tcp.Server {
+export class TCPServer {
+    _tcpServer;
     _options = null;
     constructor(options = null) {
-        super();
         this._options = options;
-        super.on('connection', this._handle);
+        this._tcpServer = tcp.createServer(this._handle.bind(this));
+    }
+    listen(...args) {
+        this._tcpServer.listen(...args);
+        return this;
+    }
+    close(callback) {
+        this._tcpServer.close(callback);
     }
     on(event, listener) {
-        super.on(event, listener);
+        this._tcpServer.on(event, listener);
         return this;
     }
     once(event, listener) {
-        super.once(event, listener);
+        this._tcpServer.once(event, listener);
         return this;
-    }
-    emit(event, ...args) {
-        return super.emit(event, ...args);
     }
     async _handle(client) {
         try {
             const data = await SocketReader.readStream(client);
             const message = Packet.parse(data);
-            super.emit('request', message, this._response.bind(this, client), client);
+            this._tcpServer.emit('request', message, this._response.bind(this, client), client);
         }
         catch (e) {
-            super.emit('requestError', e);
+            this._tcpServer.emit('requestError', e instanceof Error ? e : new Error(String(e)));
             client.destroy();
         }
     }

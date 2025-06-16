@@ -19,6 +19,7 @@ export { CNAME } from './Packet/Types/CNAME.js';
 export { PTR } from './Packet/Types/PTR.js';
 export { SRV } from './Packet/Types/SRV.js';
 export { TCPServer } from './Server/TCPServer.js';
+export { UDPServer } from './Server/UDPServer.js';
 export { AClient } from './Client/AClient.js';
 export { ClientOptionsProtocol } from './Client/ClientOptions.js';
 export { TCPClient } from './Client/TCPClient.js';

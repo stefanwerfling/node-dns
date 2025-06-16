@@ -14,5 +14,5 @@ export declare class Packet {
     toBuffer(writer?: BufferWriter | null): Buffer;
     static parse(buffer: Buffer): Packet;
     static createResponseFromRequest(request: Packet): Packet;
-    static createResourceFromQuestion(base: PacketQuestion, record: PacketType): PacketResource;
+    static createResourceFromQuestion(base: PacketQuestion, record: PacketType, tls?: number): PacketResource;
 }

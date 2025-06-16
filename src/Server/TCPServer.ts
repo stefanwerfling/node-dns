@@ -14,7 +14,13 @@ export type TCPServerEvents = {
 /**
  * TCP Server
  */
-export class TCPServer extends tcp.Server {
+export class TCPServer {
+
+    /**
+     * Internal tcp server
+     * @protected
+     */
+    protected _tcpServer: tcp.Server;
 
     /**
      * Options
@@ -27,40 +33,31 @@ export class TCPServer extends tcp.Server {
      * @param {ServerOptions|null} options
      */
     public constructor(options: ServerOptions|null = null) {
-        super();
-
         this._options = options;
+        this._tcpServer = tcp.createServer(this._handle.bind(this));
+    }
 
-        super.on('connection', this._handle);
+    public listen(...args: Parameters<tcp.Server['listen']>): this {
+        this._tcpServer.listen(...args);
+        return this;
     }
 
     /**
-     * on
-     * @param {string} event
-     * @param {TCPServerEvents} listener
+     * Close
+     * @param callback
      */
+    public close(callback?: (err?: Error) => void): void {
+        this._tcpServer.close(callback);
+    }
+
     public on<K extends keyof TCPServerEvents>(event: K, listener: TCPServerEvents[K]): this {
-        super.on(event, listener);
+        this._tcpServer.on(event, listener);
         return this;
     }
 
-    /**
-     * once
-     * @param {string} event
-     * @param {TCPServerEvents} listener
-     */
     public once<K extends keyof TCPServerEvents>(event: K, listener: TCPServerEvents[K]): this {
-        super.once(event, listener);
+        this._tcpServer.once(event, listener);
         return this;
-    }
-
-    /**
-     * emit
-     * @param {string} event
-     * @param {Parameters} args
-     */
-    public emit<K extends keyof TCPServerEvents>(event: K, ...args: Parameters<TCPServerEvents[K]>): boolean {
-        return super.emit(event, ...args);
     }
 
     /**
@@ -73,9 +70,9 @@ export class TCPServer extends tcp.Server {
             const data = await SocketReader.readStream(client);
             const message = Packet.parse(data);
 
-            super.emit('request', message, this._response.bind(this, client), client);
+            this._tcpServer.emit('request', message, this._response.bind(this, client), client);
         } catch (e) {
-            super.emit('requestError', e);
+            this._tcpServer.emit('requestError', e instanceof Error ? e : new Error(String(e)));
             client.destroy();
         }
     }
