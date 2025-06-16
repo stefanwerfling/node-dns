@@ -1,9 +1,13 @@
-# dns2ts 
 
 ![NPM version](https://img.shields.io/npm/v/dns2.svg?style=flat)
 [![Node.js CI](https://github.com/song940/node-dns/actions/workflows/node.js.yml/badge.svg)](https://github.com/song940/node-dns/actions/workflows/node.js.yml)
 
-> A DNS Server and Client Implementation in Pure JavaScript with no dependencies.
+# dns2ts
+
+<p align="center">
+<img src="/doc/images/logo.png" width="300px" style="border-radius: 15px;transition: transform .2s;object-fit: cover;">
+<br><br>
+</p>
 
 <hr>
 
