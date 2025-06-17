@@ -9,6 +9,11 @@ import {ServerOptions} from './ServerOptions.js';
 export type UDPRequestListener = (msg: Packet, send: (msg: Packet | Buffer) => Promise<Buffer | void>, rinfo: dgram.RemoteInfo) => void;
 
 /**
+ * UDP Request Pre
+ */
+export type UDPRequestPre = (data: Buffer, rinfo: dgram.RemoteInfo) => Promise<Buffer>;
+
+/**
  * UDP Server
  */
 export class UDPServer {
@@ -20,19 +25,29 @@ export class UDPServer {
     protected _socket: dgram.Socket;
 
     /**
-     * constructor
-     * @param {[ServerOptions]} options
+     * pre request, you can change buffer
+     * @protected
      */
-    public constructor(options?: ServerOptions) {
+    protected _preRequest?: UDPRequestPre;
+
+    /**
+     * constructor
+     * @param {ServerOptions|null} options
+     */
+    public constructor(options: ServerOptions|null = null) {
         let type: 'udp4' | 'udp6' = 'udp4';
 
-        if (options && options.udpType) {
-            type = options.udpType;
+        if (options && options.udp && options.udp.type) {
+            type = options.udp.type;
         }
 
         this._socket = dgram.createSocket(type);
 
-        this._socket.on('message', this._handle.bind(this));
+        this._socket.on('message', (data, rinfo) => {
+            this._handle(data, rinfo).catch(e => {
+                this._socket.emit('requestError', e instanceof Error ? e : new Error(String(e)));
+            });
+        });
     }
 
     /**
@@ -79,9 +94,16 @@ export class UDPServer {
      * @param {dgram.RemoteInfo} rinfo
      * @protected
      */
-    protected _handle(data: Buffer, rinfo: dgram.RemoteInfo): void {
+    protected async _handle(data: Buffer, rinfo: dgram.RemoteInfo): Promise<void> {
         try {
-            const message = Packet.parse(data);
+            let tdata = data;
+
+            if (this._preRequest) {
+                tdata = await this._preRequest(tdata, rinfo);
+            }
+
+            const message = Packet.parse(tdata);
+
             this._socket.emit('request', message, this._response.bind(this, rinfo), rinfo);
         } catch (e) {
             this._socket.emit('requestError', e instanceof Error ? e : new Error(String(e)));
@@ -126,6 +148,14 @@ export class UDPServer {
      */
     public close(callback?: () => void): void {
         this._socket.close(callback);
+    }
+
+    /**
+     * Set the pre request, for change buffer
+     * @param {UDPRequestPre} preReq
+     */
+    public setPreRequest(preReq: UDPRequestPre): void {
+        this._preRequest = preReq;
     }
 
 }

@@ -1,3 +1,5 @@
+import {Buffer} from 'buffer';
+import dgram from 'dgram';
 import tcp from 'net';
 import {SocketReader} from '../Lib/SocketReader.js';
 import {Packet} from '../Packet/Packet.js';
@@ -10,6 +12,8 @@ export type TCPServerEvents = {
     request: (msgRequest: Packet, send: (request: Packet) => void, client: tcp.Socket) => void;
     requestError: (error: Error) => void;
 };
+
+export type TCPRequestPre = (data: Buffer) => Promise<Buffer>;
 
 /**
  * TCP Server
@@ -29,14 +33,29 @@ export class TCPServer {
     protected _options: ServerOptions|null = null;
 
     /**
+     * pre request, you can change buffer
+     * @protected
+     */
+    protected _preRequest?: TCPRequestPre;
+
+    /**
      * Constructor
      * @param {ServerOptions|null} options
      */
     public constructor(options: ServerOptions|null = null) {
         this._options = options;
-        this._tcpServer = tcp.createServer(this._handle.bind(this));
+
+        this._tcpServer = tcp.createServer((socket) => {
+            this._handle(socket).catch(err => {
+                this._tcpServer?.emit('requestError', err instanceof Error ? err : new Error(String(err)));
+            });
+        });
     }
 
+    /**
+     * Listen
+     * @param args
+     */
     public listen(...args: Parameters<tcp.Server['listen']>): this {
         this._tcpServer.listen(...args);
         return this;
@@ -50,11 +69,21 @@ export class TCPServer {
         this._tcpServer.close(callback);
     }
 
+    /**
+     * on
+     * @param event
+     * @param listener
+     */
     public on<K extends keyof TCPServerEvents>(event: K, listener: TCPServerEvents[K]): this {
         this._tcpServer.on(event, listener);
         return this;
     }
 
+    /**
+     * once
+     * @param event
+     * @param listener
+     */
     public once<K extends keyof TCPServerEvents>(event: K, listener: TCPServerEvents[K]): this {
         this._tcpServer.once(event, listener);
         return this;
@@ -67,7 +96,12 @@ export class TCPServer {
      */
     protected async _handle(client: tcp.Socket): Promise<void> {
         try {
-            const data = await SocketReader.readStream(client);
+            let data = await SocketReader.readStream(client);
+
+            if (this._preRequest) {
+                data = await this._preRequest(data);
+            }
+
             const message = Packet.parse(data);
 
             this._tcpServer.emit('request', message, this._response.bind(this, client), client);
@@ -90,6 +124,14 @@ export class TCPServer {
         len.writeUInt16BE(buffer.length);
 
         client.end(Buffer.concat([len, buffer]));
+    }
+
+    /**
+     * Set the pre request, for change buffer
+     * @param {TCPRequestPre} preReq
+     */
+    public setPreRequest(preReq: TCPRequestPre): void {
+        this._preRequest = preReq;
     }
 
 }
