@@ -22,6 +22,7 @@ import {SRV} from './Types/SRV.js';
 import {SSHFP} from './Types/SSHFP.js';
 import {SVCB} from './Types/SVCB.js';
 import {TLSA} from './Types/TLSA.js';
+import {TSIG} from './Types/TSIG.js';
 import {TXT} from './Types/TXT.js';
 
 /**
@@ -72,6 +73,7 @@ export class PacketTypeRegistry {
             PacketTypeRegistry._instance.registerPacket(PacketTypes.TLSA, TLSA);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.SVCB, SVCB);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.HTTPS, HTTPS);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.TSIG, TSIG);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.CAA, CAA);
         }
 

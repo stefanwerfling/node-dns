@@ -37,6 +37,13 @@ export class PacketResource {
     public ttl: number;
 
     /**
+     * Byte offset in the source buffer at which this resource record
+     * started. Populated by `decode()` — undefined for records created in
+     * memory. Used by TSIG verification to slice the original wire bytes.
+     */
+    public byteStart?: number;
+
+    /**
      * Constructor
      * @param {string} name
      * @param {PacketType} packetType
@@ -89,6 +96,7 @@ export class PacketResource {
      */
     public static decode(reader: BufferReader|Buffer): PacketResource {
         const treader = reader instanceof BufferReader ? reader : new BufferReader(reader);
+        const byteStart = Math.floor(treader.getOffset() / 8);
 
         const name = PacketName.decode(treader);
         const type = treader.read(16);
@@ -111,12 +119,16 @@ export class PacketResource {
 
             const unknown = new UnknownPacketType(type, Buffer.from(arr));
 
-            return new PacketResource(name, unknown, cls, ttl);
+            const resource = new PacketResource(name, unknown, cls, ttl);
+            resource.byteStart = byteStart;
+            return resource;
         }
 
         const packet = packetType.decode(treader, len);
 
-        return new PacketResource(name, packet, cls, ttl);
+        const resource = new PacketResource(name, packet, cls, ttl);
+        resource.byteStart = byteStart;
+        return resource;
     }
 
 }

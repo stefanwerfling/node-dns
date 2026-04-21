@@ -41,17 +41,19 @@ npm run example-server-tcp    # Start TCP DNS server
 
 - **Lib/** — Low-level I/O: `BufferReader`/`BufferWriter` for bit-level DNS wire format parsing, `SocketReader` for TCP stream framing (accepts an optional `initialBuffer` so pre-consumed bytes can be fed in).
 - **Packet/** — DNS packet model (RFC 1035): header, question, resource record encoding/decoding, domain name compression, class/type enums
-- **Packet/Types/** — 22 record type implementations (A, AAAA, MX, NS, CNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS with ECS, DNSKEY, DS, NAPTR, NSEC, NSEC3, RRSIG, SSHFP, TLSA, SVCB, HTTPS), each extending abstract `PacketType`. HTTPS is a thin subclass of SVCB — same RFC 9460 wire format, different type code. Unknown types are handled gracefully via `UnknownPacketType`.
+- **Packet/Types/** — 23 record type implementations (A, AAAA, MX, NS, CNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS with ECS, DNSKEY, DS, NAPTR, NSEC, NSEC3, RRSIG, SSHFP, TLSA, SVCB, HTTPS, TSIG), each extending abstract `PacketType`. HTTPS is a thin subclass of SVCB — same RFC 9460 wire format, different type code. Unknown types are handled gracefully via `UnknownPacketType`.
+- **Packet/Tsig.ts, Packet/TsigKey.ts** — TSIG signing + verification (RFC 8945). `TsigKey` holds the shared secret; `Tsig.sign(packet, key)` patches ARCOUNT, computes HMAC (built-in `crypto`) and appends the TSIG RR; `Tsig.verify(packet, receivedBytes, key)` relies on `PacketResource.byteStart` to slice the original wire bytes and does a constant-time MAC check plus fudge-window validation.
 - **Server/** — `UDPServer`, `TCPServer`, `DohServer` (individual protocol servers) and `DnsServer` (combined multi-protocol server). Shared config in `ServerOptions`. Two hook interfaces: `ServerPreRequest<TClient>` (per message, for all three transports) and `ServerPreConnection<TClient>` (per TCP connection).
 - **Server/ProxyProtocol/** — PROXY protocol v1 (text) and v2 (binary) implementations. `ProxyProtocolV1`/`V2` implement `ServerPreRequest<dgram.RemoteInfo>` for UDP; `ProxyProtocolV1Tcp`/`V2Tcp` implement `ServerPreConnection<net.Socket>` and override `remoteAddress`/`remotePort` via `Object.defineProperty`. `ProxyProtocolTcpReader` is the shared incremental socket-reading helper.
 - **Client/** — `UDPClient`, `TCPClient` (TCP + TLS), `DohClient` (http/https/h2), `GoogleClient` (Google JSON API). All expose a static `request()` method returning a `ClientRequest` resolver function.
 - **DNS.ts** — High-level resolver that tries multiple nameservers in parallel, supports all protocol types.
-- **Test/** — Test framework and test suite (51 tests covering packets, EDNS, record types, SVCB/HTTPS params, PROXY protocol parsers, servers, integration incl. TCP+PROXY end-to-end and UDP→TCP truncation fallback).
+- **Test/** — Test framework and test suite (59 tests covering packets, EDNS, record types, SVCB/HTTPS params, TSIG sign/verify/tamper/replay/fudge, PROXY protocol parsers, servers, integration incl. TCP+PROXY end-to-end and UDP→TCP truncation fallback).
 - **index.ts** — Barrel re-export of all public API
 
 ### Key Patterns
 
-- **PacketTypeRegistry** is a singleton that maps DNS record type numbers to `PacketType` subclass instances. All 22 types are registered at first access.
+- **PacketTypeRegistry** is a singleton that maps DNS record type numbers to `PacketType` subclass instances. All 23 types are registered at first access.
+- **PacketResource.byteStart** is populated by `PacketResource.decode` with the byte offset of the record in the source buffer. Required by TSIG verification to reconstruct the exact MAC input without re-serializing (which could produce different bytes if DNS compression differs).
 - **Buffer operations** work at the bit level — `BufferReader`/`BufferWriter` use bit arrays (0/1 values) for flexible sub-byte field parsing (DNS header flags, etc.). When using `BufferWriter.writeBuffer()`, pass a `Buffer` (bytes→bits conversion) or another `BufferWriter` (bit array copy).
 - **TCP framing** uses 2-byte length prefix per message, handled by `SocketReader`.
 - **Servers** emit `request` events with parsed `Packet` objects and a send callback. `DnsServer` combines multiple protocol servers and forwards all events.

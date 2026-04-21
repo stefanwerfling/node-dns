@@ -19,7 +19,8 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - Zero production dependencies
 - ESM module format (NodeNext)
 - DNS over UDP, TCP, TLS, and HTTPS (DoH)
-- 22 record types: A, AAAA, MX, NS, CNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS (with ECS), DNSKEY, DS, NAPTR, NSEC, NSEC3, RRSIG, SSHFP, TLSA, SVCB, HTTPS (RFC 9460)
+- 23 record types: A, AAAA, MX, NS, CNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS (with ECS), DNSKEY, DS, NAPTR, NSEC, NSEC3, RRSIG, SSHFP, TLSA, SVCB, HTTPS (RFC 9460), TSIG
+- TSIG transaction signing (RFC 8945) — HMAC-based request/response authentication with hmac-md5/sha1/sha224/sha256/sha384/sha512
 - PROXY protocol v1 and v2 support (UDP per-datagram, TCP per-connection) for transparent load-balancer deployments
 
 <hr>
@@ -185,6 +186,39 @@ $ dig @127.0.0.1 -p5333 lsong.org
 Note that when implementing your own lookups, the contents of the query
 will be found in `request.questions[0].name`.
 
+### TSIG (transaction signatures, RFC 8945)
+
+Sign outgoing queries and verify incoming responses with a shared-secret HMAC.
+Supported algorithms: `hmac-md5`, `hmac-sha1`, `hmac-sha224`, `hmac-sha256`
+(default), `hmac-sha384`, `hmac-sha512`. Uses Node's built-in `crypto` — no
+extra dependencies.
+
+```ts
+import {Packet, PacketQuestion, PacketTypes, PacketClass,
+        Tsig, TsigKey, TsigAlgorithm} from 'dns2ts';
+
+const key = new TsigKey('my-key.', TsigAlgorithm.HMAC_SHA256, 'base64-secret');
+
+// Sign an outgoing query
+const query = new Packet();
+query.questions.push(new PacketQuestion('example.com', PacketTypes.A, PacketClass.IN));
+const {buffer: wire, mac: requestMac} = Tsig.sign(query, key);
+
+// … send `wire` over the wire, receive `responseBytes` …
+
+// Verify the signed response
+const parsed = Packet.parse(responseBytes);
+const result = Tsig.verify(parsed, responseBytes, key, {requestMac: requestMac});
+if (!result.valid) {
+  throw new Error(`TSIG check failed: ${result.reason}`);
+}
+```
+
+`Tsig.verify` enforces the fudge window (`|now − timeSigned| ≤ fudge`) by default
+and compares MACs in constant time. Pass `skipTimeCheck: true` when replaying
+recorded traffic. `Tsig.sign` accepts `requestMac` to chain responses
+(RFC 8945 §5.3.2.3).
+
 ### PROXY protocol support
 
 When the server sits behind a load balancer or proxy (HAProxy, AWS NLB, Envoy,
@@ -267,6 +301,7 @@ npm run lint      # ESLint check
 + [RFC-7766 - DNS Transport over TCP - Implementation Requirements](https://tools.ietf.org/html/rfc7766) (includes §8 truncation fallback)
 + [RFC-7871 - Client Subnet in DNS Queries](https://tools.ietf.org/html/rfc7871)
 + [RFC-8484 - DNS Queries over HTTPS (DoH)](https://tools.ietf.org/html/rfc8484)
++ [RFC-8945 - Secret Key Transaction Authentication for DNS (TSIG)](https://datatracker.ietf.org/doc/html/rfc8945)
 + [RFC-9460 - Service Binding and Parameter Specification via the DNS (SVCB, HTTPS)](https://datatracker.ietf.org/doc/html/rfc9460)
 
 ### Contributing

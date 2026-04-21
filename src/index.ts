@@ -41,6 +41,15 @@ export {SVCB, SvcParamKey} from './Packet/Types/SVCB.js';
 export type {SvcParams, SvcParamUnknown} from './Packet/Types/SVCB.js';
 export {HTTPS} from './Packet/Types/HTTPS.js';
 export {TLSA} from './Packet/Types/TLSA.js';
+export {TSIG, TsigError} from './Packet/Types/TSIG.js';
+export {TsigAlgorithm, TsigKey} from './Packet/TsigKey.js';
+export {Tsig} from './Packet/Tsig.js';
+export type {
+    TsigSignOptions,
+    TsigSignResult,
+    TsigVerifyOptions,
+    TsigVerifyResult
+} from './Packet/Tsig.js';
 
 // Server
 export {ServerOptions} from './Server/ServerOptions.js';

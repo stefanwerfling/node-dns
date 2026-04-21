@@ -12,6 +12,7 @@ export class PacketResource {
     packetType;
     class;
     ttl;
+    byteStart;
     constructor(name, packetType, cls = PacketClass.ANY, ttl = 300) {
         this.name = name;
         this.packetType = packetType;
@@ -31,6 +32,7 @@ export class PacketResource {
     }
     static decode(reader) {
         const treader = reader instanceof BufferReader ? reader : new BufferReader(reader);
+        const byteStart = Math.floor(treader.getOffset() / 8);
         const name = PacketName.decode(treader);
         const type = treader.read(16);
         const cls = treader.read(16);
@@ -45,10 +47,14 @@ export class PacketResource {
                 arr.push(treader.read(8));
             }
             const unknown = new UnknownPacketType(type, Buffer.from(arr));
-            return new PacketResource(name, unknown, cls, ttl);
+            const resource = new PacketResource(name, unknown, cls, ttl);
+            resource.byteStart = byteStart;
+            return resource;
         }
         const packet = packetType.decode(treader, len);
-        return new PacketResource(name, packet, cls, ttl);
+        const resource = new PacketResource(name, packet, cls, ttl);
+        resource.byteStart = byteStart;
+        return resource;
     }
 }
 //# sourceMappingURL=PacketResource.js.map

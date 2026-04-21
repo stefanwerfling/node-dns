@@ -30,6 +30,7 @@ export var PacketTypes;
     PacketTypes[PacketTypes["SVCB"] = 64] = "SVCB";
     PacketTypes[PacketTypes["HTTPS"] = 65] = "HTTPS";
     PacketTypes[PacketTypes["SPF"] = 99] = "SPF";
+    PacketTypes[PacketTypes["TSIG"] = 250] = "TSIG";
     PacketTypes[PacketTypes["AXFR"] = 252] = "AXFR";
     PacketTypes[PacketTypes["MAILB"] = 253] = "MAILB";
     PacketTypes[PacketTypes["MAILA"] = 254] = "MAILA";

@@ -29,6 +29,7 @@ export declare enum PacketTypes {
     SVCB = 64,
     HTTPS = 65,
     SPF = 99,
+    TSIG = 250,
     AXFR = 252,
     MAILB = 253,
     MAILA = 254,
