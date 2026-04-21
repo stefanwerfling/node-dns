@@ -1,14 +1,28 @@
 import https from 'https';
+import {Packet} from '../Packet/Packet.js';
+import {DohServerUseCors} from './DohServer.js';
+
+/**
+ * Server request handler
+ */
+export type ServerRequestHandler = (
+    request: Packet,
+    send: (response: Packet) => void,
+    client: unknown
+) => void;
 
 /**
  * Server options
  */
 export type ServerOptions = {
-    udp?: {
+    udp?: boolean | {
         type?: 'udp4' | 'udp6';
     };
-    doh?: {
+    tcp?: boolean | {};
+    doh?: boolean | {
         ssl?: boolean;
-        options: https.ServerOptions;
+        options?: https.ServerOptions;
+        cors?: boolean | string | DohServerUseCors;
     };
+    handle?: ServerRequestHandler;
 };

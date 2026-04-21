@@ -1,12 +1,18 @@
+import { Buffer } from 'buffer';
 import tcp from 'net';
 import { SocketReader } from '../Lib/SocketReader.js';
 import { Packet } from '../Packet/Packet.js';
 export class TCPServer {
     _tcpServer;
     _options = null;
+    _preRequest;
     constructor(options = null) {
         this._options = options;
-        this._tcpServer = tcp.createServer(this._handle.bind(this));
+        this._tcpServer = tcp.createServer((socket) => {
+            this._handle(socket).catch(err => {
+                this._tcpServer?.emit('requestError', err instanceof Error ? err : new Error(String(err)));
+            });
+        });
     }
     listen(...args) {
         this._tcpServer.listen(...args);
@@ -25,7 +31,10 @@ export class TCPServer {
     }
     async _handle(client) {
         try {
-            const data = await SocketReader.readStream(client);
+            let data = await SocketReader.readStream(client);
+            if (this._preRequest) {
+                data = await this._preRequest(data);
+            }
             const message = Packet.parse(data);
             this._tcpServer.emit('request', message, this._response.bind(this, client), client);
         }
@@ -39,6 +48,12 @@ export class TCPServer {
         const len = Buffer.alloc(2);
         len.writeUInt16BE(buffer.length);
         client.end(Buffer.concat([len, buffer]));
+    }
+    address() {
+        return this._tcpServer.address();
+    }
+    setPreRequest(preReq) {
+        this._preRequest = preReq;
     }
 }
 //# sourceMappingURL=TCPServer.js.map

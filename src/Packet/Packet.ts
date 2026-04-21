@@ -143,7 +143,7 @@ export class Packet {
                             break;
 
                         case 'additionals':
-                            packet.authorities.push(PacketResource.decode(reader));
+                            packet.additionals.push(PacketResource.decode(reader));
                             break;
                     }
                 } catch (e) {
@@ -157,6 +157,32 @@ export class Packet {
         }
 
         return packet;
+    }
+
+    /**
+     * recursive
+     */
+    public get recursive(): boolean {
+        return Boolean(this.header.rd);
+    }
+
+    public set recursive(yn: boolean) {
+        this.header.rd = yn ? 1 : 0;
+    }
+
+    /**
+     * DoH
+     * @docs https://tools.ietf.org/html/rfc8484
+     * @return {string}
+     */
+    public toBase64URL(): string {
+        const buffer = this.toBuffer();
+        const base64 = buffer.toString('base64');
+
+        return base64
+        .replace(/[=]/gu, '')
+        .replace(/[+]/gu, '-')
+        .replace(/[/]/gu, '_');
     }
 
     /**

@@ -7,8 +7,14 @@ export class BufferWriter {
         }
     }
     writeBuffer(buffer) {
-        const tBuffer = buffer instanceof Buffer ? [...buffer] : buffer;
-        this._buffer = [...this._buffer, ...tBuffer];
+        if (buffer instanceof BufferWriter) {
+            this._buffer = [...this._buffer, ...buffer._buffer];
+        }
+        else {
+            for (const byte of buffer) {
+                this.write(byte, 8);
+            }
+        }
     }
     toBuffer() {
         const arr = [];

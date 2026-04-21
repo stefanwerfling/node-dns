@@ -86,7 +86,7 @@ export class Packet {
                             packet.authorities.push(PacketResource.decode(reader));
                             break;
                         case 'additionals':
-                            packet.authorities.push(PacketResource.decode(reader));
+                            packet.additionals.push(PacketResource.decode(reader));
                             break;
                     }
                 }
@@ -101,6 +101,20 @@ export class Packet {
             }
         }
         return packet;
+    }
+    get recursive() {
+        return Boolean(this.header.rd);
+    }
+    set recursive(yn) {
+        this.header.rd = yn ? 1 : 0;
+    }
+    toBase64URL() {
+        const buffer = this.toBuffer();
+        const base64 = buffer.toString('base64');
+        return base64
+            .replace(/[=]/gu, '')
+            .replace(/[+]/gu, '-')
+            .replace(/[/]/gu, '_');
     }
     static createResponseFromRequest(request) {
         const response = new Packet(request);

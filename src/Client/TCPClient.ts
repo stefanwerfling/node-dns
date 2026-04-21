@@ -5,6 +5,7 @@ import {Packet} from '../Packet/Packet.js';
 import {PacketClass} from '../Packet/PacketClass.js';
 import {PacketQuestion} from '../Packet/PacketQuestion.js';
 import {PacketTypes} from '../Packet/PacketTypes.js';
+import {EDNS, EdnsECS} from '../Packet/Types/EDNS.js';
 import {AClient} from './AClient.js';
 import {ClientOptions, ClientOptionsProtocol} from './ClientOptions.js';
 import {ClientRequest} from './ClientRequest.js';
@@ -19,8 +20,9 @@ export class TCPClient extends AClient {
         packet.header.rd = recursive ? 1 : 0;
 
         if (clientIp !== null) {
-            // TODO
-            packet.additionals.push();
+            packet.additionals.push(
+                EDNS.createResource([new EdnsECS(clientIp)])
+            );
         }
 
         packet.questions.push(new PacketQuestion(name, type, cls));

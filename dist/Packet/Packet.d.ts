@@ -13,6 +13,9 @@ export declare class Packet {
     constructor(data?: Packet | PacketHeader | null);
     toBuffer(writer?: BufferWriter | null): Buffer;
     static parse(buffer: Buffer): Packet;
+    get recursive(): boolean;
+    set recursive(yn: boolean);
+    toBase64URL(): string;
     static createResponseFromRequest(request: Packet): Packet;
     static createResourceFromQuestion(base: PacketQuestion, record: PacketType, tls?: number): PacketResource;
 }

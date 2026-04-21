@@ -11,6 +11,8 @@ import {ServerOptions} from './ServerOptions.js';
 export type TCPServerEvents = {
     request: (msgRequest: Packet, send: (request: Packet) => void, client: tcp.Socket) => void;
     requestError: (error: Error) => void;
+    listening: () => void;
+    close: () => void;
 };
 
 export type TCPRequestPre = (data: Buffer) => Promise<Buffer>;
@@ -124,6 +126,14 @@ export class TCPServer {
         len.writeUInt16BE(buffer.length);
 
         client.end(Buffer.concat([len, buffer]));
+    }
+
+    /**
+     * Return the address of the server
+     * @return {AddressInfo|string|null}
+     */
+    public address(): tcp.AddressInfo|string|null {
+        return this._tcpServer.address();
     }
 
     /**

@@ -2,13 +2,18 @@ import dgram from 'dgram';
 import { Packet } from '../Packet/Packet.js';
 export class UDPServer {
     _socket;
-    constructor(options) {
+    _preRequest;
+    constructor(options = null) {
         let type = 'udp4';
-        if (options && options.udpType) {
-            type = options.udpType;
+        if (options && typeof options.udp === 'object' && options.udp.type) {
+            type = options.udp.type;
         }
         this._socket = dgram.createSocket(type);
-        this._socket.on('message', this._handle.bind(this));
+        this._socket.on('message', (data, rinfo) => {
+            this._handle(data, rinfo).catch(e => {
+                this._socket.emit('requestError', e instanceof Error ? e : new Error(String(e)));
+            });
+        });
     }
     on(event, listener) {
         this._socket.on(event, listener);
@@ -18,9 +23,13 @@ export class UDPServer {
         this._socket.once(event, listener);
         return this;
     }
-    _handle(data, rinfo) {
+    async _handle(data, rinfo) {
         try {
-            const message = Packet.parse(data);
+            let tdata = data;
+            if (this._preRequest) {
+                tdata = await this._preRequest(tdata, rinfo);
+            }
+            const message = Packet.parse(tdata);
             this._socket.emit('request', message, this._response.bind(this, rinfo), rinfo);
         }
         catch (e) {
@@ -45,6 +54,12 @@ export class UDPServer {
     }
     close(callback) {
         this._socket.close(callback);
+    }
+    address() {
+        return this._socket.address();
+    }
+    setPreRequest(preReq) {
+        this._preRequest = preReq;
     }
 }
 //# sourceMappingURL=UDPServer.js.map

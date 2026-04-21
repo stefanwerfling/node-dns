@@ -19,6 +19,8 @@ export var PacketTypes;
     PacketTypes[PacketTypes["AAAA"] = 28] = "AAAA";
     PacketTypes[PacketTypes["SRV"] = 33] = "SRV";
     PacketTypes[PacketTypes["EDNS"] = 41] = "EDNS";
+    PacketTypes[PacketTypes["DNSKEY"] = 48] = "DNSKEY";
+    PacketTypes[PacketTypes["RRSIG"] = 46] = "RRSIG";
     PacketTypes[PacketTypes["SPF"] = 99] = "SPF";
     PacketTypes[PacketTypes["AXFR"] = 252] = "AXFR";
     PacketTypes[PacketTypes["MAILB"] = 253] = "MAILB";

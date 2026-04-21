@@ -14,14 +14,14 @@ export class TXT extends PacketType {
     /**
      * Data
      */
-    public data: string;
+    public data: string | string[];
 
     /**
      * Constructor
      * @param {string} data
      * @param {PacketTypes} type
      */
-    public constructor(data: string = '', type: PacketTypes = PacketTypes.TXT) {
+    public constructor(data: string | string[] = '', type: PacketTypes = PacketTypes.TXT) {
         super(type);
         this.data = data;
     }

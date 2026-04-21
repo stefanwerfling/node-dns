@@ -22,6 +22,12 @@ export declare class DNS extends EventEmitter {
     nameServers: string[];
     rootServers: string[];
     constructor(options?: DNSOptions);
+    private _getResolver;
     resolve(domain: string, type?: PacketTypes, cls?: PacketClass, options?: ClientRequestOptions): Promise<Packet>;
     resolveA(domain: string, clientIp?: string): Promise<Packet>;
+    resolveAAAA(domain: string): Promise<Packet>;
+    resolveMX(domain: string): Promise<Packet>;
+    resolveCNAME(domain: string): Promise<Packet>;
+    resolvePTR(domain: string): Promise<Packet>;
+    resolveDNSKEY(domain: string): Promise<Packet>;
 }

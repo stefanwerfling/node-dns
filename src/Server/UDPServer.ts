@@ -1,5 +1,6 @@
 import dgram from 'dgram';
 import { Buffer } from 'buffer';
+import {AddressInfo} from 'net';
 import {Packet} from '../Packet/Packet.js';
 import {ServerOptions} from './ServerOptions.js';
 
@@ -37,7 +38,7 @@ export class UDPServer {
     public constructor(options: ServerOptions|null = null) {
         let type: 'udp4' | 'udp6' = 'udp4';
 
-        if (options && options.udp && options.udp.type) {
+        if (options && typeof options.udp === 'object' && options.udp.type) {
             type = options.udp.type;
         }
 
@@ -148,6 +149,14 @@ export class UDPServer {
      */
     public close(callback?: () => void): void {
         this._socket.close(callback);
+    }
+
+    /**
+     * Return the address of the server
+     * @return {AddressInfo}
+     */
+    public address(): AddressInfo {
+        return this._socket.address() as AddressInfo;
     }
 
     /**

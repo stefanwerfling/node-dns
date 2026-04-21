@@ -1,9 +1,27 @@
-import util from 'util';
+import { Buffer } from 'buffer';
+import { debuglog } from 'util';
 import { BufferReader } from '../Lib/BufferReader.js';
 import { BufferWriter } from '../Lib/BufferWriter.js';
 import { PacketClass } from './PacketClass.js';
 import { PacketName } from './PacketName.js';
+import { PacketType } from './PacketType.js';
 import { PacketTypeRegistry } from './PacketTypeRegistry.js';
+const debug = debuglog('dns2');
+export class UnknownPacketType extends PacketType {
+    data;
+    constructor(type, data = Buffer.alloc(0)) {
+        super(type);
+        this.data = data;
+    }
+    encode(_resource, writer = null) {
+        const twriter = writer === null ? new BufferWriter() : writer;
+        twriter.write(this.data.length, 16);
+        for (const byte of this.data) {
+            twriter.write(byte, 8);
+        }
+        return twriter.toBuffer();
+    }
+}
 export class PacketResource {
     name;
     packetType;
@@ -35,7 +53,14 @@ export class PacketResource {
         const len = treader.read(16);
         const packetType = PacketTypeRegistry.getInstance().getPacketType(type);
         if (packetType === null) {
-            throw new Error(util.format('node-dns > unknown parser type: %d by domain: %s', type, name));
+            debug('node-dns > unknown parser type: %d by domain: %s', type, name);
+            const arr = [];
+            let remaining = len;
+            while (remaining--) {
+                arr.push(treader.read(8));
+            }
+            const unknown = new UnknownPacketType(type, Buffer.from(arr));
+            return new PacketResource(name, unknown, cls, ttl);
         }
         const packet = packetType.decode(treader, len);
         return new PacketResource(name, packet, cls, ttl);

@@ -22,6 +22,8 @@ export enum PacketTypes {
     AAAA = 0x1C,
     SRV = 0x21,
     EDNS = 0x29,
+    DNSKEY = 0x30,
+    RRSIG = 0x2E,
     SPF = 0x63,
     AXFR = 0xFC,
     MAILB = 0xFD,

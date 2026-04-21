@@ -2,7 +2,9 @@ import EventEmitter from 'events';
 import {ClientCreateResolver} from './Client/ClientCreateResolver.js';
 import {ClientOptionsProtocol} from './Client/ClientOptions.js';
 import {ClientRequest, ClientRequestOptions} from './Client/ClientRequest.js';
+import {DohClient} from './Client/DohClient.js';
 import {TCPClient} from './Client/TCPClient.js';
+import {UDPClient} from './Client/UDPClient.js';
 import {Packet} from './Packet/Packet.js';
 import {PacketClass} from './Packet/PacketClass.js';
 import {PacketTypes} from './Packet/PacketTypes.js';
@@ -79,11 +81,11 @@ export class DNS extends EventEmitter {
                 this.timeout = options.timeout;
             }
 
-            if (options.recursive) {
+            if (options.recursive !== undefined) {
                 this.recursive = options.recursive;
             }
 
-            if (options.resolverProtocol) {
+            if (options.resolverProtocol !== undefined) {
                 this.resolverProtocol = options.resolverProtocol;
             }
 
@@ -94,6 +96,26 @@ export class DNS extends EventEmitter {
             if (options.rootServers) {
                 this.rootServers = options.rootServers;
             }
+        }
+    }
+
+    /**
+     * Get the resolver class for a protocol
+     * @param {ClientOptionsProtocol} protocol
+     * @return {ClientCreateResolver}
+     */
+    private _getResolver(protocol: ClientOptionsProtocol): ClientCreateResolver {
+        switch (protocol) {
+            case ClientOptionsProtocol.udp:
+                return UDPClient;
+
+            case ClientOptionsProtocol.doh:
+                return DohClient;
+
+            case ClientOptionsProtocol.tls:
+            case ClientOptionsProtocol.tcp:
+            default:
+                return TCPClient;
         }
     }
 
@@ -113,16 +135,9 @@ export class DNS extends EventEmitter {
     ): Promise<Packet> {
         const port = this.port;
         const nameServers = this.nameServers;
+        const createResolver = this._getResolver(this.resolverProtocol);
 
-        let createResolver: ClientCreateResolver = TCPClient;
-
-        switch (this.resolverProtocol) {
-            case ClientOptionsProtocol.tls:
-            case ClientOptionsProtocol.tcp:
-                createResolver = TCPClient;
-        }
-
-        return Promise.race(nameServers.map(address => {
+        return Promise.race(nameServers.map((address) => {
             const resolve: ClientRequest = createResolver.request({
                 dns: address,
                 port: port
@@ -136,6 +151,26 @@ export class DNS extends EventEmitter {
         return this.resolve(domain, PacketTypes.A, undefined, {
             clientIp: clientIp
         });
+    }
+
+    public async resolveAAAA(domain: string): Promise<Packet> {
+        return this.resolve(domain, PacketTypes.AAAA);
+    }
+
+    public async resolveMX(domain: string): Promise<Packet> {
+        return this.resolve(domain, PacketTypes.MX);
+    }
+
+    public async resolveCNAME(domain: string): Promise<Packet> {
+        return this.resolve(domain, PacketTypes.CNAME);
+    }
+
+    public async resolvePTR(domain: string): Promise<Packet> {
+        return this.resolve(domain, PacketTypes.PTR);
+    }
+
+    public async resolveDNSKEY(domain: string): Promise<Packet> {
+        return this.resolve(domain, PacketTypes.DNSKEY);
     }
 
 }

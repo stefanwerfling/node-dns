@@ -28,7 +28,7 @@ export class PacketName {
             }
         }
         if (o) {
-            treader.setOffset(0);
+            treader.setOffset(o);
         }
         return name.join('.');
     }

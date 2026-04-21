@@ -10,7 +10,7 @@ export {PacketClass} from './Packet/PacketClass.js';
 export {PacketHeader} from './Packet/PacketHeader.js';
 export {PacketName} from './Packet/PacketName.js';
 export {PacketQuestion} from './Packet/PacketQuestion.js';
-export {PacketResource} from './Packet/PacketResource.js';
+export {PacketResource, UnknownPacketType} from './Packet/PacketResource.js';
 export {PacketType} from './Packet/PacketType.js';
 export {PacketTypeRegistryType, PacketTypeRegistry} from './Packet/PacketTypeRegistry.js';
 export {PacketTypes} from './Packet/PacketTypes.js';
@@ -23,11 +23,23 @@ export {NS} from './Packet/Types/NS.js';
 export {CNAME} from './Packet/Types/CNAME.js';
 export {PTR} from './Packet/Types/PTR.js';
 export {SRV} from './Packet/Types/SRV.js';
+export {SOA} from './Packet/Types/SOA.js';
+export {TXT} from './Packet/Types/TXT.js';
+export {SPF} from './Packet/Types/SPF.js';
+export {CAA} from './Packet/Types/CAA.js';
+export {EDNS, EdnsOptionCode, EdnsECS} from './Packet/Types/EDNS.js';
+export type {EdnsOption} from './Packet/Types/EDNS.js';
+export {DNSKEY} from './Packet/Types/DNSKEY.js';
+export {RRSIG} from './Packet/Types/RRSIG.js';
 
 // Server
 export {ServerOptions} from './Server/ServerOptions.js';
+export type {ServerRequestHandler} from './Server/ServerOptions.js';
+export {DnsServer} from './Server/DnsServer.js';
+export type {DnsServerAddresses, DnsServerListenOptions} from './Server/DnsServer.js';
 export {TCPServerEvents, TCPServer} from './Server/TCPServer.js';
 export {UDPServer} from './Server/UDPServer.js';
+export {DohServer} from './Server/DohServer.js';
 
 // Client
 export {AClient} from './Client/AClient.js';
@@ -36,6 +48,9 @@ export {ClientRequestOptions, ClientRequest} from './Client/ClientRequest.js';
 export {ClientCreateResolver} from './Client/ClientCreateResolver.js';
 export {TCPClient} from './Client/TCPClient.js';
 export {UDPClient} from './Client/UDPClient.js';
+export {DohClient} from './Client/DohClient.js';
+export {GoogleClient} from './Client/GoogleClient.js';
+export type {GoogleDnsResponse, GoogleClientRequest} from './Client/GoogleClient.js';
 
 // DNS
 export {DNSOptions, DNS} from './DNS.js';

@@ -18,6 +18,8 @@ export declare enum PacketTypes {
     AAAA = 28,
     SRV = 33,
     EDNS = 41,
+    DNSKEY = 48,
+    RRSIG = 46,
     SPF = 99,
     AXFR = 252,
     MAILB = 253,

@@ -46,9 +46,14 @@ export class DohServer extends EventEmitter {
         super();
 
         let soptions: https.ServerOptions | undefined;
+        const dohOpts = options?.doh;
 
-        if (options?.doh) {
-            soptions = options?.doh?.options ? options.doh.options : undefined;
+        if (typeof dohOpts === 'object') {
+            soptions = dohOpts.options;
+
+            if (dohOpts.cors !== undefined) {
+                this._cors = dohOpts.cors;
+            }
         }
 
         if (soptions) {
@@ -182,7 +187,7 @@ export class DohServer extends EventEmitter {
      * @param {[string]} address
      */
     public listen(port?: number, address?: string): void {
-        this._server.listen(port || this._port, address);
+        this._server.listen(port !== undefined ? port : this._port, address);
     }
 
     /**
@@ -225,7 +230,7 @@ export class DohServer extends EventEmitter {
 
     /**
      * Read the stream by client (post)
-     * @param {client: http.IncomingMessage} client
+     * @param {http.IncomingMessage} client
      * @return {string}
      */
     public static async readStream(client: http.IncomingMessage): Promise<string> {

@@ -25,12 +25,16 @@ export class BufferWriter {
 
     /**
      * Write buffer to buffer
-     * @param {number[]|Buffer} buffer
+     * @param {Buffer|BufferWriter} buffer
      */
-    public writeBuffer(buffer: number[]|Buffer): void {
-        const tBuffer = buffer instanceof Buffer ? [...buffer] : buffer;
-
-        this._buffer = [...this._buffer, ...tBuffer];
+    public writeBuffer(buffer: Buffer|BufferWriter): void {
+        if (buffer instanceof BufferWriter) {
+            this._buffer = [...this._buffer, ...buffer._buffer];
+        } else {
+            for (const byte of buffer) {
+                this.write(byte, 8);
+            }
+        }
     }
 
     /**

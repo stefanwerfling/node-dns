@@ -11,18 +11,15 @@
 
 <hr>
 
-### Update to TypeScript (Fork)
+### Pure TypeScript (Fork)
 
-#### Real Types, real fun
+Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 
-I switched the Pure JavaScript version to TypeScript (working on it):
-- Now the types are fixed from TypeScript and not just a definition (*.d.ts). The source code is now more understandable.
-- The translation can now be done in all JS versions, if desired, it is important to me that an ESM is included.
-- I can then carry out the modification to store an OnEvent function on the servers, which in turn process the received packet before the encode. (remove reverse proxy header and note the real client IP), I requested the feature but haven't received an answer to date
-
-
-In the second step, I will further adapt the architecture of the classes. There are inconsistencies and in the middle of them I noticed errors that, although they have no effect on the function (because JS is tolerant) but raised questions.
-I will also question the names of methods again and perhaps make some small changes to the naming.
+- Real types from TypeScript source, not just definition files (*.d.ts)
+- Zero production dependencies
+- ESM module format (NodeNext)
+- DNS over UDP, TCP, TLS, and HTTPS (DoH)
+- 14 record types: A, AAAA, MX, NS, CNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS (with ECS), DNSKEY, RRSIG
 
 <hr>
 
@@ -31,7 +28,7 @@ I will also question the names of methods again and perhaps make some small chan
 + Server and Client
 + Lot of Type Supported
 + Extremely lightweight
-+ DNS over UDP, TCP, HTTPS Supported
++ DNS over UDP, TCP, TLS, HTTPS Supported
 
 ### Installation
 
@@ -41,128 +38,96 @@ $ npm install git+https://github.com/stefanwerfling/node-dns.git#ts
 
 ### DNS Client (default UDP)
 
-Lookup any records available for the domain `lsong.org`. 
+Lookup any records available for the domain `google.com`.
 DNS client will use UDP by default.
 
-```js
-const dns2 = require('dns2');
+```ts
+import {DNS} from 'dns2ts';
 
-const options = {
-  // available options
-  // dns: dns server ip address or hostname (string),
-  // port: dns server port (number),
-  // recursive: Recursion Desired flag (boolean, default true, since > v1.4.2)
-};
-const dns = new dns2(options);
+const dns = new DNS({
+  // dns server port (number)
+  // port: 53,
+  // Recursion Desired flag (boolean, default true)
+  // recursive: true,
+});
 
-(async () => {
-  const result = await dns.resolveA('google.com');
-  console.log(result.answers);
-})();
+const result = await dns.resolveA('google.com');
+console.log(result.answers);
 ```
 
-Another way to instanciate dns2 UDP Client:
+Another way to use the UDP Client directly:
 
-```js
-const { UDPClient } = require('dns2');
+```ts
+import {UDPClient, PacketTypes, PacketClass} from 'dns2ts';
 
-const resolve = UDPClient();
+const resolve = UDPClient.request({dns: '8.8.8.8'});
 
-(async () => {
-  const response = await resolve('google.com')
-  console.log(response.answers);
-})();
+const response = await resolve('google.com', PacketTypes.A, PacketClass.IN);
+console.log(response.answers);
 ```
 
 ### DNS Client (TCP)
 
-Lookup any records available for the domain `lsong.org`. By default, DNS requests will use UDP.
+```ts
+import {TCPClient, PacketTypes, PacketClass} from 'dns2ts';
 
-```js
-const { TCPClient } = require('dns2');
+const resolve = TCPClient.request({dns: '8.8.8.8'});
 
-const resolve = TCPClient();
+try {
+  const response = await resolve('lsong.org', PacketTypes.A, PacketClass.IN);
+  console.log(response.answers);
+} catch(error) {
+  // some DNS servers (i.e cloudflare 1.1.1.1, 1.0.0.1)
+  // may send an empty response when using TCP
+  console.log(error);
+}
+```
 
-(async () => {
-  try {
-    const response = await resolve('lsong.org')
-    console.log(response.answers);
-  } catch(error) {
-    // some DNS servers (i.e cloudflare 1.1.1.1, 1.0.0.1) 
-    // may send an empty response when using TCP
-    console.log(error);
-  }
-})();
+### DNS Client (DNS over HTTPS)
+
+```ts
+import {DohClient, PacketTypes, PacketClass} from 'dns2ts';
+
+const resolve = DohClient.request({dns: 'https://dns.google/dns-query'});
+
+const response = await resolve('google.com', PacketTypes.A, PacketClass.IN);
+console.log(response.answers);
 ```
 
 ### Client Custom DNS Server
 
 You can pass your own DNS Server.
 
-```js
-const { TCPClient } = require('dns2');
+```ts
+import {TCPClient, PacketTypes, PacketClass} from 'dns2ts';
 
-const resolve = TCPClient({
-  dns: '1.1.1.1'
-});
+const resolve = TCPClient.request({dns: '1.1.1.1'});
 
-(async () => {
-  try {
-    const result = await resolve('google.com');
-    console.log(result.answers);
-  } catch(error) {
-    console.log(error);
-  }
-})();
-```
-
-### System DNS Server
-
-You can use the first DNS server from your OS with native node dns.
-
-```js
-const dns = require('dns');
-const { TCPClient } = require('dns2');
-
-const resolve = TCPClient({
-  dns: dns.getServers()[0]
-});
-
-(async () => {
-  try {
-    const result = await resolve('google.com');
-    console.log(result.answers);
-  } catch(error) {
-    console.log(error);
-  }
-})();
+const result = await resolve('google.com', PacketTypes.A, PacketClass.IN);
+console.log(result.answers);
 ```
 
 ### Example Server
 
-```js
-const dns2 = require('dns2');
+```ts
+import {DnsServer, Packet, PacketResource, PacketClass} from 'dns2ts';
+import {A} from 'dns2ts';
 
-const { Packet } = dns2;
-
-const server = dns2.createServer({
+const server = new DnsServer({
   udp: true,
-  handle: (request, send, rinfo) => {
+  handle: (request, send) => {
     const response = Packet.createResponseFromRequest(request);
-    const [ question ] = request.questions;
-    const { name } = question;
-    response.answers.push({
-      name,
-      type: Packet.TYPE.A,
-      class: Packet.CLASS.IN,
-      ttl: 300,
-      address: '8.8.8.8'
-    });
+    const [question] = request.questions;
+
+    response.answers.push(
+      Packet.createResourceFromQuestion(question, new A('8.8.8.8'))
+    );
+
     send(response);
   }
 });
 
-server.on('request', (request, response, rinfo) => {
+server.on('request', (request) => {
   console.log(request.header.id, request.questions[0]);
 });
 
@@ -179,16 +144,16 @@ server.on('close', () => {
 });
 
 server.listen({
-  // Optionally specify port, address and/or the family of socket() for udp server:
-  udp: { 
+  // Optionally specify port and/or address for udp server:
+  udp: {
     port: 5333,
-    address: "127.0.0.1",
+    address: '127.0.0.1',
   },
-  
+
   // Optionally specify port and/or address for tcp server:
-  tcp: { 
+  tcp: {
     port: 5333,
-    address: "127.0.0.1",
+    address: '127.0.0.1',
   },
 });
 
@@ -205,12 +170,24 @@ $ dig @127.0.0.1 -p5333 lsong.org
 Note that when implementing your own lookups, the contents of the query
 will be found in `request.questions[0].name`.
 
+### Build & Development
+
+```bash
+npm install       # Install dev dependencies
+npx tsc           # Compile TypeScript (src/ -> dist/)
+npm test          # Compile and run tests
+npm run lint      # ESLint check
+```
+
 ### Relevant Specifications
 
 + [RFC-1034 - Domain Names - Concepts and Facilities](https://tools.ietf.org/html/rfc1034)
 + [RFC-1035 - Domain Names - Implementation and Specification](https://tools.ietf.org/html/rfc1035)
 + [RFC-2782 - A DNS RR for specifying the location of services (DNS SRV)](https://tools.ietf.org/html/rfc2782)
++ [RFC-4034 - Resource Records for the DNS Security Extensions (DNSSEC)](https://tools.ietf.org/html/rfc4034)
++ [RFC-6891 - Extension Mechanisms for DNS (EDNS(0))](https://tools.ietf.org/html/rfc6891)
 + [RFC-7766 - DNS Transport over TCP - Implementation Requirements](https://tools.ietf.org/html/rfc7766)
++ [RFC-7871 - Client Subnet in DNS Queries](https://tools.ietf.org/html/rfc7871)
 + [RFC-8484 - DNS Queries over HTTPS (DoH)](https://tools.ietf.org/html/rfc8484)
 
 ### Contributing

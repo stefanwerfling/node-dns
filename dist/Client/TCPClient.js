@@ -3,6 +3,7 @@ import tls from 'tls';
 import { SocketReader } from '../Lib/SocketReader.js';
 import { Packet } from '../Packet/Packet.js';
 import { PacketQuestion } from '../Packet/PacketQuestion.js';
+import { EDNS, EdnsECS } from '../Packet/Types/EDNS.js';
 import { AClient } from './AClient.js';
 import { ClientOptionsProtocol } from './ClientOptions.js';
 export class TCPClient extends AClient {
@@ -10,7 +11,7 @@ export class TCPClient extends AClient {
         const packet = new Packet();
         packet.header.rd = recursive ? 1 : 0;
         if (clientIp !== null) {
-            packet.additionals.push();
+            packet.additionals.push(EDNS.createResource([new EdnsECS(clientIp)]));
         }
         packet.questions.push(new PacketQuestion(name, type, cls));
         return packet.toBuffer();
