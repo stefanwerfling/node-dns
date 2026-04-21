@@ -7,13 +7,19 @@ import tcp from 'net';
 export class SocketReader {
 
     /**
-     * Read the socket stream (handle chunks) to Buffer
+     * Read the socket stream (handle chunks) to Buffer.
+     *
+     * If `initialBuffer` is provided, its bytes are treated as if they had
+     * already been received from the socket — useful when a preamble (e.g.
+     * PROXY header) has been consumed earlier and the remaining pre-read
+     * bytes need to be fed into the DNS length-prefix framing.
      * @param {tcp.Socket} socket
+     * @param {[Buffer]} initialBuffer
      * @return {Promise<Buffer>}
      */
-    public static readStream(socket: tcp.Socket): Promise<Buffer> {
-        let chunks: Buffer[] = [];
-        let chunklen = 0;
+    public static readStream(socket: tcp.Socket, initialBuffer?: Buffer): Promise<Buffer> {
+        let chunks: Buffer[] = initialBuffer && initialBuffer.length > 0 ? [initialBuffer] : [];
+        let chunklen = initialBuffer ? initialBuffer.length : 0;
         let received = false;
         let expected: number|null = null;
 
@@ -29,16 +35,7 @@ export class SocketReader {
                 resolve(buffer.subarray(2));
             };
 
-            socket.on('error', reject);
-            socket.on('end', processMessage);
-            socket.on('readable', () => {
-                let chunk;
-
-                while ((chunk = socket.read()) !== null) {
-                    chunks.push(chunk);
-                    chunklen += chunk.length;
-                }
-
+            const tryResolve = (): void => {
                 if (!expected && chunklen >= 2) {
                     if (chunks.length > 1) {
                         chunks = [Buffer.concat(chunks, chunklen)];
@@ -50,7 +47,25 @@ export class SocketReader {
                 if (expected !== null && chunklen >= 2 + expected) {
                     processMessage();
                 }
+            };
+
+            socket.on('error', reject);
+            socket.on('end', processMessage);
+            socket.on('readable', () => {
+                let chunk;
+
+                while ((chunk = socket.read()) !== null) {
+                    chunks.push(chunk);
+                    chunklen += chunk.length;
+                }
+
+                tryResolve();
             });
+
+            // Evaluate any preloaded initial buffer immediately.
+            if (chunklen > 0) {
+                tryResolve();
+            }
         });
     }
 

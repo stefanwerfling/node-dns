@@ -1,8 +1,8 @@
 import { Buffer } from 'buffer';
 export class SocketReader {
-    static readStream(socket) {
-        let chunks = [];
-        let chunklen = 0;
+    static readStream(socket, initialBuffer) {
+        let chunks = initialBuffer && initialBuffer.length > 0 ? [initialBuffer] : [];
+        let chunklen = initialBuffer ? initialBuffer.length : 0;
         let received = false;
         let expected = null;
         return new Promise((resolve, reject) => {
@@ -14,14 +14,7 @@ export class SocketReader {
                 const buffer = Buffer.concat(chunks, chunklen);
                 resolve(buffer.subarray(2));
             };
-            socket.on('error', reject);
-            socket.on('end', processMessage);
-            socket.on('readable', () => {
-                let chunk;
-                while ((chunk = socket.read()) !== null) {
-                    chunks.push(chunk);
-                    chunklen += chunk.length;
-                }
+            const tryResolve = () => {
                 if (!expected && chunklen >= 2) {
                     if (chunks.length > 1) {
                         chunks = [Buffer.concat(chunks, chunklen)];
@@ -31,7 +24,20 @@ export class SocketReader {
                 if (expected !== null && chunklen >= 2 + expected) {
                     processMessage();
                 }
+            };
+            socket.on('error', reject);
+            socket.on('end', processMessage);
+            socket.on('readable', () => {
+                let chunk;
+                while ((chunk = socket.read()) !== null) {
+                    chunks.push(chunk);
+                    chunklen += chunk.length;
+                }
+                tryResolve();
             });
+            if (chunklen > 0) {
+                tryResolve();
+            }
         });
     }
 }

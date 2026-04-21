@@ -6,6 +6,7 @@ import {URL} from 'url';
 import {debuglog} from 'util';
 import {Packet} from '../Packet/Packet.js';
 import {ServerOptions} from './ServerOptions.js';
+import {ServerPreRequest} from './ServerPreRequest.js';
 
 const debug = debuglog('dns2-server');
 
@@ -39,6 +40,12 @@ export class DohServer extends EventEmitter {
     protected _port: number = 8080;
 
     /**
+     * pre request processor, can modify the raw query data and override the client reference
+     * @protected
+     */
+    protected _preRequest?: ServerPreRequest<http.IncomingMessage>;
+
+    /**
      * Constructor
      * @param {ServerOptions|null} options
      */
@@ -53,6 +60,10 @@ export class DohServer extends EventEmitter {
 
             if (dohOpts.cors !== undefined) {
                 this._cors = dohOpts.cors;
+            }
+
+            if (dohOpts.preRequest) {
+                this._preRequest = dohOpts.preRequest;
             }
         }
 
@@ -157,10 +168,21 @@ export class DohServer extends EventEmitter {
                 return;
             }
 
+            let emitClient = client;
+
+            if (this._preRequest) {
+                const result = await this._preRequest.process(queryData, client);
+                queryData = result.data;
+
+                if (result.client) {
+                    emitClient = result.client;
+                }
+            }
+
             // Parse DNS query and Raise event.
             const message = Packet.parse(queryData);
 
-            this.emit('request', message, this._response.bind(this, res), client);
+            this.emit('request', message, this._response.bind(this, res), emitClient);
         } catch (e) {
             this.emit('requestError', e);
             res.destroy();

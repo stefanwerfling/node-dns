@@ -41,7 +41,33 @@ export {TLSA} from './Packet/Types/TLSA.js';
 
 // Server
 export {ServerOptions} from './Server/ServerOptions.js';
-export type {ServerRequestHandler} from './Server/ServerOptions.js';
+export type {
+    ServerRequestHandler,
+    ServerUdpOptions,
+    ServerTcpOptions,
+    ServerDohOptions
+} from './Server/ServerOptions.js';
+export type {ServerPreRequest, ServerPreRequestResult} from './Server/ServerPreRequest.js';
+export type {ServerPreConnection, ServerPreConnectionResult} from './Server/ServerPreConnection.js';
+export {
+    ProxyProtocolCommand,
+    ProxyProtocolFamily,
+    ProxyProtocolTransport
+} from './Server/ProxyProtocol/ProxyProtocolInfo.js';
+export type {
+    ProxyProtocolAddress,
+    ProxyProtocolInfo,
+    ProxyProtocolParseResult
+} from './Server/ProxyProtocol/ProxyProtocolInfo.js';
+export {ProxyProtocolV1} from './Server/ProxyProtocol/ProxyProtocolV1.js';
+export {ProxyProtocolV2} from './Server/ProxyProtocol/ProxyProtocolV2.js';
+export {ProxyProtocolV1Tcp} from './Server/ProxyProtocol/ProxyProtocolV1Tcp.js';
+export {ProxyProtocolV2Tcp} from './Server/ProxyProtocol/ProxyProtocolV2Tcp.js';
+export {ProxyProtocolTcpReader} from './Server/ProxyProtocol/ProxyProtocolTcpReader.js';
+export type {
+    ProxyProtocolBytesNeeded,
+    ProxyProtocolSocketReadResult
+} from './Server/ProxyProtocol/ProxyProtocolTcpReader.js';
 export {DnsServer} from './Server/DnsServer.js';
 export type {DnsServerAddresses, DnsServerListenOptions} from './Server/DnsServer.js';
 export {TCPServerEvents, TCPServer} from './Server/TCPServer.js';

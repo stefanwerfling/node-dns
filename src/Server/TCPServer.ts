@@ -3,6 +3,8 @@ import tcp from 'net';
 import {SocketReader} from '../Lib/SocketReader.js';
 import {Packet} from '../Packet/Packet.js';
 import {ServerOptions} from './ServerOptions.js';
+import {ServerPreConnection} from './ServerPreConnection.js';
+import {ServerPreRequest} from './ServerPreRequest.js';
 
 /**
  * TCP Server Events
@@ -13,8 +15,6 @@ export type TCPServerEvents = {
     listening: () => void;
     close: () => void;
 };
-
-export type TCPRequestPre = (data: Buffer) => Promise<Buffer>;
 
 /**
  * TCP Server
@@ -34,10 +34,16 @@ export class TCPServer {
     protected _options: ServerOptions|null = null;
 
     /**
-     * pre request, you can change buffer
+     * pre request processor, can modify the raw buffer and override the client socket reference
      * @protected
      */
-    protected _preRequest?: TCPRequestPre;
+    protected _preRequest?: ServerPreRequest<tcp.Socket>;
+
+    /**
+     * pre connection processor, runs once per accepted socket (e.g. PROXY protocol)
+     * @protected
+     */
+    protected _preConnection?: ServerPreConnection<tcp.Socket>;
 
     /**
      * Constructor
@@ -45,6 +51,16 @@ export class TCPServer {
      */
     public constructor(options: ServerOptions|null = null) {
         this._options = options;
+
+        if (options && typeof options.tcp === 'object') {
+            if (options.tcp.preRequest) {
+                this._preRequest = options.tcp.preRequest;
+            }
+
+            if (options.tcp.preConnection) {
+                this._preConnection = options.tcp.preConnection;
+            }
+        }
 
         this._tcpServer = tcp.createServer((socket) => {
             this._handle(socket).catch(err => {
@@ -97,15 +113,35 @@ export class TCPServer {
      */
     protected async _handle(client: tcp.Socket): Promise<void> {
         try {
-            let data = await SocketReader.readStream(client);
+            let emitClient = client;
+            let initialBuffer: Buffer|undefined;
+
+            if (this._preConnection) {
+                const pre = await this._preConnection.process(client);
+
+                if (pre.client) {
+                    emitClient = pre.client;
+                }
+
+                initialBuffer = pre.initialBuffer;
+            }
+
+            let data = await SocketReader.readStream(client, initialBuffer);
 
             if (this._preRequest) {
-                data = await this._preRequest(data);
+                const result = await this._preRequest.process(data, client);
+                data = result.data;
+
+                if (result.client) {
+                    emitClient = result.client;
+                }
             }
 
             const message = Packet.parse(data);
 
-            this._tcpServer.emit('request', message, this._response.bind(this, client), client);
+            // Response writes go to the real socket (transport peer), while the
+            // emitted client reference may be overridden by the pre-request processor.
+            this._tcpServer.emit('request', message, this._response.bind(this, client), emitClient);
         } catch (e) {
             this._tcpServer.emit('requestError', e instanceof Error ? e : new Error(String(e)));
             client.destroy();
@@ -133,14 +169,6 @@ export class TCPServer {
      */
     public address(): tcp.AddressInfo|string|null {
         return this._tcpServer.address();
-    }
-
-    /**
-     * Set the pre request, for change buffer
-     * @param {TCPRequestPre} preReq
-     */
-    public setPreRequest(preReq: TCPRequestPre): void {
-        this._preRequest = preReq;
     }
 
 }

@@ -9,6 +9,7 @@ export class DohServer extends EventEmitter {
     _server;
     _cors = true;
     _port = 8080;
+    _preRequest;
     constructor(options = null) {
         super();
         let soptions;
@@ -17,6 +18,9 @@ export class DohServer extends EventEmitter {
             soptions = dohOpts.options;
             if (dohOpts.cors !== undefined) {
                 this._cors = dohOpts.cors;
+            }
+            if (dohOpts.preRequest) {
+                this._preRequest = dohOpts.preRequest;
             }
         }
         if (soptions) {
@@ -96,8 +100,16 @@ export class DohServer extends EventEmitter {
                 res.end();
                 return;
             }
+            let emitClient = client;
+            if (this._preRequest) {
+                const result = await this._preRequest.process(queryData, client);
+                queryData = result.data;
+                if (result.client) {
+                    emitClient = result.client;
+                }
+            }
             const message = Packet.parse(queryData);
-            this.emit('request', message, this._response.bind(this, res), client);
+            this.emit('request', message, this._response.bind(this, res), emitClient);
         }
         catch (e) {
             this.emit('requestError', e);

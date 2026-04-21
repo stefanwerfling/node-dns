@@ -19,7 +19,8 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - Zero production dependencies
 - ESM module format (NodeNext)
 - DNS over UDP, TCP, TLS, and HTTPS (DoH)
-- 14 record types: A, AAAA, MX, NS, CNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS (with ECS), DNSKEY, RRSIG
+- 20 record types: A, AAAA, MX, NS, CNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS (with ECS), DNSKEY, DS, NAPTR, NSEC, NSEC3, RRSIG, SSHFP, TLSA
+- PROXY protocol v1 and v2 support (UDP per-datagram, TCP per-connection) for transparent load-balancer deployments
 
 <hr>
 
@@ -169,6 +170,69 @@ $ dig @127.0.0.1 -p5333 lsong.org
 
 Note that when implementing your own lookups, the contents of the query
 will be found in `request.questions[0].name`.
+
+### PROXY protocol support
+
+When the server sits behind a load balancer or proxy (HAProxy, AWS NLB, Envoy,
+…) the original client IP is normally hidden. Configure a PROXY protocol
+processor so each packet/connection gets its real source endpoint restored
+before your handler is invoked.
+
+- UDP uses a per-datagram `preRequest` processor.
+- TCP uses a per-connection `preConnection` processor (the header appears
+  once, before any DNS data).
+
+```ts
+import {
+  DnsServer,
+  ProxyProtocolV2,      // UDP, per datagram
+  ProxyProtocolV2Tcp    // TCP, once per connection
+} from 'dns2ts';
+
+const server = new DnsServer({
+  udp: { preRequest:    new ProxyProtocolV2() },
+  tcp: { preConnection: new ProxyProtocolV2Tcp() },
+  handle: (request, send, client) => {
+    // UDP: `client` is `dgram.RemoteInfo` with the real source address/port.
+    // TCP: `client` is the `net.Socket`; its `remoteAddress`/`remotePort`
+    // are shadowed with the proxied endpoint, so `client.remoteAddress`
+    // returns the real client IP (responses still flow through the proxy).
+    console.log('real client:', client);
+    send(Packet.createResponseFromRequest(request));
+  }
+});
+```
+
+Classes shipped:
+
+| Class                  | Transport | Interface                            |
+| ---------------------- | --------- | ------------------------------------ |
+| `ProxyProtocolV1`      | UDP       | `ServerPreRequest<dgram.RemoteInfo>` |
+| `ProxyProtocolV2`      | UDP       | `ServerPreRequest<dgram.RemoteInfo>` |
+| `ProxyProtocolV1Tcp`   | TCP       | `ServerPreConnection<net.Socket>`    |
+| `ProxyProtocolV2Tcp`   | TCP       | `ServerPreConnection<net.Socket>`    |
+
+Each v1/v2 class also exposes static `detect(buffer)`, `parse(buffer)` and
+`bytesNeeded(buffer)` for use outside of the server hooks.
+
+### Custom pre-request / pre-connection hooks
+
+The same hooks are generic — implement your own processor to strip custom
+framing, collect metrics or override the client reference. Interfaces are
+`ServerPreRequest<TClient>` (per message) and `ServerPreConnection<TClient>`
+(per TCP connection).
+
+```ts
+import {ServerPreRequest, ServerPreRequestResult} from 'dns2ts';
+import type {RemoteInfo} from 'dgram';
+
+class MyStripper implements ServerPreRequest<RemoteInfo> {
+  async process(data: Buffer, client: RemoteInfo): Promise<ServerPreRequestResult<RemoteInfo>> {
+    // strip a custom prefix, return modified buffer and/or overridden client
+    return { data: data.subarray(8), client: { ...client, address: 'real.ip' } };
+  }
+}
+```
 
 ### Build & Development
 

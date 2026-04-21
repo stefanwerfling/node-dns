@@ -4,11 +4,13 @@ import https from 'https';
 import { AddressInfo } from 'net';
 import { Packet } from '../Packet/Packet.js';
 import { ServerOptions } from './ServerOptions.js';
+import { ServerPreRequest } from './ServerPreRequest.js';
 export type DohServerUseCors = (origin: string | undefined) => Promise<boolean>;
 export declare class DohServer extends EventEmitter {
     protected _server: http.Server | https.Server;
     protected _cors: boolean | string | DohServerUseCors;
     protected _port: number;
+    protected _preRequest?: ServerPreRequest<http.IncomingMessage>;
     constructor(options?: ServerOptions | null);
     protected _handleRequest(client: http.IncomingMessage, res: http.ServerResponse): Promise<void>;
     protected _response(res: http.ServerResponse, message: Packet): void;

@@ -39,21 +39,23 @@ npm run example-server-tcp    # Start TCP DNS server
 
 ### Module Layout (src/)
 
-- **Lib/** — Low-level I/O: `BufferReader`/`BufferWriter` for bit-level DNS wire format parsing, `SocketReader` for TCP stream framing
+- **Lib/** — Low-level I/O: `BufferReader`/`BufferWriter` for bit-level DNS wire format parsing, `SocketReader` for TCP stream framing (accepts an optional `initialBuffer` so pre-consumed bytes can be fed in).
 - **Packet/** — DNS packet model (RFC 1035): header, question, resource record encoding/decoding, domain name compression, class/type enums
-- **Packet/Types/** — 14 record type implementations (A, AAAA, MX, NS, CNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS with ECS, DNSKEY, RRSIG), each extending abstract `PacketType`. Unknown types are handled gracefully via `UnknownPacketType`.
-- **Server/** — `UDPServer`, `TCPServer`, `DohServer` (individual protocol servers) and `DnsServer` (combined multi-protocol server). Shared config in `ServerOptions`.
+- **Packet/Types/** — 20 record type implementations (A, AAAA, MX, NS, CNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS with ECS, DNSKEY, DS, NAPTR, NSEC, NSEC3, RRSIG, SSHFP, TLSA), each extending abstract `PacketType`. Unknown types are handled gracefully via `UnknownPacketType`.
+- **Server/** — `UDPServer`, `TCPServer`, `DohServer` (individual protocol servers) and `DnsServer` (combined multi-protocol server). Shared config in `ServerOptions`. Two hook interfaces: `ServerPreRequest<TClient>` (per message, for all three transports) and `ServerPreConnection<TClient>` (per TCP connection).
+- **Server/ProxyProtocol/** — PROXY protocol v1 (text) and v2 (binary) implementations. `ProxyProtocolV1`/`V2` implement `ServerPreRequest<dgram.RemoteInfo>` for UDP; `ProxyProtocolV1Tcp`/`V2Tcp` implement `ServerPreConnection<net.Socket>` and override `remoteAddress`/`remotePort` via `Object.defineProperty`. `ProxyProtocolTcpReader` is the shared incremental socket-reading helper.
 - **Client/** — `UDPClient`, `TCPClient` (TCP + TLS), `DohClient` (http/https/h2), `GoogleClient` (Google JSON API). All expose a static `request()` method returning a `ClientRequest` resolver function.
 - **DNS.ts** — High-level resolver that tries multiple nameservers in parallel, supports all protocol types.
-- **Test/** — Test framework and test suite (20 tests covering packets, EDNS, servers, integration)
+- **Test/** — Test framework and test suite (43 tests covering packets, EDNS, record types, PROXY protocol parsers, servers, integration incl. TCP+PROXY end-to-end).
 - **index.ts** — Barrel re-export of all public API
 
 ### Key Patterns
 
-- **PacketTypeRegistry** is a singleton that maps DNS record type numbers to `PacketType` subclass instances. All 14 types are registered at first access.
+- **PacketTypeRegistry** is a singleton that maps DNS record type numbers to `PacketType` subclass instances. All 20 types are registered at first access.
 - **Buffer operations** work at the bit level — `BufferReader`/`BufferWriter` use bit arrays (0/1 values) for flexible sub-byte field parsing (DNS header flags, etc.). When using `BufferWriter.writeBuffer()`, pass a `Buffer` (bytes→bits conversion) or another `BufferWriter` (bit array copy).
 - **TCP framing** uses 2-byte length prefix per message, handled by `SocketReader`.
 - **Servers** emit `request` events with parsed `Packet` objects and a send callback. `DnsServer` combines multiple protocol servers and forwards all events.
+- **Pre-hooks** — `preRequest` (per-message) and `preConnection` (TCP-only, per-connection) are configured via `ServerOptions.udp|tcp|doh`. Both can return a `client` override that the server emits in place of the original. For TCP `preConnection`, the server passes the returned `initialBuffer` (any bytes read past the PROXY header) to `SocketReader.readStream` so DNS framing continues seamlessly. Responses always go back to the true transport peer; only the emitted client reference is swapped.
 - **Clients** follow a factory pattern: `XClient.request(options)` returns an async resolver function `(name, type, cls, options?) => Promise<Packet>`.
 
 ### TypeScript / Module Config
