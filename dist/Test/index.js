@@ -28,6 +28,8 @@ import { NAPTR } from '../Packet/Types/NAPTR.js';
 import { NSEC } from '../Packet/Types/NSEC.js';
 import { NSEC3 } from '../Packet/Types/NSEC3.js';
 import { SSHFP } from '../Packet/Types/SSHFP.js';
+import { SVCB } from '../Packet/Types/SVCB.js';
+import { HTTPS } from '../Packet/Types/HTTPS.js';
 import { TLSA } from '../Packet/Types/TLSA.js';
 import { DnsServer } from '../Server/DnsServer.js';
 import { DohServer } from '../Server/DohServer.js';
@@ -295,6 +297,87 @@ test('NSEC3#encode+decode', () => {
     assert.equal(nsec3.salt, 'aabb');
     assert.equal(nsec3.nextHashedOwner, 'deadbeef');
     assert.deepEqual(nsec3.rdtypes, [PacketTypes.A, PacketTypes.AAAA]);
+});
+test('SVCB#AliasMode roundtrip', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('example.com', new SVCB(0, 'svc.example.net', {}), PacketClass.IN, 300));
+    const parsed = Packet.parse(packet.toBuffer());
+    const svcb = parsed.answers[0].packetType;
+    assert.equal(svcb.priority, 0);
+    assert.equal(svcb.target, 'svc.example.net');
+    assert.deepEqual(svcb.params, {});
+});
+test('SVCB#ServiceMode with alpn/port/hints', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('example.com', new SVCB(1, '.', {
+        alpn: ['h2', 'h3'],
+        port: 8443,
+        ipv4hint: ['192.0.2.1', '192.0.2.2'],
+        ipv6hint: ['2001:db8::1']
+    }), PacketClass.IN, 300));
+    const parsed = Packet.parse(packet.toBuffer());
+    const svcb = parsed.answers[0].packetType;
+    assert.equal(svcb.priority, 1);
+    assert.equal(svcb.target, '');
+    assert.deepEqual(svcb.params.alpn, ['h2', 'h3']);
+    assert.equal(svcb.params.port, 8443);
+    assert.deepEqual(svcb.params.ipv4hint, ['192.0.2.1', '192.0.2.2']);
+    assert.deepEqual(svcb.params.ipv6hint, ['2001:db8::1']);
+});
+test('SVCB#mandatory + noDefaultAlpn + dohpath + ech', () => {
+    const ech = Buffer.from([0xAA, 0xBB, 0xCC, 0xDD]);
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('doh.example.com', new SVCB(5, 'doh-target.example.net', {
+        mandatory: [1, 3],
+        alpn: ['h2'],
+        noDefaultAlpn: true,
+        dohpath: '/dns-query{?dns}',
+        ech: ech
+    }), PacketClass.IN, 300));
+    const parsed = Packet.parse(packet.toBuffer());
+    const svcb = parsed.answers[0].packetType;
+    assert.deepEqual(svcb.params.mandatory, [1, 3]);
+    assert.deepEqual(svcb.params.alpn, ['h2']);
+    assert.equal(svcb.params.noDefaultAlpn, true);
+    assert.equal(svcb.params.dohpath, '/dns-query{?dns}');
+    assert.deepEqual(svcb.params.ech, ech);
+});
+test('SVCB#unknown SvcParam roundtrips', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('example.com', new SVCB(1, '.', {
+        unknown: [{ key: 99, value: Buffer.from([0x01, 0x02, 0x03]) }]
+    }), PacketClass.IN, 300));
+    const parsed = Packet.parse(packet.toBuffer());
+    const svcb = parsed.answers[0].packetType;
+    assert.equal(svcb.params.unknown?.length, 1);
+    assert.equal(svcb.params.unknown?.[0].key, 99);
+    assert.deepEqual(svcb.params.unknown?.[0].value, Buffer.from([0x01, 0x02, 0x03]));
+});
+test('SVCB#params are sorted on encode', () => {
+    const svcb = new SVCB(1, '.', {
+        port: 443,
+        alpn: ['h2']
+    });
+    const rdata = svcb.encode({}).subarray(2);
+    assert.equal(rdata.readUInt16BE(3), 1);
+});
+test('HTTPS#record has correct type code', () => {
+    const https = new HTTPS(1, 'www.example.com', { alpn: ['h3'] });
+    assert.equal(https.type, PacketTypes.HTTPS);
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('example.com', https, PacketClass.IN, 300));
+    const parsed = Packet.parse(packet.toBuffer());
+    assert.equal(parsed.answers[0].packetType.type, PacketTypes.HTTPS);
+    const dec = parsed.answers[0].packetType;
+    assert.ok(dec instanceof HTTPS);
+    assert.equal(dec.priority, 1);
+    assert.equal(dec.target, 'www.example.com');
+    assert.deepEqual(dec.params.alpn, ['h3']);
 });
 test('TLSA#encode+decode', () => {
     const packet = new Packet();

@@ -26,6 +26,8 @@ export declare enum PacketTypes {
     DNSKEY = 48,
     NSEC3 = 50,
     TLSA = 52,
+    SVCB = 64,
+    HTTPS = 65,
     SPF = 99,
     AXFR = 252,
     MAILB = 253,

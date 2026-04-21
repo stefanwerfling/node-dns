@@ -31,6 +31,8 @@ export { NSEC } from './Packet/Types/NSEC.js';
 export { NSEC3 } from './Packet/Types/NSEC3.js';
 export { RRSIG } from './Packet/Types/RRSIG.js';
 export { SSHFP } from './Packet/Types/SSHFP.js';
+export { SVCB, SvcParamKey } from './Packet/Types/SVCB.js';
+export { HTTPS } from './Packet/Types/HTTPS.js';
 export { TLSA } from './Packet/Types/TLSA.js';
 export { ProxyProtocolCommand, ProxyProtocolFamily, ProxyProtocolTransport } from './Server/ProxyProtocol/ProxyProtocolInfo.js';
 export { ProxyProtocolV1 } from './Server/ProxyProtocol/ProxyProtocolV1.js';

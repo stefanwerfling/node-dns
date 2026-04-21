@@ -19,7 +19,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - Zero production dependencies
 - ESM module format (NodeNext)
 - DNS over UDP, TCP, TLS, and HTTPS (DoH)
-- 20 record types: A, AAAA, MX, NS, CNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS (with ECS), DNSKEY, DS, NAPTR, NSEC, NSEC3, RRSIG, SSHFP, TLSA
+- 22 record types: A, AAAA, MX, NS, CNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS (with ECS), DNSKEY, DS, NAPTR, NSEC, NSEC3, RRSIG, SSHFP, TLSA, SVCB, HTTPS (RFC 9460)
 - PROXY protocol v1 and v2 support (UDP per-datagram, TCP per-connection) for transparent load-balancer deployments
 
 <hr>
@@ -253,6 +253,7 @@ npm run lint      # ESLint check
 + [RFC-7766 - DNS Transport over TCP - Implementation Requirements](https://tools.ietf.org/html/rfc7766)
 + [RFC-7871 - Client Subnet in DNS Queries](https://tools.ietf.org/html/rfc7871)
 + [RFC-8484 - DNS Queries over HTTPS (DoH)](https://tools.ietf.org/html/rfc8484)
++ [RFC-9460 - Service Binding and Parameter Specification via the DNS (SVCB, HTTPS)](https://datatracker.ietf.org/doc/html/rfc9460)
 
 ### Contributing
 
