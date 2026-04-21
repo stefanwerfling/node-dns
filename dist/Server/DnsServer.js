@@ -17,23 +17,23 @@ export class DnsServer extends EventEmitter {
             this._doh.on('error', (error) => this.emit('error', error, 'doh'));
             this._doh.on('request', (request, send, client) => this.emit('request', request, send, client));
             this._doh.on('requestError', (error) => this.emit('requestError', error));
-            closePromises.push(new Promise((resolve) => this._doh.on('close', resolve)));
-            listenPromises.push(new Promise((resolve) => this._doh.on('listening', resolve)));
+            closePromises.push(new Promise((resolve) => { this._doh.on('close', resolve); }));
+            listenPromises.push(new Promise((resolve) => { this._doh.on('listening', resolve); }));
         }
         if (options.tcp) {
             this._tcp = new TCPServer(options);
             this._tcp.on('requestError', (error) => this.emit('error', error, 'tcp'));
             this._tcp.on('request', (request, send, client) => this.emit('request', request, send, client));
-            closePromises.push(new Promise((resolve) => this._tcp.once('close', resolve)));
-            listenPromises.push(new Promise((resolve) => this._tcp.once('listening', resolve)));
+            closePromises.push(new Promise((resolve) => { this._tcp.once('close', resolve); }));
+            listenPromises.push(new Promise((resolve) => { this._tcp.once('listening', resolve); }));
         }
         if (options.udp) {
             const udpOptions = typeof options.udp === 'object' ? options : null;
             this._udp = new UDPServer(udpOptions);
             this._udp.on('requestError', (error) => this.emit('requestError', error));
             this._udp.on('request', (request, send, rinfo) => this.emit('request', request, send, rinfo));
-            closePromises.push(new Promise((resolve) => this._udp.once('close', resolve)));
-            listenPromises.push(new Promise((resolve) => this._udp.once('listening', resolve)));
+            closePromises.push(new Promise((resolve) => { this._udp.once('close', resolve); }));
+            listenPromises.push(new Promise((resolve) => { this._udp.once('listening', resolve); }));
         }
         this._closed = Promise.all(closePromises).then(() => {
             this.emit('close');

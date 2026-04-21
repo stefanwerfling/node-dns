@@ -6,7 +6,7 @@ export type ServerOptions = {
     udp?: boolean | {
         type?: 'udp4' | 'udp6';
     };
-    tcp?: boolean | {};
+    tcp?: boolean | object;
     doh?: boolean | {
         ssl?: boolean;
         options?: https.ServerOptions;

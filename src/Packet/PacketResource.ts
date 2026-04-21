@@ -6,35 +6,9 @@ import {PacketClass} from './PacketClass.js';
 import {PacketName} from './PacketName.js';
 import {PacketType} from './PacketType.js';
 import {PacketTypeRegistry} from './PacketTypeRegistry.js';
-import {PacketTypes} from './PacketTypes.js';
+import {UnknownPacketType} from './Types/UnknownPacketType.js';
 
 const debug = debuglog('dns2');
-
-/**
- * Unknown Packet Type - for unregistered record types
- */
-export class UnknownPacketType extends PacketType {
-
-    public data: Buffer;
-
-    public constructor(type: PacketTypes|number, data: Buffer = Buffer.alloc(0)) {
-        super(type);
-        this.data = data;
-    }
-
-    public encode(_resource: PacketResource, writer: BufferWriter|null = null): Buffer {
-        const twriter = writer === null ? new BufferWriter() : writer;
-
-        twriter.write(this.data.length, 16);
-
-        for (const byte of this.data) {
-            twriter.write(byte, 8);
-        }
-
-        return twriter.toBuffer();
-    }
-
-}
 
 /**
  * Resource record format

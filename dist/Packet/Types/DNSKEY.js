@@ -38,12 +38,12 @@ export class DNSKEY extends PacketType {
             rdata.push(reader.read(8));
         }
         const dnskey = new DNSKEY();
-        dnskey.flags = rdata[0] << 8 | rdata[1];
+        dnskey.flags = (rdata[0] << 8) | rdata[1];
         dnskey.protocol = rdata[2];
         dnskey.algorithm = rdata[3];
         let ac = 0;
         for (let i = 0; i < length; ++i) {
-            ac += (i & 1) ? rdata[i] : rdata[i] << 8;
+            ac += i & 1 ? rdata[i] : rdata[i] << 8;
         }
         ac += (ac >> 16) & 0xFFFF;
         dnskey.keyTag = ac & 0xFFFF;

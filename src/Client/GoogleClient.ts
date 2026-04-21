@@ -12,9 +12,9 @@ export type GoogleDnsResponse = {
     RA: boolean;
     AD: boolean;
     CD: boolean;
-    Question: {name: string; type: number}[];
-    Answer?: {name: string; type: number; TTL: number; data: string}[];
-    Authority?: {name: string; type: number; TTL: number; data: string}[];
+    Question: {name: string; type: number;}[];
+    Answer?: {name: string; type: number; TTL: number; data: string;}[];
+    Authority?: {name: string; type: number; TTL: number; data: string;}[];
 };
 
 /**

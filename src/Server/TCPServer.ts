@@ -1,5 +1,4 @@
 import {Buffer} from 'buffer';
-import dgram from 'dgram';
 import tcp from 'net';
 import {SocketReader} from '../Lib/SocketReader.js';
 import {Packet} from '../Packet/Packet.js';

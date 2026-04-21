@@ -83,7 +83,7 @@ export class TCPClient extends AClient {
             port = option.port;
         }
 
-        return async (name, type, cls, options): Promise<Packet> => {
+        return async(name, type, cls, options): Promise<Packet> => {
             let clientIp: string|null = null;
             let recursive: boolean = true;
 

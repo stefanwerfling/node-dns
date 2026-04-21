@@ -62,13 +62,13 @@ export class RRSIG extends PacketType {
         // Calculate max offset in bits
         const maxOffset = reader.getOffset() + (length * 8);
 
-        rrsig.sigType = reader.read(16);       // 2 octets
-        rrsig.algorithm = reader.read(8);      // 1 octet
-        rrsig.labels = reader.read(8);         // 1 octet
-        rrsig.originalTtl = reader.read(32);   // 4 octets
-        rrsig.expiration = RRSIG._dateForSig(reader.read(32));  // 4 octets
-        rrsig.inception = RRSIG._dateForSig(reader.read(32));   // 4 octets
-        rrsig.keyTag = reader.read(16);        // 2 octets
+        rrsig.sigType = reader.read(16);
+        rrsig.algorithm = reader.read(8);
+        rrsig.labels = reader.read(8);
+        rrsig.originalTtl = reader.read(32);
+        rrsig.expiration = RRSIG._dateForSig(reader.read(32));
+        rrsig.inception = RRSIG._dateForSig(reader.read(32));
+        rrsig.keyTag = reader.read(16);
         rrsig.signer = PacketName.decode(reader);
 
         const maxLength = (maxOffset - reader.getOffset()) / 8;

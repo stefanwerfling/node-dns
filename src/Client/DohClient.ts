@@ -92,7 +92,7 @@ export class DohClient extends AClient {
 
                     const response: HttpResponse = {
                         statusCode: headers[':status'],
-                        on(event: string, cb: (...args: unknown[]) => void): HttpResponse {
+                        on: (event: string, cb: (...args: unknown[]) => void): HttpResponse => {
                             req.on(event, cb);
                             return response;
                         }

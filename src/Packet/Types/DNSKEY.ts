@@ -74,8 +74,8 @@ export class DNSKEY extends PacketType {
 
         const dnskey = new DNSKEY();
 
-        // eslint-disable-next-line no-bitwise
-        dnskey.flags = rdata[0] << 8 | rdata[1];
+        // eslint-disable-next-line no-bitwise, no-mixed-operators
+        dnskey.flags = (rdata[0] << 8) | rdata[1];
         dnskey.protocol = rdata[2];
         dnskey.algorithm = rdata[3];
 
@@ -84,7 +84,7 @@ export class DNSKEY extends PacketType {
 
         for (let i = 0; i < length; ++i) {
             // eslint-disable-next-line no-bitwise
-            ac += (i & 1) ? rdata[i] : rdata[i] << 8;
+            ac += i & 1 ? rdata[i] : rdata[i] << 8;
         }
 
         // eslint-disable-next-line no-bitwise

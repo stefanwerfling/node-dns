@@ -295,14 +295,14 @@ test('server/udp-tcp#simple-request-async-response', async () => {
     const server = new DnsServer({
         tcp: true,
         udp: true,
-        handle(request, send) {
+        handle: (request, send) => {
             const [question] = request.questions;
             assert.equal(question.name, 'test.com');
             assert.equal(question.type, PacketTypes.A);
             assert.equal(question.class, PacketClass.IN);
             const pResponse = Packet.createResponseFromRequest(request);
             pResponse.answers.push(new PacketResource(question.name, new TXT('Hello World'), PacketClass.IN, 300));
-            void new Promise((resolve) => setTimeout(() => resolve(), 1)).then(() => send(pResponse));
+            new Promise((resolve) => { setTimeout(() => { resolve(); }, 1); }).then(() => send(pResponse));
         },
     });
     const servers = await server.listen();
@@ -349,9 +349,9 @@ test('server/all#invalid-request', async () => {
         headers: { accept: 'application/dns-message' },
     }).on('error', () => { });
     await Promise.all([
-        new Promise((resolve) => tcpSocket.on('close', resolve)),
-        new Promise((resolve) => udpSocket.on('close', resolve)),
-        new Promise((resolve) => dohConn.on('close', resolve)),
+        new Promise((resolve) => { tcpSocket.on('close', resolve); }),
+        new Promise((resolve) => { udpSocket.on('close', resolve); }),
+        new Promise((resolve) => { dohConn.on('close', resolve); }),
     ]);
     assert.equal(errors.length, 3);
     await server.close();

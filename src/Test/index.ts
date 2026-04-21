@@ -1,8 +1,7 @@
 import assert from 'assert';
 import http from 'http';
-import tcp from 'net';
+import tcp, {AddressInfo} from 'net';
 import dgram from 'dgram';
-import {AddressInfo} from 'net';
 import {test} from './test.js';
 import {BufferReader} from '../Lib/BufferReader.js';
 import {IP} from '../Packet/IP.js';
@@ -110,7 +109,8 @@ test('Package#toIPv6', () => {
 
 test('Package#fromIPv6', () => {
     assert.deepEqual(IP.fromIPv6('2a04:4e42:200::323'), [
-        '2a04', '4e42', '0200', '0', '0', '0', '0', '0323']);
+        '2a04', '4e42', '0200', '0', '0', '0', '0', '0323'
+    ]);
     assert.deepEqual(IP.fromIPv6('2a03:b0c0:3:d0::13c1:f001'), ['2a03', 'b0c0', '0003', '00d0', '0', '0', '13c1', 'f001']);
     assert.deepEqual(IP.fromIPv6('2a00:1450:4003:807::200e'), ['2a00', '1450', '4003', '0807', '0', '0', '0', '200e']);
     assert.deepEqual(IP.fromIPv6('2606:4700:3108::ac42:2ae8'), ['2606', '4700', '3108', '0', '0', '0', 'ac42', '2ae8']);
@@ -263,7 +263,7 @@ test('EDNS#decode multiple', () => {
 
 // -- HTTP helper --
 
-const get = (url: string, options?: http.RequestOptions): Promise<{body: Buffer; headers: http.IncomingHttpHeaders}> => {
+const get = (url: string, options?: http.RequestOptions): Promise<{body: Buffer; headers: http.IncomingHttpHeaders;}> => {
     return new Promise((resolve, reject) => {
         try {
             const req = http.get(url, options || {}, (res) => {
@@ -356,7 +356,7 @@ test('server/udp-tcp#simple-request-async-response', async() => {
     const server = new DnsServer({
         tcp: true,
         udp: true,
-        handle(request, send): void {
+        handle: (request, send): void => {
             const [question] = request.questions;
             assert.equal(question.name, 'test.com');
             assert.equal(question.type, PacketTypes.A);
@@ -367,7 +367,7 @@ test('server/udp-tcp#simple-request-async-response', async() => {
                 new PacketResource(question.name, new TXT('Hello World'), PacketClass.IN, 300)
             );
 
-            void new Promise<void>((resolve) => setTimeout(() => resolve(), 1)).then(() => send(pResponse));
+            new Promise<void>((resolve) => { setTimeout(() => { resolve(); }, 1); }).then(() => send(pResponse));
         },
     });
 
@@ -396,6 +396,7 @@ test('server/all#invalid-request', async() => {
         doh: true,
         tcp: true,
         udp: true,
+        // eslint-disable-next-line @typescript-eslint/no-empty-function
         handle: (): void => {},
     });
 
@@ -426,12 +427,13 @@ test('server/all#invalid-request', async() => {
 
     const dohConn = http.get(`http://127.0.0.1:${dohPort}/dns-query?dns=INVALID`, {
         headers: {accept: 'application/dns-message'},
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
     }).on('error', () => {});
 
     await Promise.all([
-        new Promise<void>((resolve) => tcpSocket.on('close', resolve)),
-        new Promise<void>((resolve) => udpSocket.on('close', resolve)),
-        new Promise<void>((resolve) => dohConn.on('close', resolve)),
+        new Promise<void>((resolve) => { tcpSocket.on('close', resolve); }),
+        new Promise<void>((resolve) => { udpSocket.on('close', resolve); }),
+        new Promise<void>((resolve) => { dohConn.on('close', resolve); }),
     ]);
 
     assert.equal(errors.length, 3);

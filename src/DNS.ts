@@ -127,12 +127,14 @@ export class DNS extends EventEmitter {
      * @param {[ClientRequestOptions]} options
      * @return {Packet}
      */
+    /* eslint-disable default-param-last */
     public async resolve(
         domain: string,
         type: PacketTypes = PacketTypes.ANY,
         cls: PacketClass = PacketClass.IN,
         options?: ClientRequestOptions
     ): Promise<Packet> {
+        /* eslint-enable default-param-last */
         const port = this.port;
         const nameServers = this.nameServers;
         const createResolver = this._getResolver(this.resolverProtocol);

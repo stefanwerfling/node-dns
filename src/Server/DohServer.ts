@@ -187,7 +187,8 @@ export class DohServer extends EventEmitter {
      * @param {[string]} address
      */
     public listen(port?: number, address?: string): void {
-        this._server.listen(port !== undefined ? port : this._port, address);
+        const listenPort = port === undefined ? this._port : port;
+        this._server.listen(listenPort, address);
     }
 
     /**

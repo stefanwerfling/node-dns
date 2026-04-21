@@ -111,7 +111,8 @@ export class DohServer extends EventEmitter {
         res.end(message.toBuffer());
     }
     listen(port, address) {
-        this._server.listen(port !== undefined ? port : this._port, address);
+        const listenPort = port === undefined ? this._port : port;
+        this._server.listen(listenPort, address);
     }
     address() {
         return this._server.address();

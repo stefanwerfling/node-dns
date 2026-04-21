@@ -40,7 +40,7 @@ export class DohClient extends AClient {
                     client.close();
                     const response = {
                         statusCode: headers[':status'],
-                        on(event, cb) {
+                        on: (event, cb) => {
                             req.on(event, cb);
                             return response;
                         }

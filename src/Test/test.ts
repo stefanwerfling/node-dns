@@ -18,7 +18,7 @@ export const test = (title: string, fn: () => void | Promise<void>): Promise<voi
             await fn();
             console.log(color(` ✔  ${title}`, 32));
         } catch (err: unknown) {
-            const error = err as Error & {expected?: unknown; actual?: unknown};
+            const error = err as Error & {expected?: unknown; actual?: unknown;};
 
             console.error(color(` ✘  ${title}`, 31));
             console.log();
