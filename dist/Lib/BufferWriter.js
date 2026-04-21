@@ -1,6 +1,7 @@
 import { Buffer } from 'buffer';
 export class BufferWriter {
     _buffer = [];
+    _nameOffsets = new Map();
     write(d, size) {
         for (let i = 0; i < size; i++) {
             this._buffer.push(d & 2 ** (size - i - 1) ? 1 : 0);
@@ -15,6 +16,15 @@ export class BufferWriter {
                 this.write(byte, 8);
             }
         }
+    }
+    getByteOffset() {
+        return this._buffer.length / 8;
+    }
+    getNameOffset(name) {
+        return this._nameOffsets.get(name);
+    }
+    setNameOffset(name, offset) {
+        this._nameOffsets.set(name, offset);
     }
     toBuffer() {
         const arr = [];
