@@ -23,6 +23,12 @@ import {NS} from '../Packet/Types/NS.js';
 import {PTR} from '../Packet/Types/PTR.js';
 import {SOA} from '../Packet/Types/SOA.js';
 import {TXT} from '../Packet/Types/TXT.js';
+import {DS} from '../Packet/Types/DS.js';
+import {NAPTR} from '../Packet/Types/NAPTR.js';
+import {NSEC} from '../Packet/Types/NSEC.js';
+import {NSEC3} from '../Packet/Types/NSEC3.js';
+import {SSHFP} from '../Packet/Types/SSHFP.js';
+import {TLSA} from '../Packet/Types/TLSA.js';
 import {DnsServer} from '../Server/DnsServer.js';
 import {DohServer} from '../Server/DohServer.js';
 import {TCPClient} from '../Client/TCPClient.js';
@@ -282,6 +288,111 @@ test('EDNS#decode multiple', () => {
     assert.equal((decodedEdns.rdata[2] as EdnsECS).ip, '10.9.8.0');
     assert.equal((decodedEdns.rdata[3] as EdnsECS).ip, '10.9.8.7');
     assert.equal((decodedEdns.rdata[3] as EdnsECS).sourcePrefixLength, 32);
+});
+
+// -- New record type roundtrip tests --
+
+test('NAPTR#encode+decode', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource(
+        'example.com',
+        new NAPTR(100, 10, 'u', 'E2U+sip', '!^.*$!sip:info@example.com!', ''),
+        PacketClass.IN, 300
+    ));
+
+    const parsed = Packet.parse(packet.toBuffer());
+    const naptr = parsed.answers[0].packetType as NAPTR;
+    assert.equal(naptr.order, 100);
+    assert.equal(naptr.preference, 10);
+    assert.equal(naptr.flags, 'u');
+    assert.equal(naptr.services, 'E2U+sip');
+    assert.equal(naptr.regexp, '!^.*$!sip:info@example.com!');
+    assert.equal(naptr.replacement, '');
+});
+
+test('DS#encode+decode', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource(
+        'example.com',
+        new DS(12345, 8, 2, 'aabbccdd0011223344556677'),
+        PacketClass.IN, 300
+    ));
+
+    const parsed = Packet.parse(packet.toBuffer());
+    const ds = parsed.answers[0].packetType as DS;
+    assert.equal(ds.keyTag, 12345);
+    assert.equal(ds.algorithm, 8);
+    assert.equal(ds.digestType, 2);
+    assert.equal(ds.digest, 'aabbccdd0011223344556677');
+});
+
+test('SSHFP#encode+decode', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource(
+        'host.example.com',
+        new SSHFP(1, 1, 'bf6b6825d2977c511a475bbefb88aad54a92ac73'),
+        PacketClass.IN, 300
+    ));
+
+    const parsed = Packet.parse(packet.toBuffer());
+    const sshfp = parsed.answers[0].packetType as SSHFP;
+    assert.equal(sshfp.algorithm, 1);
+    assert.equal(sshfp.fpType, 1);
+    assert.equal(sshfp.fingerprint, 'bf6b6825d2977c511a475bbefb88aad54a92ac73');
+});
+
+test('NSEC#encode+decode', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource(
+        'example.com',
+        new NSEC('next.example.com', [PacketTypes.A, PacketTypes.MX, PacketTypes.RRSIG, PacketTypes.NSEC]),
+        PacketClass.IN, 300
+    ));
+
+    const parsed = Packet.parse(packet.toBuffer());
+    const nsec = parsed.answers[0].packetType as NSEC;
+    assert.equal(nsec.nextDomain, 'next.example.com');
+    assert.deepEqual(nsec.rdtypes, [PacketTypes.A, PacketTypes.MX, PacketTypes.RRSIG, PacketTypes.NSEC]);
+});
+
+test('NSEC3#encode+decode', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource(
+        'example.com',
+        new NSEC3(1, 0, 10, 'aabb', 'deadbeef', [PacketTypes.A, PacketTypes.AAAA]),
+        PacketClass.IN, 300
+    ));
+
+    const parsed = Packet.parse(packet.toBuffer());
+    const nsec3 = parsed.answers[0].packetType as NSEC3;
+    assert.equal(nsec3.hashAlgorithm, 1);
+    assert.equal(nsec3.flags, 0);
+    assert.equal(nsec3.iterations, 10);
+    assert.equal(nsec3.salt, 'aabb');
+    assert.equal(nsec3.nextHashedOwner, 'deadbeef');
+    assert.deepEqual(nsec3.rdtypes, [PacketTypes.A, PacketTypes.AAAA]);
+});
+
+test('TLSA#encode+decode', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource(
+        '_443._tcp.example.com',
+        new TLSA(3, 1, 1, 'aabbccddee0011223344556677889900'),
+        PacketClass.IN, 300
+    ));
+
+    const parsed = Packet.parse(packet.toBuffer());
+    const tlsa = parsed.answers[0].packetType as TLSA;
+    assert.equal(tlsa.usage, 3);
+    assert.equal(tlsa.selector, 1);
+    assert.equal(tlsa.matchingType, 1);
+    assert.equal(tlsa.certificate, 'aabbccddee0011223344556677889900');
 });
 
 // -- HTTP helper --

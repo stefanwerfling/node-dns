@@ -31,7 +31,13 @@ export {CAA} from './Packet/Types/CAA.js';
 export {EDNS, EdnsOptionCode, EdnsECS} from './Packet/Types/EDNS.js';
 export type {EdnsOption} from './Packet/Types/EDNS.js';
 export {DNSKEY} from './Packet/Types/DNSKEY.js';
+export {DS} from './Packet/Types/DS.js';
+export {NAPTR} from './Packet/Types/NAPTR.js';
+export {NSEC} from './Packet/Types/NSEC.js';
+export {NSEC3} from './Packet/Types/NSEC3.js';
 export {RRSIG} from './Packet/Types/RRSIG.js';
+export {SSHFP} from './Packet/Types/SSHFP.js';
+export {TLSA} from './Packet/Types/TLSA.js';
 
 // Server
 export {ServerOptions} from './Server/ServerOptions.js';

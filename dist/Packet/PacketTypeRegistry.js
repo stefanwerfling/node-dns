@@ -4,14 +4,20 @@ import { AAAA } from './Types/AAAA.js';
 import { CAA } from './Types/CAA.js';
 import { CNAME } from './Types/CNAME.js';
 import { DNSKEY } from './Types/DNSKEY.js';
+import { DS } from './Types/DS.js';
 import { EDNS } from './Types/EDNS.js';
 import { MX } from './Types/MX.js';
+import { NAPTR } from './Types/NAPTR.js';
 import { NS } from './Types/NS.js';
+import { NSEC } from './Types/NSEC.js';
+import { NSEC3 } from './Types/NSEC3.js';
 import { PTR } from './Types/PTR.js';
 import { RRSIG } from './Types/RRSIG.js';
 import { SOA } from './Types/SOA.js';
 import { SPF } from './Types/SPF.js';
 import { SRV } from './Types/SRV.js';
+import { SSHFP } from './Types/SSHFP.js';
+import { TLSA } from './Types/TLSA.js';
 import { TXT } from './Types/TXT.js';
 export class PacketTypeRegistry {
     static _instance = null;
@@ -28,9 +34,15 @@ export class PacketTypeRegistry {
             PacketTypeRegistry._instance.registerPacket(PacketTypes.SPF, SPF);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.SOA, SOA);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.SRV, SRV);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.NAPTR, NAPTR);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.EDNS, EDNS);
-            PacketTypeRegistry._instance.registerPacket(PacketTypes.DNSKEY, DNSKEY);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.DS, DS);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.SSHFP, SSHFP);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.RRSIG, RRSIG);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.NSEC, NSEC);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.DNSKEY, DNSKEY);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.NSEC3, NSEC3);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.TLSA, TLSA);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.CAA, CAA);
         }
         return PacketTypeRegistry._instance;
