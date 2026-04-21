@@ -974,6 +974,86 @@ test('server/tcp#proxy-protocol-v1', async() => {
     await server.close();
 });
 
+test('client/udp#tcp-fallback-on-truncation', async() => {
+    let udpHits = 0;
+    let tcpHits = 0;
+
+    const server = new DnsServer({
+        udp: true,
+        tcp: true,
+        handle: (request, send, client): void => {
+            const pResponse = Packet.createResponseFromRequest(request);
+
+            if (client instanceof tcp.Socket) {
+                tcpHits++;
+                pResponse.answers.push(new PacketResource(
+                    request.questions[0].name, new A('9.9.9.9'), PacketClass.IN, 300
+                ));
+                send(pResponse);
+            } else {
+                udpHits++;
+                // Signal truncation with no answers; client must retry via TCP.
+                pResponse.header.tc = 1;
+                send(pResponse);
+            }
+        },
+    });
+
+    const addresses = await server.listen();
+    const udpPort = addresses.udp!.port;
+    const tcpPort = (addresses.tcp as AddressInfo).port;
+
+    const resolve = UDPClient.request({
+        dns: '127.0.0.1',
+        port: udpPort,
+        tcpFallbackPort: tcpPort
+    });
+    const result = await resolve('fallback.test', PacketTypes.A, PacketClass.IN);
+
+    assert.equal(udpHits, 1);
+    assert.equal(tcpHits, 1);
+    assert.equal(result.header.tc, 0);
+    assert.equal(result.answers.length, 1);
+    assert.equal((result.answers[0].packetType as A).address, '9.9.9.9');
+
+    await server.close();
+});
+
+test('client/udp#tcp-fallback-disabled returns truncated', async() => {
+    const server = new DnsServer({
+        udp: true,
+        tcp: true,
+        handle: (request, send, client): void => {
+            const pResponse = Packet.createResponseFromRequest(request);
+
+            if (client instanceof tcp.Socket) {
+                // Shouldn't be reached when fallback is off.
+                send(pResponse);
+            } else {
+                pResponse.header.tc = 1;
+                send(pResponse);
+            }
+        },
+    });
+
+    const addresses = await server.listen();
+    const udpPort = addresses.udp!.port;
+    const tcpPort = (addresses.tcp as AddressInfo).port;
+
+    const resolve = UDPClient.request({
+        dns: '127.0.0.1',
+        port: udpPort,
+        tcpFallbackPort: tcpPort,
+        tcpFallback: false
+    });
+    const result = await resolve('fallback.test', PacketTypes.A, PacketClass.IN);
+
+    assert.equal(result.header.tc, 1);
+    assert.equal(result.answers.length, 0);
+
+    await server.close();
+});
+
 test('server/all#invalid-request', async() => {
     const server = new DnsServer({
         doh: true,

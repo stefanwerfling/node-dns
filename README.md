@@ -67,6 +67,20 @@ const response = await resolve('google.com', PacketTypes.A, PacketClass.IN);
 console.log(response.answers);
 ```
 
+When the UDP server sets the TC (truncation) bit in the response header, the
+`UDPClient` automatically retries the same query over TCP against the same
+nameserver (RFC 7766 §8). This is on by default; opt out with
+`tcpFallback: false`, override the port with `tcpFallbackPort`:
+
+```ts
+UDPClient.request({
+  dns: '1.1.1.1',
+  port: 53,
+  tcpFallback: true,       // default
+  tcpFallbackPort: 53      // default: same as UDP port
+});
+```
+
 ### DNS Client (TCP)
 
 ```ts
@@ -250,7 +264,7 @@ npm run lint      # ESLint check
 + [RFC-2782 - A DNS RR for specifying the location of services (DNS SRV)](https://tools.ietf.org/html/rfc2782)
 + [RFC-4034 - Resource Records for the DNS Security Extensions (DNSSEC)](https://tools.ietf.org/html/rfc4034)
 + [RFC-6891 - Extension Mechanisms for DNS (EDNS(0))](https://tools.ietf.org/html/rfc6891)
-+ [RFC-7766 - DNS Transport over TCP - Implementation Requirements](https://tools.ietf.org/html/rfc7766)
++ [RFC-7766 - DNS Transport over TCP - Implementation Requirements](https://tools.ietf.org/html/rfc7766) (includes §8 truncation fallback)
 + [RFC-7871 - Client Subnet in DNS Queries](https://tools.ietf.org/html/rfc7871)
 + [RFC-8484 - DNS Queries over HTTPS (DoH)](https://tools.ietf.org/html/rfc8484)
 + [RFC-9460 - Service Binding and Parameter Specification via the DNS (SVCB, HTTPS)](https://datatracker.ietf.org/doc/html/rfc9460)

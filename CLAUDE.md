@@ -46,7 +46,7 @@ npm run example-server-tcp    # Start TCP DNS server
 - **Server/ProxyProtocol/** — PROXY protocol v1 (text) and v2 (binary) implementations. `ProxyProtocolV1`/`V2` implement `ServerPreRequest<dgram.RemoteInfo>` for UDP; `ProxyProtocolV1Tcp`/`V2Tcp` implement `ServerPreConnection<net.Socket>` and override `remoteAddress`/`remotePort` via `Object.defineProperty`. `ProxyProtocolTcpReader` is the shared incremental socket-reading helper.
 - **Client/** — `UDPClient`, `TCPClient` (TCP + TLS), `DohClient` (http/https/h2), `GoogleClient` (Google JSON API). All expose a static `request()` method returning a `ClientRequest` resolver function.
 - **DNS.ts** — High-level resolver that tries multiple nameservers in parallel, supports all protocol types.
-- **Test/** — Test framework and test suite (49 tests covering packets, EDNS, record types, SVCB/HTTPS params, PROXY protocol parsers, servers, integration incl. TCP+PROXY end-to-end).
+- **Test/** — Test framework and test suite (51 tests covering packets, EDNS, record types, SVCB/HTTPS params, PROXY protocol parsers, servers, integration incl. TCP+PROXY end-to-end and UDP→TCP truncation fallback).
 - **index.ts** — Barrel re-export of all public API
 
 ### Key Patterns
@@ -56,7 +56,7 @@ npm run example-server-tcp    # Start TCP DNS server
 - **TCP framing** uses 2-byte length prefix per message, handled by `SocketReader`.
 - **Servers** emit `request` events with parsed `Packet` objects and a send callback. `DnsServer` combines multiple protocol servers and forwards all events.
 - **Pre-hooks** — `preRequest` (per-message) and `preConnection` (TCP-only, per-connection) are configured via `ServerOptions.udp|tcp|doh`. Both can return a `client` override that the server emits in place of the original. For TCP `preConnection`, the server passes the returned `initialBuffer` (any bytes read past the PROXY header) to `SocketReader.readStream` so DNS framing continues seamlessly. Responses always go back to the true transport peer; only the emitted client reference is swapped.
-- **Clients** follow a factory pattern: `XClient.request(options)` returns an async resolver function `(name, type, cls, options?) => Promise<Packet>`.
+- **Clients** follow a factory pattern: `XClient.request(options)` returns an async resolver function `(name, type, cls, options?) => Promise<Packet>`. `UDPClient` automatically retries via `TCPClient` when the response header has the TC (truncation) bit set (RFC 7766 §8); opt out via `tcpFallback: false`, override target with `tcpFallbackPort`.
 
 ### TypeScript / Module Config
 

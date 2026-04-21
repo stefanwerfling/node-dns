@@ -9,4 +9,6 @@ export type ClientOptions = {
     dns: string;
     protocol?: ClientOptionsProtocol;
     port?: number;
+    tcpFallback?: boolean;
+    tcpFallbackPort?: number;
 };

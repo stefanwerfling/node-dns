@@ -3,6 +3,7 @@ import { Packet } from '../Packet/Packet.js';
 import { PacketQuestion } from '../Packet/PacketQuestion.js';
 import { EDNS, EdnsECS } from '../Packet/Types/EDNS.js';
 import { AClient } from './AClient.js';
+import { TCPClient } from './TCPClient.js';
 export class UDPClient extends AClient {
     static makeQuery(name, type, cls, clientIp = null, recursive = true) {
         const query = new Packet();
@@ -18,6 +19,8 @@ export class UDPClient extends AClient {
         const dns = option.dns || '8.8.8.8';
         const port = option.port || 53;
         const socketType = 'udp4';
+        const tcpFallback = option.tcpFallback !== false;
+        const tcpFallbackPort = option.tcpFallbackPort === undefined ? port : option.tcpFallbackPort;
         return async (name, type, cls, options) => {
             let clientIp = null;
             let recursive = true;
@@ -31,19 +34,27 @@ export class UDPClient extends AClient {
             }
             const query = UDPClient.makeQuery(name, type, cls, clientIp, recursive);
             const client = dgram.createSocket(socketType);
-            return new Promise((resolve, reject) => {
+            const response = await new Promise((resolve, reject) => {
                 client.once('message', (message) => {
                     client.close();
-                    const response = Packet.parse(message);
-                    resolve(response);
+                    resolve(Packet.parse(message));
                 });
                 const buffer = query.toBuffer();
                 client.send(buffer, port, dns, (err) => {
                     if (err) {
+                        client.close();
                         reject(err);
                     }
                 });
             });
+            if (tcpFallback && response.header.tc === 1) {
+                const tcpResolve = TCPClient.request({
+                    dns: dns,
+                    port: tcpFallbackPort
+                });
+                return tcpResolve(name, type, cls, options);
+            }
+            return response;
         };
     }
 }

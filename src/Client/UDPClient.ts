@@ -7,6 +7,7 @@ import {EDNS, EdnsECS} from '../Packet/Types/EDNS.js';
 import {AClient} from './AClient.js';
 import {ClientOptions} from './ClientOptions.js';
 import {ClientRequest} from './ClientRequest.js';
+import {TCPClient} from './TCPClient.js';
 
 /**
  * UDPClient
@@ -55,6 +56,8 @@ export class UDPClient extends AClient {
         const dns = option.dns || '8.8.8.8';
         const port = option.port || 53;
         const socketType: 'udp4' | 'udp6' = 'udp4';
+        const tcpFallback = option.tcpFallback !== false;
+        const tcpFallbackPort = option.tcpFallbackPort === undefined ? port : option.tcpFallbackPort;
 
         return async(name, type, cls, options): Promise<Packet> => {
             let clientIp: string|null = null;
@@ -73,23 +76,33 @@ export class UDPClient extends AClient {
             const query = UDPClient.makeQuery(name, type, cls, clientIp, recursive);
             const client = dgram.createSocket(socketType);
 
-            return new Promise<Packet>((resolve, reject) => {
+            const response = await new Promise<Packet>((resolve, reject) => {
                 client.once('message', (message: Buffer) => {
                     client.close();
-
-                    const response = Packet.parse(message);
-
-                    resolve(response);
+                    resolve(Packet.parse(message));
                 });
 
                 const buffer = query.toBuffer();
 
                 client.send(buffer, port, dns, (err) => {
                     if (err) {
+                        client.close();
                         reject(err);
                     }
                 });
             });
+
+            // RFC 7766 §8 — if the response is truncated, retry via TCP.
+            if (tcpFallback && response.header.tc === 1) {
+                const tcpResolve = TCPClient.request({
+                    dns: dns,
+                    port: tcpFallbackPort
+                });
+
+                return tcpResolve(name, type, cls, options);
+            }
+
+            return response;
         };
     }
 
