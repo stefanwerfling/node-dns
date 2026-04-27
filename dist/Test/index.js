@@ -1,3 +1,4 @@
+import './buffers.js';
 import './name.js';
 import './packet.js';
 import './edns.js';

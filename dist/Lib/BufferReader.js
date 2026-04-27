@@ -6,36 +6,38 @@ export class BufferReader {
         this._offset = offset || 0;
     }
     static read(buffer, offset, length) {
-        let a = [];
-        let c = Math.ceil(length / 8);
-        let l = Math.floor(offset / 8);
-        const m = offset % 8;
-        const t = (n) => {
-            const r = [0, 0, 0, 0, 0, 0, 0, 0];
-            for (let i = 7; i >= 0; i--) {
-                if (n & 2 ** i) {
-                    r[7 - i] = 1;
-                }
-                else {
-                    r[7 - i] = 0;
-                }
+        const byteOffset = offset >> 3;
+        const bitInByte = offset & 7;
+        if (bitInByte === 0) {
+            if (length === 8) {
+                return buffer.readUInt8(byteOffset);
             }
-            a = a.concat(r);
-        };
-        const p = (ta) => {
-            let n = 0;
-            const f = ta.length - 1;
-            for (let i = f; i >= 0; i--) {
-                if (ta[f - i]) {
-                    n += 2 ** i;
-                }
+            if (length === 16) {
+                return buffer.readUInt16BE(byteOffset);
             }
-            return n;
-        };
-        while (c--) {
-            t(buffer.readUInt8(l++));
+            if (length === 32) {
+                return buffer.readUInt32BE(byteOffset);
+            }
         }
-        return p(a.slice(m, m + length));
+        let value = 0;
+        let bitsNeeded = length;
+        let curByte = byteOffset;
+        let curBitInByte = bitInByte;
+        while (bitsNeeded > 0) {
+            const bitsInThisByte = 8 - curBitInByte;
+            const take = bitsInThisByte < bitsNeeded ? bitsInThisByte : bitsNeeded;
+            const shift = bitsInThisByte - take;
+            const mask = (1 << take) - 1;
+            const bits = (buffer[curByte] >> shift) & mask;
+            value = (value << take) | bits;
+            bitsNeeded -= take;
+            curBitInByte += take;
+            if (curBitInByte === 8) {
+                curBitInByte = 0;
+                curByte++;
+            }
+        }
+        return value;
     }
     read(size) {
         const val = BufferReader.read(this._buffer, this._offset, size);

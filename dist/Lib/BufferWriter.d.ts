@@ -1,6 +1,7 @@
 import { Buffer } from 'buffer';
 export declare class BufferWriter {
-    protected _buffer: number[];
+    protected _bytes: number[];
+    protected _bitLength: number;
     protected _nameOffsets: Map<string, number>;
     write(d: number, size: number): void;
     writeBuffer(buffer: Buffer | BufferWriter): void;

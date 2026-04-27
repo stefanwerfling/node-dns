@@ -1,84 +1,94 @@
 import { Buffer } from 'buffer';
 
 /**
- * Buffer Reader
+ * Bit-precise reader over a byte buffer. DNS messages have a few sub-byte
+ * fields in the 12-byte header (1-bit flags, 4-bit OPCODE/RCODE) and are
+ * byte-aligned everywhere else, so this reader takes a fast path for the
+ * common case (aligned 8/16/32-bit reads via Node's native Buffer methods)
+ * and falls back to byte-shift arithmetic for sub-byte fields.
+ *
+ * The whole API is bit-precise — `read(size)` and `setOffset(offset)` both
+ * operate on bits — so DNS name compression pointers (which point at byte
+ * offsets but are read out as 14 bits within a 16-bit field) keep working.
  */
 export class BufferReader {
 
     /**
-     * Buffer
+     * Underlying byte buffer.
      * @protected
      */
     protected _buffer: Buffer;
 
     /**
-     * Buffer offset
+     * Current read position, in **bits**.
      * @protected
      */
     protected _offset: number = 0;
 
-    /**
-     * Constructor
-     * @param {Buffer} buffer
-     * @param {number} offset
-     */
     public constructor(buffer: Buffer, offset: number = 0) {
         this._buffer = buffer;
         this._offset = offset || 0;
     }
 
     /**
-     * Static Read
-     * @param {Buffer} buffer
-     * @param {number} offset
-     * @param {number} length
-     * @return {number}
+     * Stateless read of `length` bits starting at bit `offset` in `buffer`.
+     * Used by `PacketHeader.parse` and any other call site that wants to
+     * peek without keeping reader state.
      */
     public static read(buffer: Buffer, offset: number, length: number): number {
-        let a: number[] = [];
-        let c = Math.ceil(length / 8);
-        let l = Math.floor(offset / 8);
-        const m = offset % 8;
+        // eslint-disable-next-line no-bitwise
+        const byteOffset = offset >> 3;
+        // eslint-disable-next-line no-bitwise
+        const bitInByte = offset & 7;
 
-        const t = (n: number): void => {
-            const r = [ 0, 0, 0, 0, 0, 0, 0, 0 ];
-
-            for (let i = 7; i >= 0; i--) {
-                // eslint-disable-next-line no-bitwise
-                if (n & 2**i) {
-                    r[7 - i] = 1;
-                } else {
-                    r[7 - i] = 0;
-                }
+        // Byte-aligned hot path for the three common DNS field widths.
+        if (bitInByte === 0) {
+            if (length === 8) {
+                return buffer.readUInt8(byteOffset);
             }
 
-            a = a.concat(r);
-        };
-
-        const p = (ta: number[]): number => {
-            let n = 0;
-            const f = ta.length - 1;
-
-            for (let i = f; i >= 0; i--) {
-                if (ta[f - i]) {
-                    n += 2**i;
-                }
+            if (length === 16) {
+                return buffer.readUInt16BE(byteOffset);
             }
 
-            return n;
-        };
-
-        while (c--) {
-            t(buffer.readUInt8(l++));
+            if (length === 32) {
+                return buffer.readUInt32BE(byteOffset);
+            }
         }
 
-        return p(a.slice(m, m + length));
+        // Cold path: arbitrary bit-aligned read. Walks each byte that
+        // contains part of the field, shifts bits into place, masks down
+        // to `length` bits.
+        let value = 0;
+        let bitsNeeded = length;
+        let curByte = byteOffset;
+        let curBitInByte = bitInByte;
+
+        while (bitsNeeded > 0) {
+            const bitsInThisByte = 8 - curBitInByte;
+            const take = bitsInThisByte < bitsNeeded ? bitsInThisByte : bitsNeeded;
+            const shift = bitsInThisByte - take;
+            // eslint-disable-next-line no-bitwise
+            const mask = (1 << take) - 1;
+            // eslint-disable-next-line no-bitwise
+            const bits = (buffer[curByte] >> shift) & mask;
+            // eslint-disable-next-line no-bitwise
+            value = (value << take) | bits;
+
+            bitsNeeded -= take;
+            curBitInByte += take;
+
+            if (curBitInByte === 8) {
+                curBitInByte = 0;
+                curByte++;
+            }
+        }
+
+        return value;
     }
 
     /**
-     * read
-     * @param {number} size
-     * @return {number}
+     * Read `size` bits at the current offset and advance.
      */
     public read(size: number): number {
         const val = BufferReader.read(this._buffer, this._offset, size);
@@ -87,16 +97,15 @@ export class BufferReader {
     }
 
     /**
-     * Return the current offset
-     * @return {number}
+     * Current read position, in bits.
      */
     public getOffset(): number {
         return this._offset;
     }
 
     /**
-     * Set the current offset
-     * @param {number} offset
+     * Move the read position to `offset` bits. Used by name-compression
+     * decoding to follow pointers and rewind back.
      */
     public setOffset(offset: number): void {
         this._offset = offset;
