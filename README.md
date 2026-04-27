@@ -41,6 +41,33 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 $ npm install git+https://github.com/stefanwerfling/node-dns.git#ts
 ```
 
+### Documentation
+
+In-depth guides per topic live under [`docs/`](docs/README.md):
+
+- **[DNS clients](docs/dns-clients.md)** — UDP, TCP, DoT, DoH, Google JSON,
+  the combined `DNS` resolver, and the AXFR client. Truncation fallback,
+  TLS options, ECS, per-query overrides.
+- **[DNS servers](docs/dns-servers.md)** — `UDPServer`, `TCPServer`,
+  `TLSServer` (DoT), `DohServer`, the combined `DnsServer`. Request event,
+  `send` callback (single or `Packet[]`), pre-hooks, lifecycle.
+- **[Record types](docs/record-types.md)** — every supported RR type with
+  fields, construction examples, and unsupported-type fallback.
+- **[EDNS(0) options](docs/edns.md)** — ECS, Cookies (incl. RFC 9018
+  server-cookie algorithm), Padding, NSID, TCP Keepalive, Extended DNS
+  Errors.
+- **[TSIG](docs/tsig.md)** — transaction-signature signing/verification,
+  fudge window, request-MAC chaining.
+- **[Zone files](docs/zone-files.md)** — RFC 1035 master file parser and
+  the `Zone` class. Directives, inheritance rules, supported RDATA, errors.
+- **[AXFR](docs/axfr.md)** — full zone transfer over TCP/TLS using `Zone`
+  and `AxfrClient`. Authentication patterns (TSIG, IP allow-list).
+- **[PROXY protocol](docs/proxy-protocol.md)** — v1/v2 hooks for UDP and
+  TCP/TLS, custom processors.
+- **[Reverse proxy](docs/reverse-proxy.md)** — putting nginx, HAProxy, or
+  Envoy in front of a dns2ts server. TLS termination vs pass-through,
+  PROXY-protocol IP transparency, complete configs, troubleshooting.
+
 ### DNS Client (default UDP)
 
 Lookup any records available for the domain `google.com`.
