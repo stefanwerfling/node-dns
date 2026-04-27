@@ -19,6 +19,7 @@ export var PacketTypes;
     PacketTypes[PacketTypes["AAAA"] = 28] = "AAAA";
     PacketTypes[PacketTypes["SRV"] = 33] = "SRV";
     PacketTypes[PacketTypes["NAPTR"] = 35] = "NAPTR";
+    PacketTypes[PacketTypes["DNAME"] = 39] = "DNAME";
     PacketTypes[PacketTypes["EDNS"] = 41] = "EDNS";
     PacketTypes[PacketTypes["DS"] = 43] = "DS";
     PacketTypes[PacketTypes["SSHFP"] = 44] = "SSHFP";

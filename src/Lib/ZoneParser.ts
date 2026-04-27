@@ -4,6 +4,7 @@ import {A} from '../Packet/Types/A.js';
 import {AAAA} from '../Packet/Types/AAAA.js';
 import {CAA} from '../Packet/Types/CAA.js';
 import {CNAME} from '../Packet/Types/CNAME.js';
+import {DNAME} from '../Packet/Types/DNAME.js';
 import {MX} from '../Packet/Types/MX.js';
 import {NS} from '../Packet/Types/NS.js';
 import {PTR} from '../Packet/Types/PTR.js';
@@ -68,7 +69,7 @@ export type ZoneParseOptions = {
  *   - `$ORIGIN`, `$TTL` directives
  *   - `@` shortcut for the current origin
  *   - TTL/class inheritance from the previous record
- *   - RDATA for A, AAAA, NS, CNAME, PTR, MX, TXT, SOA, SRV, CAA
+ *   - RDATA for A, AAAA, NS, CNAME, DNAME, PTR, MX, TXT, SOA, SRV, CAA
  *
  * Not yet supported (intentional): `$INCLUDE` (filesystem I/O),
  * generic-encoding `\#`, DNSSEC RDATA types (DNSKEY/DS/RRSIG/…).
@@ -417,6 +418,9 @@ export class ZoneParser {
 
             case 'CNAME':
                 return new CNAME(fqdn(v(0)));
+
+            case 'DNAME':
+                return new DNAME(fqdn(v(0)));
 
             case 'PTR':
                 return new PTR(fqdn(v(0)));

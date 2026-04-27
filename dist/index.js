@@ -23,6 +23,7 @@ export { AAAA } from './Packet/Types/AAAA.js';
 export { MX } from './Packet/Types/MX.js';
 export { NS } from './Packet/Types/NS.js';
 export { CNAME } from './Packet/Types/CNAME.js';
+export { DNAME } from './Packet/Types/DNAME.js';
 export { PTR } from './Packet/Types/PTR.js';
 export { SRV } from './Packet/Types/SRV.js';
 export { SOA } from './Packet/Types/SOA.js';

@@ -3,6 +3,7 @@ import { A } from './Types/A.js';
 import { AAAA } from './Types/AAAA.js';
 import { CAA } from './Types/CAA.js';
 import { CNAME } from './Types/CNAME.js';
+import { DNAME } from './Types/DNAME.js';
 import { DNSKEY } from './Types/DNSKEY.js';
 import { DS } from './Types/DS.js';
 import { EDNS } from './Types/EDNS.js';
@@ -32,6 +33,7 @@ export class PacketTypeRegistry {
             PacketTypeRegistry._instance.registerPacket(PacketTypes.AAAA, AAAA);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.NS, NS);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.CNAME, CNAME);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.DNAME, DNAME);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.PTR, PTR);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.TXT, TXT);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.SPF, SPF);

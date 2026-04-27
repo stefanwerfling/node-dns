@@ -1,6 +1,6 @@
 # Record types
 
-dns2ts implements 23 RR types as classes that extend `PacketType`. Each one
+dns2ts implements 24 RR types as classes that extend `PacketType`. Each one
 has the same lifecycle: a constructor for outbound records, a static
 `decode(reader, length)` for inbound parsing, and an instance `encode(...)`
 that writes the wire format. You normally only interact with the constructor.
@@ -23,6 +23,7 @@ unknown RR survives a roundtrip through the library.
 | AAAA     | 28     | `AAAA`            | `address: string` (IPv6 colon)                     |
 | SRV      | 33     | `SRV`             | `priority, weight, port, target`                   |
 | NAPTR    | 35     | `NAPTR`           | `order, preference, flags, services, regexp, replacement` |
+| DNAME    | 39     | `DNAME`           | `target: string` (RFC 6672 — redirects whole subtree) |
 | EDNS     | 41     | `EDNS`            | `rdata: EdnsOption[]` (see [EDNS guide](edns.md))  |
 | DS       | 43     | `DS`              | `keyTag, algorithm, digestType, digest`            |
 | SSHFP    | 44     | `SSHFP`           | `algorithm, fpType, fingerprint`                   |
@@ -74,6 +75,23 @@ new AAAA('2001:db8::1');
 All three are simple "name pointer" records. The library does **not**
 validate that a name resolves; it only encodes/decodes the wire form. Domain
 names are length-prefixed labels per RFC 1035, with compression on encode.
+
+### DNAME
+
+Like CNAME, but redirects an *entire subtree* rather than a single name.
+A `foo.example.com DNAME bar.example.net` makes any query for
+`*.foo.example.com` resolve under `*.bar.example.net`. The owner name
+itself is not redirected — that's still CNAME's job.
+
+```ts
+new DNAME('bar.example.net');
+```
+
+Per RFC 6672 §3.1 the target MUST NOT use DNS name compression on the
+wire (the wire form has to be self-contained). The library encodes
+domain-name RDATA without compression across the board, so this
+requirement is met by construction; receivers tolerate compressed input
+because `PacketName.decode` follows pointers transparently.
 
 ### MX
 

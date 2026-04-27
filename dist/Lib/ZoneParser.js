@@ -4,6 +4,7 @@ import { A } from '../Packet/Types/A.js';
 import { AAAA } from '../Packet/Types/AAAA.js';
 import { CAA } from '../Packet/Types/CAA.js';
 import { CNAME } from '../Packet/Types/CNAME.js';
+import { DNAME } from '../Packet/Types/DNAME.js';
 import { MX } from '../Packet/Types/MX.js';
 import { NS } from '../Packet/Types/NS.js';
 import { PTR } from '../Packet/Types/PTR.js';
@@ -248,6 +249,8 @@ export class ZoneParser {
                 return new NS(fqdn(v(0)));
             case 'CNAME':
                 return new CNAME(fqdn(v(0)));
+            case 'DNAME':
+                return new DNAME(fqdn(v(0)));
             case 'PTR':
                 return new PTR(fqdn(v(0)));
             case 'MX':

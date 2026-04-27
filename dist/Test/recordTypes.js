@@ -3,6 +3,7 @@ import { Packet } from '../Packet/Packet.js';
 import { PacketClass } from '../Packet/PacketClass.js';
 import { PacketResource } from '../Packet/PacketResource.js';
 import { PacketTypes } from '../Packet/PacketTypes.js';
+import { DNAME } from '../Packet/Types/DNAME.js';
 import { DS } from '../Packet/Types/DS.js';
 import { HTTPS } from '../Packet/Types/HTTPS.js';
 import { NAPTR } from '../Packet/Types/NAPTR.js';
@@ -148,6 +149,25 @@ test('HTTPS#record has correct type code', () => {
     assert.equal(dec.priority, 1);
     assert.equal(dec.target, 'www.example.com');
     assert.deepEqual(dec.params.alpn, ['h3']);
+});
+test('DNAME#encode+decode roundtrip', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('old.example.com', new DNAME('new.example.net'), PacketClass.IN, 300));
+    const parsed = Packet.parse(packet.toBuffer());
+    const dname = parsed.answers[0].packetType;
+    assert.equal(dname.type, PacketTypes.DNAME);
+    assert.equal(dname.target, 'new.example.net');
+});
+test('DNAME#target written without compression (RFC 6672 §3.1)', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('a.example.com', new DNAME('foo.example.org'), PacketClass.IN, 300));
+    packet.answers.push(new PacketResource('b.example.com', new DNAME('bar.example.org'), PacketClass.IN, 300));
+    const buf = packet.toBuffer();
+    const parsed = Packet.parse(buf);
+    assert.equal(parsed.answers[0].packetType.target, 'foo.example.org');
+    assert.equal(parsed.answers[1].packetType.target, 'bar.example.org');
 });
 test('TLSA#encode+decode', () => {
     const packet = new Packet();

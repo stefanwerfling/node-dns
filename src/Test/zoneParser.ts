@@ -33,6 +33,7 @@ import {A} from '../Packet/Types/A.js';
 import {AAAA} from '../Packet/Types/AAAA.js';
 import {CAA} from '../Packet/Types/CAA.js';
 import {CNAME} from '../Packet/Types/CNAME.js';
+import {DNAME} from '../Packet/Types/DNAME.js';
 import {MX} from '../Packet/Types/MX.js';
 import {NS} from '../Packet/Types/NS.js';
 import {PTR} from '../Packet/Types/PTR.js';
@@ -219,6 +220,18 @@ test('zone#class is inherited and recognized', () => {
     const {records} = ZoneParser.parse(dedent(zone));
     assert.equal(records[0].class, PacketClass.IN);
     assert.equal(records[1].class, PacketClass.IN);
+});
+
+test('zone#DNAME redirects subtree', () => {
+    const zone = `
+        $ORIGIN example.com.
+        old 60 IN DNAME new.example.net.
+    `;
+    const {records} = ZoneParser.parse(dedent(zone));
+    assert.equal(records.length, 1);
+    const dname = records[0].packetType as DNAME;
+    assert.equal(records[0].name, 'old.example.com');
+    assert.equal(dname.target, 'new.example.net');
 });
 
 test('zone#errors on unmatched parens', () => {

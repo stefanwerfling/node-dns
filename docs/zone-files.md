@@ -76,8 +76,8 @@ Returns:
 The parser dispatches RDATA parsing per type. The 10 most common are
 covered:
 
-A, AAAA, NS, CNAME, PTR, MX, TXT (incl. multiple character-strings), SOA,
-SRV, CAA.
+A, AAAA, NS, CNAME, DNAME, PTR, MX, TXT (incl. multiple character-strings),
+SOA, SRV, CAA.
 
 Unsupported types raise a clear error with the offending line number
 rather than silently dropping data:

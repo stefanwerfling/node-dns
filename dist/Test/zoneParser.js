@@ -182,6 +182,17 @@ test('zone#class is inherited and recognized', () => {
     assert.equal(records[0].class, PacketClass.IN);
     assert.equal(records[1].class, PacketClass.IN);
 });
+test('zone#DNAME redirects subtree', () => {
+    const zone = `
+        $ORIGIN example.com.
+        old 60 IN DNAME new.example.net.
+    `;
+    const { records } = ZoneParser.parse(dedent(zone));
+    assert.equal(records.length, 1);
+    const dname = records[0].packetType;
+    assert.equal(records[0].name, 'old.example.com');
+    assert.equal(dname.target, 'new.example.net');
+});
 test('zone#errors on unmatched parens', () => {
     assert.throws(() => ZoneParser.parse('@ IN SOA ns admin (1 2 3 4 5'));
 });
