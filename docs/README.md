@@ -39,6 +39,9 @@ example.
 - **[NOTIFY](notify.md)** — RFC 1996 zone-change notification: primary
   pushes "your zone changed" to secondaries via `NotifyClient`, secondary
   dispatches on `request.header.opcode === PacketOpcode.NOTIFY`.
+- **[DNS UPDATE](update.md)** — RFC 2136 dynamic updates with
+  `UpdateBuilder`, `UpdateClient`, `Update.applyToZone`. Five
+  prerequisite forms, four update forms, RCODE-driven error handling.
 
 ## Deployment
 

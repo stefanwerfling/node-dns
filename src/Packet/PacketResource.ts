@@ -44,6 +44,15 @@ export class PacketResource {
     public byteStart?: number;
 
     /**
+     * The original RDLENGTH that the wire record carried. Populated by
+     * `decode()`; undefined for records constructed in memory. Required by
+     * DNS UPDATE (RFC 2136) classification, which distinguishes "empty
+     * RDATA" prerequisites/updates from records that happen to encode to
+     * a small payload.
+     */
+    public rdlength?: number;
+
+    /**
      * Constructor
      * @param {string} name
      * @param {PacketType} packetType
@@ -121,6 +130,7 @@ export class PacketResource {
 
             const resource = new PacketResource(name, unknown, cls, ttl);
             resource.byteStart = byteStart;
+            resource.rdlength = len;
             return resource;
         }
 
@@ -128,6 +138,7 @@ export class PacketResource {
 
         const resource = new PacketResource(name, packet, cls, ttl);
         resource.byteStart = byteStart;
+        resource.rdlength = len;
         return resource;
     }
 

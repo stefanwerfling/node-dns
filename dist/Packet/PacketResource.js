@@ -13,6 +13,7 @@ export class PacketResource {
     class;
     ttl;
     byteStart;
+    rdlength;
     constructor(name, packetType, cls = PacketClass.ANY, ttl = 300) {
         this.name = name;
         this.packetType = packetType;
@@ -49,11 +50,13 @@ export class PacketResource {
             const unknown = new UnknownPacketType(type, Buffer.from(arr));
             const resource = new PacketResource(name, unknown, cls, ttl);
             resource.byteStart = byteStart;
+            resource.rdlength = len;
             return resource;
         }
         const packet = packetType.decode(treader, len);
         const resource = new PacketResource(name, packet, cls, ttl);
         resource.byteStart = byteStart;
+        resource.rdlength = len;
         return resource;
     }
 }

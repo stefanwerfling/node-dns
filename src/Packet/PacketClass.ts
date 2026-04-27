@@ -7,5 +7,10 @@ export enum PacketClass {
     CS = 0x02,
     CH = 0x03,
     HS = 0x04,
+    /**
+     * Used by DNS UPDATE (RFC 2136 §2.4–§2.5) to encode "must-not-exist"
+     * prerequisites and "delete this exact RR" updates. Not a query class.
+     */
+    NONE = 0xFE,
     ANY = 0xFF
 }

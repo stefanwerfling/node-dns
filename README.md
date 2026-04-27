@@ -27,6 +27,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - AXFR zone transfer (RFC 5936) — `Zone` class for in-memory zones, `AxfrClient` for fetching, `send(Packet[])` server hook for serving
 - IXFR incremental zone transfer (RFC 1995) — `Zone.toIxfrPackets` with optional `ZoneChangeSet` history, `IxfrClient` returning a no-change / incremental / AXFR-fallback discriminated union
 - NOTIFY zone-change notification (RFC 1996) — `NotifyClient` on the primary side, opcode-dispatch on the secondary side
+- DNS UPDATE (RFC 2136) — `UpdateBuilder` fluent API, `Update.applyToZone` reference engine, `UpdateClient` over UDP/TCP/TLS
 
 <hr>
 
@@ -70,6 +71,9 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
 - **[NOTIFY](docs/notify.md)** — RFC 1996 zone-change notification with
   `NotifyClient` (primary side) and an opcode-dispatching handler
   (secondary side).
+- **[DNS UPDATE](docs/update.md)** — RFC 2136 dynamic updates: five
+  prerequisite forms, four update forms, `UpdateBuilder` fluent API,
+  `Update.applyToZone` reference engine, `UpdateClient` over UDP/TCP/TLS.
 - **[PROXY protocol](docs/proxy-protocol.md)** — v1/v2 hooks for UDP and
   TCP/TLS, custom processors.
 - **[Reverse proxy](docs/reverse-proxy.md)** — putting nginx, HAProxy, or
@@ -510,6 +514,7 @@ npm run lint      # ESLint check
 + [RFC-8945 - Secret Key Transaction Authentication for DNS (TSIG)](https://datatracker.ietf.org/doc/html/rfc8945)
 + [RFC-1995 - Incremental Zone Transfer in DNS (IXFR)](https://datatracker.ietf.org/doc/html/rfc1995)
 + [RFC-1996 - A Mechanism for Prompt Notification of Zone Changes (DNS NOTIFY)](https://datatracker.ietf.org/doc/html/rfc1996)
++ [RFC-2136 - Dynamic Updates in the Domain Name System (DNS UPDATE)](https://datatracker.ietf.org/doc/html/rfc2136)
 + [RFC-5936 - DNS Zone Transfer Protocol (AXFR)](https://datatracker.ietf.org/doc/html/rfc5936)
 + [RFC-9018 - Interoperable Domain Name System (DNS) Server Cookies](https://datatracker.ietf.org/doc/html/rfc9018)
 + [RFC-9460 - Service Binding and Parameter Specification via the DNS (SVCB, HTTPS)](https://datatracker.ietf.org/doc/html/rfc9460)

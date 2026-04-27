@@ -9,6 +9,7 @@ export declare class PacketResource {
     class: PacketClass | number;
     ttl: number;
     byteStart?: number;
+    rdlength?: number;
     constructor(name: string, packetType: PacketType, cls?: PacketClass | number, ttl?: number);
     toBuffer(writer?: BufferWriter | null): Buffer;
     static encode(resource: PacketResource, writer?: BufferWriter | null): Buffer;
