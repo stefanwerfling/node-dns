@@ -37,5 +37,53 @@ export class Zone {
     soaRdata() {
         return this.soa().packetType;
     }
+    toIxfrPackets(query, options = {}) {
+        const currentSoa = this.soa();
+        const currentSerial = currentSoa.packetType.serial;
+        const clientSerial = Zone._extractClientSerial(query);
+        const response = Packet.createResponseFromRequest(query);
+        response.questions = query.questions.slice();
+        response.header.aa = 1;
+        if (clientSerial === null) {
+            return this.toAxfrPackets(query);
+        }
+        if (clientSerial === currentSerial) {
+            response.answers = [currentSoa];
+            return [response];
+        }
+        const chain = Zone._stitchChain(options.history ?? [], clientSerial, currentSerial);
+        if (chain === null) {
+            return this.toAxfrPackets(query);
+        }
+        const answers = [currentSoa];
+        for (const cs of chain) {
+            answers.push(cs.fromSoa, ...cs.deletions);
+            answers.push(cs.toSoa, ...cs.additions);
+        }
+        answers.push(currentSoa);
+        response.answers = answers;
+        return [response];
+    }
+    static _extractClientSerial(query) {
+        for (const r of query.authorities) {
+            if (r.packetType.type === PacketTypes.SOA) {
+                return r.packetType.serial;
+            }
+        }
+        return null;
+    }
+    static _stitchChain(history, from, to) {
+        const chain = [];
+        let cursor = from;
+        while (cursor !== to) {
+            const next = history.find((h) => h.fromSerial === cursor);
+            if (!next) {
+                return null;
+            }
+            chain.push(next);
+            cursor = next.toSerial;
+        }
+        return chain;
+    }
 }
 //# sourceMappingURL=Zone.js.map

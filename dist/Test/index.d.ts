@@ -6,6 +6,7 @@ import './proxyProtocol.js';
 import './tsig.js';
 import './zoneParser.js';
 import './axfr.js';
+import './ixfr.js';
 import './notify.js';
 import './serverDoh.js';
 import './serverIntegration.js';

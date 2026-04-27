@@ -25,6 +25,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - PROXY protocol v1 and v2 support (UDP per-datagram, TCP per-connection) for transparent load-balancer deployments
 - RFC 1035 master file ("zone file") parser — `$ORIGIN`, `$TTL`, `@`, multi-line records via parens, quoted strings; RDATA for A, AAAA, NS, CNAME, PTR, MX, TXT, SOA, SRV, CAA
 - AXFR zone transfer (RFC 5936) — `Zone` class for in-memory zones, `AxfrClient` for fetching, `send(Packet[])` server hook for serving
+- IXFR incremental zone transfer (RFC 1995) — `Zone.toIxfrPackets` with optional `ZoneChangeSet` history, `IxfrClient` returning a no-change / incremental / AXFR-fallback discriminated union
 - NOTIFY zone-change notification (RFC 1996) — `NotifyClient` on the primary side, opcode-dispatch on the secondary side
 
 <hr>
@@ -63,6 +64,9 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   the `Zone` class. Directives, inheritance rules, supported RDATA, errors.
 - **[AXFR](docs/axfr.md)** — full zone transfer over TCP/TLS using `Zone`
   and `AxfrClient`. Authentication patterns (TSIG, IP allow-list).
+- **[IXFR](docs/ixfr.md)** — incremental zone transfer (RFC 1995) with
+  `ZoneChangeSet` history, `Zone.toIxfrPackets`, and `IxfrClient` (no-change
+  / incremental / AXFR-fallback).
 - **[NOTIFY](docs/notify.md)** — RFC 1996 zone-change notification with
   `NotifyClient` (primary side) and an opcode-dispatching handler
   (secondary side).
@@ -504,6 +508,7 @@ npm run lint      # ESLint check
 + [RFC-8484 - DNS Queries over HTTPS (DoH)](https://tools.ietf.org/html/rfc8484)
 + [RFC-8914 - Extended DNS Errors](https://datatracker.ietf.org/doc/html/rfc8914)
 + [RFC-8945 - Secret Key Transaction Authentication for DNS (TSIG)](https://datatracker.ietf.org/doc/html/rfc8945)
++ [RFC-1995 - Incremental Zone Transfer in DNS (IXFR)](https://datatracker.ietf.org/doc/html/rfc1995)
 + [RFC-1996 - A Mechanism for Prompt Notification of Zone Changes (DNS NOTIFY)](https://datatracker.ietf.org/doc/html/rfc1996)
 + [RFC-5936 - DNS Zone Transfer Protocol (AXFR)](https://datatracker.ietf.org/doc/html/rfc5936)
 + [RFC-9018 - Interoperable Domain Name System (DNS) Server Cookies](https://datatracker.ietf.org/doc/html/rfc9018)

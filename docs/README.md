@@ -32,6 +32,10 @@ example.
   `Zone` class.
 - **[AXFR](axfr.md)** — full zone transfer over TCP/TLS with the `Zone`
   helpers and the `AxfrClient`.
+- **[IXFR](ixfr.md)** — incremental zone transfer (RFC 1995). `Zone.toIxfrPackets`
+  picks the right shape (no-change / incremental / AXFR fallback) given
+  an optional `ZoneChangeSet[]` history; `IxfrClient` classifies the
+  response into a discriminated union.
 - **[NOTIFY](notify.md)** — RFC 1996 zone-change notification: primary
   pushes "your zone changed" to secondaries via `NotifyClient`, secondary
   dispatches on `request.header.opcode === PacketOpcode.NOTIFY`.

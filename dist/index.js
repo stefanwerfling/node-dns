@@ -61,6 +61,7 @@ export { ClientOptionsProtocol } from './Client/ClientOptions.js';
 export { TCPClient } from './Client/TCPClient.js';
 export { UDPClient } from './Client/UDPClient.js';
 export { AxfrClient } from './Client/AxfrClient.js';
+export { IxfrClient } from './Client/IxfrClient.js';
 export { NotifyClient } from './Client/NotifyClient.js';
 export { DohClient } from './Client/DohClient.js';
 export { GoogleClient } from './Client/GoogleClient.js';

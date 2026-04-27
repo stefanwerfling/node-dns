@@ -6,6 +6,7 @@ export type { ZoneParseOptions, ZoneParseResult, ZoneToken, ZoneTokenLine } from
 export { IP } from './Packet/IP.js';
 export { Packet } from './Packet/Packet.js';
 export { Zone } from './Packet/Zone.js';
+export type { ZoneChangeSet } from './Packet/Zone.js';
 export { PacketClass } from './Packet/PacketClass.js';
 export { PacketHeader } from './Packet/PacketHeader.js';
 export { PacketName } from './Packet/PacketName.js';
@@ -75,6 +76,8 @@ export { TCPClient } from './Client/TCPClient.js';
 export { UDPClient } from './Client/UDPClient.js';
 export { AxfrClient } from './Client/AxfrClient.js';
 export type { AxfrClientOptions, AxfrResult } from './Client/AxfrClient.js';
+export { IxfrClient } from './Client/IxfrClient.js';
+export type { IxfrClientOptions, IxfrResult, IxfrChangeSet } from './Client/IxfrClient.js';
 export { NotifyClient } from './Client/NotifyClient.js';
 export type { NotifyClientOptions } from './Client/NotifyClient.js';
 export { DohClient } from './Client/DohClient.js';

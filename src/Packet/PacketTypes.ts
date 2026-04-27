@@ -34,6 +34,7 @@ export enum PacketTypes {
     HTTPS = 0x41,
     SPF = 0x63,
     TSIG = 0xFA,
+    IXFR = 0xFB,
     AXFR = 0xFC,
     MAILB = 0xFD,
     MAILA = 0xFE,

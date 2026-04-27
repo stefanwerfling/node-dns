@@ -30,6 +30,7 @@ export declare enum PacketTypes {
     HTTPS = 65,
     SPF = 99,
     TSIG = 250,
+    IXFR = 251,
     AXFR = 252,
     MAILB = 253,
     MAILA = 254,

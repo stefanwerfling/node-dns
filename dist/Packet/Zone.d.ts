@@ -12,4 +12,17 @@ export declare class Zone {
     recordsOfType(type: PacketTypes): IterableIterator<PacketResource>;
     toAxfrPackets(query: Packet): Packet[];
     soaRdata(): SOA;
+    toIxfrPackets(query: Packet, options?: {
+        history?: ZoneChangeSet[];
+    }): Packet[];
+    protected static _extractClientSerial(query: Packet): number | null;
+    protected static _stitchChain(history: ZoneChangeSet[], from: number, to: number): ZoneChangeSet[] | null;
 }
+export type ZoneChangeSet = {
+    fromSerial: number;
+    toSerial: number;
+    fromSoa: PacketResource;
+    toSoa: PacketResource;
+    deletions: PacketResource[];
+    additions: PacketResource[];
+};

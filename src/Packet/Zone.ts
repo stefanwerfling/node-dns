@@ -96,4 +96,121 @@ export class Zone {
         return this.soa().packetType as SOA;
     }
 
+    /**
+     * Build the IXFR response (RFC 1995) for the given query.
+     *
+     * Three response shapes are produced depending on what the client asked
+     * for and what history was supplied:
+     *
+     *   1. **No-change** (RFC 1995 §2.1): if `clientSerial` equals the
+     *      zone's current serial, reply with a single message whose only
+     *      answer is the current SOA.
+     *   2. **Incremental**: if `options.history` chains contiguously from
+     *      `clientSerial` to the current serial, build the difference
+     *      sequences per RFC 1995 §4.
+     *   3. **AXFR fallback**: otherwise serve a full AXFR (RFC 1995 §4 §2:
+     *      "A server unable to provide an incremental zone transfer should
+     *      respond with a full zone transfer.").
+     *
+     * @param {Packet} query the parsed IXFR query (QTYPE=IXFR with the
+     *        client's current SOA in the AUTHORITY section)
+     * @param {{history?: ZoneChangeSet[]}} options optional ordered list of
+     *        change sets the server has on hand. Each entry's `toSerial`
+     *        must equal the next entry's `fromSerial`.
+     * @return {Packet[]}
+     */
+    public toIxfrPackets(query: Packet, options: {history?: ZoneChangeSet[];} = {}): Packet[] {
+        const currentSoa = this.soa();
+        const currentSerial = (currentSoa.packetType as SOA).serial;
+        const clientSerial = Zone._extractClientSerial(query);
+        const response = Packet.createResponseFromRequest(query);
+
+        response.questions = query.questions.slice();
+        response.header.aa = 1;
+
+        if (clientSerial === null) {
+            // No SOA in authority → behave like AXFR fallback per RFC 1995.
+            return this.toAxfrPackets(query);
+        }
+
+        if (clientSerial === currentSerial) {
+            response.answers = [currentSoa];
+            return [response];
+        }
+
+        const chain = Zone._stitchChain(options.history ?? [], clientSerial, currentSerial);
+
+        if (chain === null) {
+            // No usable history → AXFR fallback.
+            return this.toAxfrPackets(query);
+        }
+
+        const answers: PacketResource[] = [currentSoa];
+
+        for (const cs of chain) {
+            answers.push(cs.fromSoa, ...cs.deletions);
+            answers.push(cs.toSoa, ...cs.additions);
+        }
+
+        answers.push(currentSoa);
+        response.answers = answers;
+        return [response];
+    }
+
+    /**
+     * Read the SOA serial from the AUTHORITY section of an IXFR query.
+     * Returns `null` if no SOA is present.
+     * @protected
+     */
+    protected static _extractClientSerial(query: Packet): number|null {
+        for (const r of query.authorities) {
+            if (r.packetType.type === PacketTypes.SOA) {
+                return (r.packetType as SOA).serial;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Pick the contiguous prefix of `history` that walks `from → … → to`.
+     * Returns `null` if no chain covers the gap.
+     * @protected
+     */
+    protected static _stitchChain(history: ZoneChangeSet[], from: number, to: number): ZoneChangeSet[]|null {
+        const chain: ZoneChangeSet[] = [];
+        let cursor = from;
+
+        while (cursor !== to) {
+            const next = history.find((h) => h.fromSerial === cursor);
+
+            if (!next) {
+                return null;
+            }
+
+            chain.push(next);
+            cursor = next.toSerial;
+        }
+
+        return chain;
+    }
+
 }
+
+/**
+ * One incremental change set between two zone serials. Used as input to
+ * `Zone.toIxfrPackets` so the server can answer IXFR queries with diffs
+ * instead of full transfers.
+ *
+ * `fromSoa` is the SOA at `fromSerial`; `toSoa` is the SOA at `toSerial`.
+ * Both are full `PacketResource` instances so the IXFR encoder can place
+ * them in the answer section verbatim.
+ */
+export type ZoneChangeSet = {
+    fromSerial: number;
+    toSerial: number;
+    fromSoa: PacketResource;
+    toSoa: PacketResource;
+    deletions: PacketResource[];
+    additions: PacketResource[];
+};
