@@ -32,6 +32,9 @@ example.
   `Zone` class.
 - **[AXFR](axfr.md)** — full zone transfer over TCP/TLS with the `Zone`
   helpers and the `AxfrClient`.
+- **[NOTIFY](notify.md)** — RFC 1996 zone-change notification: primary
+  pushes "your zone changed" to secondaries via `NotifyClient`, secondary
+  dispatches on `request.header.opcode === PacketOpcode.NOTIFY`.
 
 ## Deployment
 

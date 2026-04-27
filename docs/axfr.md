@@ -148,8 +148,9 @@ re-fetches the whole zone, which is fine up to a few thousand records.
   increments, they trigger an IXFR / AXFR. Keep `refresh` reasonable —
   typically 1-4 hours.
 - **NOTIFY** (RFC 1996) lets the primary push a hint to secondaries that a
-  new serial exists. **Not yet implemented** in dns2ts. Until it lands,
-  secondaries rely solely on the refresh interval.
+  new serial exists. See the [NOTIFY guide](notify.md) for the
+  `NotifyClient` (primary side) and the opcode-dispatch pattern on the
+  secondary side.
 - **Serial numbers** must increment monotonically (RFC 1982 serial-number
   arithmetic). The common convention is `YYYYMMDDNN`. dns2ts does not
   enforce this — it's your zone editor's job.
