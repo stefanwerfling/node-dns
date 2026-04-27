@@ -33,6 +33,12 @@ example.
   step-by-step recipe for moving `lab.example.com` onto your own dns2ts
   server, multi-NS replication, sub-delegation, verification, common
   pitfalls.
+- **[Becoming a TLD](becoming-a-tld.md)** — honest walkthrough of the
+  paths that actually exist (ICANN gTLD program, IETF special-use names,
+  private/alternative roots), the costs and timelines, the ongoing
+  registry-operator obligations (DNSSEC, EPP, RDAP, data escrow), where
+  dns2ts fits, and realistic alternatives for most goals. Full link/RFC
+  reference list.
 - **[Zone files](zone-files.md)** — the RFC 1035 master file parser and the
   `Zone` class.
 - **[AXFR](axfr.md)** — full zone transfer over TCP/TLS with the `Zone`

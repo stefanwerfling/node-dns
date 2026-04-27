@@ -66,6 +66,10 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   with NS records: how to delegate `lab.example.com` to your own dns2ts
   server, glue records, multi-NS setups with NOTIFY/AXFR, sub-delegation,
   verification, and common pitfalls.
+- **[Becoming a TLD](docs/becoming-a-tld.md)** — what's actually involved
+  in operating a public TLD: ICANN gTLD process, IETF special-use names,
+  private/alternative roots, registry-operator obligations (DNSSEC, EPP,
+  RDAP, escrow), where dns2ts fits, and full link/RFC reference list.
 - **[Zone files](docs/zone-files.md)** — RFC 1035 master file parser and
   the `Zone` class. Directives, inheritance rules, supported RDATA, errors.
 - **[AXFR](docs/axfr.md)** — full zone transfer over TCP/TLS using `Zone`
