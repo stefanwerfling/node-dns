@@ -1,10 +1,12 @@
 import EventEmitter from 'events';
 import { DohServer } from './DohServer.js';
 import { TCPServer } from './TCPServer.js';
+import { TLSServer } from './TLSServer.js';
 import { UDPServer } from './UDPServer.js';
 export class DnsServer extends EventEmitter {
     _udp;
     _tcp;
+    _tls;
     _doh;
     _closed;
     _listening;
@@ -26,6 +28,13 @@ export class DnsServer extends EventEmitter {
             this._tcp.on('request', (request, send, client) => this.emit('request', request, send, client));
             closePromises.push(new Promise((resolve) => { this._tcp.once('close', resolve); }));
             listenPromises.push(new Promise((resolve) => { this._tcp.once('listening', resolve); }));
+        }
+        if (options.tls) {
+            this._tls = new TLSServer(options);
+            this._tls.on('requestError', (error) => this.emit('error', error, 'tls'));
+            this._tls.on('request', (request, send, client) => this.emit('request', request, send, client));
+            closePromises.push(new Promise((resolve) => { this._tls.once('close', resolve); }));
+            listenPromises.push(new Promise((resolve) => { this._tls.once('listening', resolve); }));
         }
         if (options.udp) {
             const udpOptions = typeof options.udp === 'object' ? options : null;
@@ -54,6 +63,9 @@ export class DnsServer extends EventEmitter {
         }
         if (this._tcp) {
             addresses.tcp = this._tcp.address();
+        }
+        if (this._tls) {
+            addresses.tls = this._tls.address();
         }
         if (this._doh) {
             addresses.doh = this._doh.address();
@@ -85,6 +97,18 @@ export class DnsServer extends EventEmitter {
                 this._tcp.listen(0);
             }
         }
+        if (this._tls) {
+            const opt = options.tls;
+            if (typeof opt === 'object' && opt.port !== undefined) {
+                this._tls.listen({ port: opt.port, host: opt.address });
+            }
+            else if (typeof opt === 'number') {
+                this._tls.listen(opt);
+            }
+            else {
+                this._tls.listen(0);
+            }
+        }
         if (this._doh) {
             const opt = options.doh;
             if (typeof opt === 'object' && opt.port !== undefined) {
@@ -105,6 +129,9 @@ export class DnsServer extends EventEmitter {
         }
         if (this._tcp) {
             this._tcp.close();
+        }
+        if (this._tls) {
+            this._tls.close();
         }
         if (this._doh) {
             this._doh.close();

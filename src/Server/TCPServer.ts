@@ -52,21 +52,43 @@ export class TCPServer {
     public constructor(options: ServerOptions|null = null) {
         this._options = options;
 
-        if (options && typeof options.tcp === 'object') {
-            if (options.tcp.preRequest) {
-                this._preRequest = options.tcp.preRequest;
-            }
+        this._loadHooks();
 
-            if (options.tcp.preConnection) {
-                this._preConnection = options.tcp.preConnection;
-            }
-        }
-
-        this._tcpServer = tcp.createServer((socket) => {
+        this._tcpServer = this._createInternalServer((socket) => {
             this._handle(socket).catch(err => {
                 this._tcpServer?.emit('requestError', err instanceof Error ? err : new Error(String(err)));
             });
         });
+    }
+
+    /**
+     * Read transport-specific hook options off `this._options`.
+     * Overridden by subclasses (e.g. TLSServer reads from `options.tls`).
+     * @protected
+     */
+    protected _loadHooks(): void {
+        const opt = this._options?.tcp;
+
+        if (opt && typeof opt === 'object') {
+            if (opt.preRequest) {
+                this._preRequest = opt.preRequest;
+            }
+
+            if (opt.preConnection) {
+                this._preConnection = opt.preConnection;
+            }
+        }
+    }
+
+    /**
+     * Create the underlying transport server. Overridden by subclasses
+     * (e.g. TLSServer returns a `tls.Server`).
+     * @param {(socket: tcp.Socket) => void} listener
+     * @return {tcp.Server}
+     * @protected
+     */
+    protected _createInternalServer(listener: (socket: tcp.Socket) => void): tcp.Server {
+        return tcp.createServer(listener);
     }
 
     /**

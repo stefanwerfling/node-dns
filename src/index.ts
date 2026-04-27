@@ -30,6 +30,11 @@ export {SPF} from './Packet/Types/SPF.js';
 export {CAA} from './Packet/Types/CAA.js';
 export {EDNS, EdnsOptionCode, EdnsECS} from './Packet/Types/EDNS.js';
 export type {EdnsOption} from './Packet/Types/EDNS.js';
+export {EdnsPadding} from './Packet/Types/EdnsPadding.js';
+export {EdnsNsid} from './Packet/Types/EdnsNsid.js';
+export {EdnsKeepalive} from './Packet/Types/EdnsKeepalive.js';
+export {EdnsExtendedError, ExtendedDnsErrorCode} from './Packet/Types/EdnsExtendedError.js';
+export {EdnsCookie} from './Packet/Types/EdnsCookie.js';
 export {DNSKEY} from './Packet/Types/DNSKEY.js';
 export {DS} from './Packet/Types/DS.js';
 export {NAPTR} from './Packet/Types/NAPTR.js';
@@ -57,6 +62,7 @@ export type {
     ServerRequestHandler,
     ServerUdpOptions,
     ServerTcpOptions,
+    ServerTlsOptions,
     ServerDohOptions
 } from './Server/ServerOptions.js';
 export type {ServerPreRequest, ServerPreRequestResult} from './Server/ServerPreRequest.js';
@@ -83,6 +89,7 @@ export type {
 export {DnsServer} from './Server/DnsServer.js';
 export type {DnsServerAddresses, DnsServerListenOptions} from './Server/DnsServer.js';
 export {TCPServerEvents, TCPServer} from './Server/TCPServer.js';
+export {TLSServer} from './Server/TLSServer.js';
 export {UDPServer} from './Server/UDPServer.js';
 export {DohServer} from './Server/DohServer.js';
 

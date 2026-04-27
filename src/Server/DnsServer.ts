@@ -4,6 +4,7 @@ import {Packet} from '../Packet/Packet.js';
 import {DohServer} from './DohServer.js';
 import {ServerOptions} from './ServerOptions.js';
 import {TCPServer} from './TCPServer.js';
+import {TLSServer} from './TLSServer.js';
 import {UDPServer} from './UDPServer.js';
 
 /**
@@ -12,6 +13,7 @@ import {UDPServer} from './UDPServer.js';
 export type DnsServerAddresses = {
     udp?: AddressInfo;
     tcp?: AddressInfo|string|null;
+    tls?: AddressInfo|string|null;
     doh?: AddressInfo|string|null;
 };
 
@@ -21,6 +23,7 @@ export type DnsServerAddresses = {
 export type DnsServerListenOptions = {
     udp?: number | {port?: number; address?: string;};
     tcp?: number | {port?: number; address?: string;};
+    tls?: number | {port?: number; address?: string;};
     doh?: number | {port?: number; address?: string;};
 };
 
@@ -31,6 +34,7 @@ export class DnsServer extends EventEmitter {
 
     protected _udp?: UDPServer;
     protected _tcp?: TCPServer;
+    protected _tls?: TLSServer;
     protected _doh?: DohServer;
 
     protected _closed: Promise<void>;
@@ -61,6 +65,16 @@ export class DnsServer extends EventEmitter {
 
             closePromises.push(new Promise<void>((resolve) => { this._tcp!.once('close', resolve); }));
             listenPromises.push(new Promise<void>((resolve) => { this._tcp!.once('listening', resolve); }));
+        }
+
+        if (options.tls) {
+            this._tls = new TLSServer(options);
+
+            this._tls.on('requestError', (error: Error) => this.emit('error', error, 'tls'));
+            this._tls.on('request', (request: Packet, send: unknown, client: unknown) => this.emit('request', request, send, client));
+
+            closePromises.push(new Promise<void>((resolve) => { this._tls!.once('close', resolve); }));
+            listenPromises.push(new Promise<void>((resolve) => { this._tls!.once('listening', resolve); }));
         }
 
         if (options.udp) {
@@ -105,6 +119,10 @@ export class DnsServer extends EventEmitter {
             addresses.tcp = this._tcp.address();
         }
 
+        if (this._tls) {
+            addresses.tls = this._tls.address();
+        }
+
         if (this._doh) {
             addresses.doh = this._doh.address();
         }
@@ -142,6 +160,18 @@ export class DnsServer extends EventEmitter {
             }
         }
 
+        if (this._tls) {
+            const opt = options.tls;
+
+            if (typeof opt === 'object' && opt.port !== undefined) {
+                this._tls.listen({port: opt.port, host: opt.address});
+            } else if (typeof opt === 'number') {
+                this._tls.listen(opt);
+            } else {
+                this._tls.listen(0);
+            }
+        }
+
         if (this._doh) {
             const opt = options.doh;
 
@@ -168,6 +198,10 @@ export class DnsServer extends EventEmitter {
 
         if (this._tcp) {
             this._tcp.close();
+        }
+
+        if (this._tls) {
+            this._tls.close();
         }
 
         if (this._doh) {

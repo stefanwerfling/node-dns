@@ -3,10 +3,15 @@ import {BufferWriter} from '../../Lib/BufferWriter.js';
 
 /**
  * EDNS Option Code
- * @docs https://tools.ietf.org/html/rfc6891#section-6.1.2
+ * @docs https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-11
  */
 export enum EdnsOptionCode {
-    ECS = 0x08
+    NSID = 0x03,
+    ECS = 0x08,
+    COOKIE = 0x0A,
+    KEEPALIVE = 0x0B,
+    PADDING = 0x0C,
+    EDE = 0x0F
 }
 
 /**
@@ -14,6 +19,7 @@ export enum EdnsOptionCode {
  */
 export interface EdnsOption {
     ednsCode: number;
+    encode(writer: BufferWriter): void;
 }
 
 /**

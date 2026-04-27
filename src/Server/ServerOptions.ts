@@ -2,6 +2,7 @@ import dgram from 'dgram';
 import http from 'http';
 import https from 'https';
 import tcp from 'net';
+import tls from 'tls';
 import {Packet} from '../Packet/Packet.js';
 import {DohServerUseCors} from './DohServer.js';
 import {ServerPreConnection} from './ServerPreConnection.js';
@@ -52,11 +53,33 @@ export type ServerDohOptions = {
 };
 
 /**
+ * DoT (DNS over TLS, RFC 7858) transport options
+ */
+export type ServerTlsOptions = {
+    /**
+     * TLS context options forwarded to `tls.createServer` (cert, key, ca, ...).
+     * Required — DoT cannot run without TLS material.
+     */
+    options: tls.TlsOptions;
+
+    /**
+     * Per-message raw buffer processor. Same semantics as `tcp.preRequest`.
+     */
+    preRequest?: ServerPreRequest<tls.TLSSocket>;
+
+    /**
+     * Per-connection processor. Same semantics as `tcp.preConnection`.
+     */
+    preConnection?: ServerPreConnection<tls.TLSSocket>;
+};
+
+/**
  * Server options
  */
 export type ServerOptions = {
     udp?: boolean | ServerUdpOptions;
     tcp?: boolean | ServerTcpOptions;
+    tls?: ServerTlsOptions;
     doh?: boolean | ServerDohOptions;
     handle?: ServerRequestHandler;
 };

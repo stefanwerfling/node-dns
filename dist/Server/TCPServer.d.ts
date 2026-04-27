@@ -15,6 +15,8 @@ export declare class TCPServer {
     protected _preRequest?: ServerPreRequest<tcp.Socket>;
     protected _preConnection?: ServerPreConnection<tcp.Socket>;
     constructor(options?: ServerOptions | null);
+    protected _loadHooks(): void;
+    protected _createInternalServer(listener: (socket: tcp.Socket) => void): tcp.Server;
     listen(...args: Parameters<tcp.Server['listen']>): this;
     close(callback?: (err?: Error) => void): void;
     on<K extends keyof TCPServerEvents>(event: K, listener: TCPServerEvents[K]): this;

@@ -1,6 +1,11 @@
 export var EdnsOptionCode;
 (function (EdnsOptionCode) {
+    EdnsOptionCode[EdnsOptionCode["NSID"] = 3] = "NSID";
     EdnsOptionCode[EdnsOptionCode["ECS"] = 8] = "ECS";
+    EdnsOptionCode[EdnsOptionCode["COOKIE"] = 10] = "COOKIE";
+    EdnsOptionCode[EdnsOptionCode["KEEPALIVE"] = 11] = "KEEPALIVE";
+    EdnsOptionCode[EdnsOptionCode["PADDING"] = 12] = "PADDING";
+    EdnsOptionCode[EdnsOptionCode["EDE"] = 15] = "EDE";
 })(EdnsOptionCode || (EdnsOptionCode = {}));
 export class EdnsECS {
     ednsCode = EdnsOptionCode.ECS;

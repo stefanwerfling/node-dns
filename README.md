@@ -18,8 +18,9 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - Real types from TypeScript source, not just definition files (*.d.ts)
 - Zero production dependencies
 - ESM module format (NodeNext)
-- DNS over UDP, TCP, TLS, and HTTPS (DoH)
-- 23 record types: A, AAAA, MX, NS, CNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS (with ECS), DNSKEY, DS, NAPTR, NSEC, NSEC3, RRSIG, SSHFP, TLSA, SVCB, HTTPS (RFC 9460), TSIG
+- Transports: UDP, TCP, TLS (DoT, RFC 7858) and HTTPS (DoH, RFC 8484), client + server
+- 23 record types: A, AAAA, MX, NS, CNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS, DNSKEY, DS, NAPTR, NSEC, NSEC3, RRSIG, SSHFP, TLSA, SVCB, HTTPS (RFC 9460), TSIG
+- EDNS(0) options: ECS (RFC 7871), Cookies (RFC 7873 + RFC 9018 server-cookie algorithm), Padding (RFC 7830), NSID (RFC 5001), TCP Keepalive (RFC 7828), Extended DNS Errors (RFC 8914)
 - TSIG transaction signing (RFC 8945) — HMAC-based request/response authentication with hmac-md5/sha1/sha224/sha256/sha384/sha512
 - PROXY protocol v1 and v2 support (UDP per-datagram, TCP per-connection) for transparent load-balancer deployments
 
@@ -30,7 +31,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 + Server and Client
 + Lot of Type Supported
 + Extremely lightweight
-+ DNS over UDP, TCP, TLS, HTTPS Supported
++ DNS over UDP, TCP, TLS (DoT), HTTPS (DoH) — Server and Client
 
 ### Installation
 
@@ -186,6 +187,88 @@ $ dig @127.0.0.1 -p5333 lsong.org
 Note that when implementing your own lookups, the contents of the query
 will be found in `request.questions[0].name`.
 
+### DNS over TLS server (DoT, RFC 7858)
+
+`TLSServer` is a TLS-wrapped variant of `TCPServer` — same length-prefixed
+framing and `request` event flow, but the connection is encrypted on port 853
+with a certificate of your choice. The same `preRequest` / `preConnection`
+hooks apply (typed for `tls.TLSSocket`).
+
+```ts
+import {readFileSync} from 'fs';
+import {DnsServer, Packet} from 'dns2ts';
+
+const server = new DnsServer({
+  tcp: true,
+  tls: {
+    options: {
+      cert: readFileSync('server.crt'),
+      key:  readFileSync('server.key'),
+    },
+  },
+  handle: (request, send) => {
+    send(Packet.createResponseFromRequest(request));
+  },
+});
+
+server.listen({tls: 853, tcp: 53});
+```
+
+The combined server reports separate addresses per transport via
+`server.addresses()` (`addresses.tls` is the DoT listener). Use the existing
+`TCPClient` with `protocol: ClientOptionsProtocol.tls` to query a DoT server.
+
+### EDNS(0) options
+
+EDNS records are built with `EDNS.createResource([...options])`. Each option
+implements the `EdnsOption` interface; mix and match in one record:
+
+```ts
+import {
+  EDNS, EdnsECS, EdnsCookie, EdnsPadding, EdnsNsid,
+  EdnsKeepalive, EdnsExtendedError, ExtendedDnsErrorCode,
+} from 'dns2ts';
+
+const opt = EDNS.createResource([
+  new EdnsECS('192.0.2.0/24'),                             // RFC 7871
+  new EdnsCookie(EdnsCookie.generateClientCookie()),       // RFC 7873
+  new EdnsPadding(128),                                    // RFC 7830
+  new EdnsNsid(),                                          // RFC 5001 query
+  new EdnsKeepalive(null),                                 // RFC 7828 client signal
+  new EdnsExtendedError(ExtendedDnsErrorCode.STALE_ANSWER, 'cache hit'),
+]);
+
+packet.additionals.push(opt);
+```
+
+For server-side DNS Cookies, `EdnsCookie` provides RFC 9018-style helpers:
+
+```ts
+import {EdnsCookie} from 'dns2ts';
+
+const secret = readFileSync('cookie-secret.bin'); // long-lived, ≥16 bytes
+
+// Verify a cookie sent by the client
+const ok = EdnsCookie.verifyServerCookie(
+  cookieFromQuery.serverCookie!,
+  cookieFromQuery.clientCookie,
+  clientIpBytes,         // 4 bytes for IPv4, 16 for IPv6
+  secret,
+  {maxAgeSeconds: 3600}, // optional: reject cookies older than 1 hour
+);
+
+// Issue a fresh server cookie back to the client
+const fresh = EdnsCookie.computeServerCookie(
+  cookieFromQuery.clientCookie,
+  clientIpBytes,
+  secret,
+);
+```
+
+`computeServerCookie` returns 24 bytes (1B version + 3B reserved + 4B unix
+timestamp + 16B truncated HMAC-SHA256). `verifyServerCookie` recomputes with
+the embedded timestamp and compares in constant time.
+
 ### TSIG (transaction signatures, RFC 8945)
 
 Sign outgoing queries and verify incoming responses with a shared-secret HMAC.
@@ -297,11 +380,18 @@ npm run lint      # ESLint check
 + [RFC-1035 - Domain Names - Implementation and Specification](https://tools.ietf.org/html/rfc1035)
 + [RFC-2782 - A DNS RR for specifying the location of services (DNS SRV)](https://tools.ietf.org/html/rfc2782)
 + [RFC-4034 - Resource Records for the DNS Security Extensions (DNSSEC)](https://tools.ietf.org/html/rfc4034)
++ [RFC-5001 - DNS Name Server Identifier (NSID) Option](https://datatracker.ietf.org/doc/html/rfc5001)
 + [RFC-6891 - Extension Mechanisms for DNS (EDNS(0))](https://tools.ietf.org/html/rfc6891)
 + [RFC-7766 - DNS Transport over TCP - Implementation Requirements](https://tools.ietf.org/html/rfc7766) (includes §8 truncation fallback)
++ [RFC-7828 - The edns-tcp-keepalive EDNS(0) Option](https://datatracker.ietf.org/doc/html/rfc7828)
++ [RFC-7830 - The EDNS(0) Padding Option](https://datatracker.ietf.org/doc/html/rfc7830)
++ [RFC-7858 - Specification for DNS over Transport Layer Security (DoT)](https://datatracker.ietf.org/doc/html/rfc7858)
 + [RFC-7871 - Client Subnet in DNS Queries](https://tools.ietf.org/html/rfc7871)
++ [RFC-7873 - Domain Name System (DNS) Cookies](https://datatracker.ietf.org/doc/html/rfc7873)
 + [RFC-8484 - DNS Queries over HTTPS (DoH)](https://tools.ietf.org/html/rfc8484)
++ [RFC-8914 - Extended DNS Errors](https://datatracker.ietf.org/doc/html/rfc8914)
 + [RFC-8945 - Secret Key Transaction Authentication for DNS (TSIG)](https://datatracker.ietf.org/doc/html/rfc8945)
++ [RFC-9018 - Interoperable Domain Name System (DNS) Server Cookies](https://datatracker.ietf.org/doc/html/rfc9018)
 + [RFC-9460 - Service Binding and Parameter Specification via the DNS (SVCB, HTTPS)](https://datatracker.ietf.org/doc/html/rfc9460)
 
 ### Contributing

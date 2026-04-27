@@ -12,4 +12,5 @@ export declare class EDNS extends PacketType {
     static createResource(rdata: EdnsOption[]): PacketResource;
     encode(_resource: PacketResource, writer?: BufferWriter | null): Buffer;
     static decode(reader: BufferReader, length: number): PacketType;
+    protected static _decodeOption(code: number, length: number, reader: BufferReader): EdnsOption | null;
 }

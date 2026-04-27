@@ -2,6 +2,7 @@ import dgram from 'dgram';
 import http from 'http';
 import https from 'https';
 import tcp from 'net';
+import tls from 'tls';
 import { Packet } from '../Packet/Packet.js';
 import { DohServerUseCors } from './DohServer.js';
 import { ServerPreConnection } from './ServerPreConnection.js';
@@ -21,9 +22,15 @@ export type ServerDohOptions = {
     cors?: boolean | string | DohServerUseCors;
     preRequest?: ServerPreRequest<http.IncomingMessage>;
 };
+export type ServerTlsOptions = {
+    options: tls.TlsOptions;
+    preRequest?: ServerPreRequest<tls.TLSSocket>;
+    preConnection?: ServerPreConnection<tls.TLSSocket>;
+};
 export type ServerOptions = {
     udp?: boolean | ServerUdpOptions;
     tcp?: boolean | ServerTcpOptions;
+    tls?: ServerTlsOptions;
     doh?: boolean | ServerDohOptions;
     handle?: ServerRequestHandler;
 };

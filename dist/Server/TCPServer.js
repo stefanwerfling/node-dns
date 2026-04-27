@@ -9,19 +9,26 @@ export class TCPServer {
     _preConnection;
     constructor(options = null) {
         this._options = options;
-        if (options && typeof options.tcp === 'object') {
-            if (options.tcp.preRequest) {
-                this._preRequest = options.tcp.preRequest;
-            }
-            if (options.tcp.preConnection) {
-                this._preConnection = options.tcp.preConnection;
-            }
-        }
-        this._tcpServer = tcp.createServer((socket) => {
+        this._loadHooks();
+        this._tcpServer = this._createInternalServer((socket) => {
             this._handle(socket).catch(err => {
                 this._tcpServer?.emit('requestError', err instanceof Error ? err : new Error(String(err)));
             });
         });
+    }
+    _loadHooks() {
+        const opt = this._options?.tcp;
+        if (opt && typeof opt === 'object') {
+            if (opt.preRequest) {
+                this._preRequest = opt.preRequest;
+            }
+            if (opt.preConnection) {
+                this._preConnection = opt.preConnection;
+            }
+        }
+    }
+    _createInternalServer(listener) {
+        return tcp.createServer(listener);
     }
     listen(...args) {
         this._tcpServer.listen(...args);
