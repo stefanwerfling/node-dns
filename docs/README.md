@@ -39,6 +39,12 @@ example.
   registry-operator obligations (DNSSEC, EPP, RDAP, data escrow), where
   dns2ts fits, and realistic alternatives for most goals. Full link/RFC
   reference list.
+- **[Becoming a registrar](becoming-a-registrar.md)** — the other half of
+  the domain business: ICANN-accredited gTLD registrar (RAA terms,
+  ~$70k working-capital + insurance), ccTLD-only direct (DENIC, Nominet,
+  EURid, AFNIC, …), reseller via wholesale APIs (OpenSRS, eNom,
+  ResellerClub) — the path most launches actually take. Where dns2ts
+  fits as the DNS-hosting value-add layer.
 - **[Zone files](zone-files.md)** — the RFC 1035 master file parser and the
   `Zone` class.
 - **[AXFR](axfr.md)** — full zone transfer over TCP/TLS with the `Zone`

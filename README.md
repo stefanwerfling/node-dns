@@ -70,6 +70,11 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   in operating a public TLD: ICANN gTLD process, IETF special-use names,
   private/alternative roots, registry-operator obligations (DNSSEC, EPP,
   RDAP, escrow), where dns2ts fits, and full link/RFC reference list.
+- **[Becoming a registrar](docs/becoming-a-registrar.md)** — the
+  domain-selling tier: ICANN-accredited gTLD registrar, ccTLD-only direct,
+  or reseller via OpenSRS / eNom / ResellerClub (the path most launches
+  actually take). Costs, RAA obligations, EPP/WHOIS/RDAP touchpoints,
+  where dns2ts handles the DNS-hosting value-add.
 - **[Zone files](docs/zone-files.md)** — RFC 1035 master file parser and
   the `Zone` class. Directives, inheritance rules, supported RDATA, errors.
 - **[AXFR](docs/axfr.md)** — full zone transfer over TCP/TLS using `Zone`
