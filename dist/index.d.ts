@@ -1,6 +1,8 @@
 export { BufferReader } from './Lib/BufferReader.js';
 export { BufferWriter } from './Lib/BufferWriter.js';
 export { SocketReader } from './Lib/SocketReader.js';
+export { ZoneParser } from './Lib/ZoneParser.js';
+export type { ZoneParseOptions, ZoneParseResult, ZoneToken, ZoneTokenLine } from './Lib/ZoneParser.js';
 export { IP } from './Packet/IP.js';
 export { Packet } from './Packet/Packet.js';
 export { PacketClass } from './Packet/PacketClass.js';

@@ -4,6 +4,7 @@ import './edns.js';
 import './recordTypes.js';
 import './proxyProtocol.js';
 import './tsig.js';
+import './zoneParser.js';
 import './serverDoh.js';
 import './serverIntegration.js';
 import './serverTls.js';

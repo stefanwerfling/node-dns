@@ -23,6 +23,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - EDNS(0) options: ECS (RFC 7871), Cookies (RFC 7873 + RFC 9018 server-cookie algorithm), Padding (RFC 7830), NSID (RFC 5001), TCP Keepalive (RFC 7828), Extended DNS Errors (RFC 8914)
 - TSIG transaction signing (RFC 8945) — HMAC-based request/response authentication with hmac-md5/sha1/sha224/sha256/sha384/sha512
 - PROXY protocol v1 and v2 support (UDP per-datagram, TCP per-connection) for transparent load-balancer deployments
+- RFC 1035 master file ("zone file") parser — `$ORIGIN`, `$TTL`, `@`, multi-line records via parens, quoted strings; RDATA for A, AAAA, NS, CNAME, PTR, MX, TXT, SOA, SRV, CAA
 
 <hr>
 
@@ -268,6 +269,41 @@ const fresh = EdnsCookie.computeServerCookie(
 `computeServerCookie` returns 24 bytes (1B version + 3B reserved + 4B unix
 timestamp + 16B truncated HMAC-SHA256). `verifyServerCookie` recomputes with
 the embedded timestamp and compares in constant time.
+
+### Zone file parser (RFC 1035 master file format)
+
+`ZoneParser.parse(text, options?)` turns a BIND-style zone file into an array
+of `PacketResource` objects. Comments, parens-spanned records, quoted strings,
+`$ORIGIN`/`$TTL` directives and `@` are all supported; owner-name inheritance
+follows RFC 1035 §5.1 (a line that begins with whitespace inherits the owner
+name from the previous record).
+
+```ts
+import {ZoneParser} from 'dns2ts';
+
+const text = `
+$ORIGIN example.com.
+$TTL 3600
+@   IN SOA ns1 admin (
+        2024010101  ; serial
+        7200        ; refresh
+        3600        ; retry
+        1209600     ; expire
+        3600 )      ; minimum
+    IN NS  ns1
+    IN MX  10 mail
+www IN A   192.0.2.1
+www IN AAAA 2001:db8::1
+`;
+
+const {origin, records} = ZoneParser.parse(text);
+console.log(origin);             // 'example.com.'
+console.log(records.length);     // 5
+```
+
+RDATA parsers ship for the 10 most common record types: A, AAAA, NS, CNAME,
+PTR, MX, TXT, SOA, SRV, CAA. Unsupported types throw a descriptive error
+with the offending line number rather than silently dropping data.
 
 ### TSIG (transaction signatures, RFC 8945)
 
