@@ -24,6 +24,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - TSIG transaction signing (RFC 8945) — HMAC-based request/response authentication with hmac-md5/sha1/sha224/sha256/sha384/sha512
 - PROXY protocol v1 and v2 support (UDP per-datagram, TCP per-connection) for transparent load-balancer deployments
 - RFC 1035 master file ("zone file") parser — `$ORIGIN`, `$TTL`, `@`, multi-line records via parens, quoted strings; RDATA for A, AAAA, NS, CNAME, PTR, MX, TXT, SOA, SRV, CAA
+- AXFR zone transfer (RFC 5936) — `Zone` class for in-memory zones, `AxfrClient` for fetching, `send(Packet[])` server hook for serving
 
 <hr>
 
@@ -305,6 +306,51 @@ RDATA parsers ship for the 10 most common record types: A, AAAA, NS, CNAME,
 PTR, MX, TXT, SOA, SRV, CAA. Unsupported types throw a descriptive error
 with the offending line number rather than silently dropping data.
 
+### AXFR zone transfer (RFC 5936)
+
+`Zone` is the in-memory representation of a parsed zone (origin + records +
+SOA helpers). `AxfrClient` opens a TCP (or TLS) connection, sends one
+`QTYPE=AXFR` query, and reassembles the multi-message stream until the
+closing SOA. The server-side hook accepts `Packet[]` so a single handler
+call can emit the full transfer.
+
+```ts
+import {DnsServer, Zone, AxfrClient} from 'dns2ts';
+
+const zone = Zone.fromZoneFile(`
+$ORIGIN example.com.
+$TTL 3600
+@   IN SOA ns1 admin (2024010101 7200 3600 1209600 3600)
+@   IN NS  ns1
+@   IN MX  10 mail
+www IN A   192.0.2.1
+`);
+
+// Authoritative server: serve AXFR for the zone
+const server = new DnsServer({
+  tcp: true,
+  handle: (request, send) => {
+    if (request.questions[0]?.type === 252 /* AXFR */) {
+      send(zone.toAxfrPackets(request));   // multi-message reply
+      return;
+    }
+    // … normal A/AAAA/MX/… handling …
+  },
+});
+const {tcp} = await server.listen();
+
+// Fetch the zone with the client
+const transfer = AxfrClient.request({dns: '127.0.0.1', port: tcp.port});
+const {soa, records} = await transfer('example.com');
+console.log(soa.packetType.serial, records.length);
+```
+
+`zone.toAxfrPackets(query)` currently emits the simplest valid AXFR shape
+(RFC 5936 §2.2): one response message that begins and ends with the SOA.
+Multi-message splitting for zones whose serialized form would exceed 64 KiB
+is not yet implemented — split the records yourself and call
+`send([packet1, packet2, …])` for very large zones.
+
 ### TSIG (transaction signatures, RFC 8945)
 
 Sign outgoing queries and verify incoming responses with a shared-secret HMAC.
@@ -427,6 +473,7 @@ npm run lint      # ESLint check
 + [RFC-8484 - DNS Queries over HTTPS (DoH)](https://tools.ietf.org/html/rfc8484)
 + [RFC-8914 - Extended DNS Errors](https://datatracker.ietf.org/doc/html/rfc8914)
 + [RFC-8945 - Secret Key Transaction Authentication for DNS (TSIG)](https://datatracker.ietf.org/doc/html/rfc8945)
++ [RFC-5936 - DNS Zone Transfer Protocol (AXFR)](https://datatracker.ietf.org/doc/html/rfc5936)
 + [RFC-9018 - Interoperable Domain Name System (DNS) Server Cookies](https://datatracker.ietf.org/doc/html/rfc9018)
 + [RFC-9460 - Service Binding and Parameter Specification via the DNS (SVCB, HTTPS)](https://datatracker.ietf.org/doc/html/rfc9460)
 

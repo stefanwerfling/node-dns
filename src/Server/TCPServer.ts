@@ -7,10 +7,18 @@ import {ServerPreConnection} from './ServerPreConnection.js';
 import {ServerPreRequest} from './ServerPreRequest.js';
 
 /**
+ * Reply payload accepted by the per-connection `send` callback. A single
+ * Packet covers the common one-shot response case; an array is used for
+ * AXFR (RFC 5936) and any other multi-message exchange — all elements are
+ * written as length-prefixed frames before the connection is closed.
+ */
+export type TCPSendable = Packet | Packet[];
+
+/**
  * TCP Server Events
  */
 export type TCPServerEvents = {
-    request: (msgRequest: Packet, send: (request: Packet) => void, client: tcp.Socket) => void;
+    request: (msgRequest: Packet, send: (response: TCPSendable) => void, client: tcp.Socket) => void;
     requestError: (error: Error) => void;
     listening: () => void;
     close: () => void;
@@ -171,18 +179,31 @@ export class TCPServer {
     }
 
     /**
-     * Handle client messages response
+     * Handle client messages response. Accepts a single Packet (one-shot) or
+     * an array (multi-message, e.g. AXFR). All packets are written as
+     * length-prefixed frames; the connection is closed after the last frame.
      * @param {tcp.Socket} client
-     * @param {Packet} message
+     * @param {TCPSendable} message
      * @protected
      */
-    protected _response(client: tcp.Socket, message: Packet): void {
-        const buffer = message.toBuffer();
-        const len = Buffer.alloc(2);
+    protected _response(client: tcp.Socket, message: TCPSendable): void {
+        const messages = Array.isArray(message) ? message : [message];
 
-        len.writeUInt16BE(buffer.length);
+        if (messages.length === 0) {
+            client.end();
+            return;
+        }
 
-        client.end(Buffer.concat([len, buffer]));
+        const chunks: Buffer[] = [];
+
+        for (const m of messages) {
+            const buffer = m.toBuffer();
+            const len = Buffer.alloc(2);
+            len.writeUInt16BE(buffer.length);
+            chunks.push(len, buffer);
+        }
+
+        client.end(Buffer.concat(chunks));
     }
 
     /**

@@ -73,10 +73,19 @@ export class TCPServer {
         }
     }
     _response(client, message) {
-        const buffer = message.toBuffer();
-        const len = Buffer.alloc(2);
-        len.writeUInt16BE(buffer.length);
-        client.end(Buffer.concat([len, buffer]));
+        const messages = Array.isArray(message) ? message : [message];
+        if (messages.length === 0) {
+            client.end();
+            return;
+        }
+        const chunks = [];
+        for (const m of messages) {
+            const buffer = m.toBuffer();
+            const len = Buffer.alloc(2);
+            len.writeUInt16BE(buffer.length);
+            chunks.push(len, buffer);
+        }
+        client.end(Buffer.concat(chunks));
     }
     address() {
         return this._tcpServer.address();

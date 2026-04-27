@@ -3,8 +3,9 @@ import { Packet } from '../Packet/Packet.js';
 import { ServerOptions } from './ServerOptions.js';
 import { ServerPreConnection } from './ServerPreConnection.js';
 import { ServerPreRequest } from './ServerPreRequest.js';
+export type TCPSendable = Packet | Packet[];
 export type TCPServerEvents = {
-    request: (msgRequest: Packet, send: (request: Packet) => void, client: tcp.Socket) => void;
+    request: (msgRequest: Packet, send: (response: TCPSendable) => void, client: tcp.Socket) => void;
     requestError: (error: Error) => void;
     listening: () => void;
     close: () => void;
@@ -22,6 +23,6 @@ export declare class TCPServer {
     on<K extends keyof TCPServerEvents>(event: K, listener: TCPServerEvents[K]): this;
     once<K extends keyof TCPServerEvents>(event: K, listener: TCPServerEvents[K]): this;
     protected _handle(client: tcp.Socket): Promise<void>;
-    protected _response(client: tcp.Socket, message: Packet): void;
+    protected _response(client: tcp.Socket, message: TCPSendable): void;
     address(): tcp.AddressInfo | string | null;
 }

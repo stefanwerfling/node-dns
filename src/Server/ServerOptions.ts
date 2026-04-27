@@ -9,11 +9,14 @@ import {ServerPreConnection} from './ServerPreConnection.js';
 import {ServerPreRequest} from './ServerPreRequest.js';
 
 /**
- * Server request handler
+ * Server request handler. The `send` callback accepts a single Packet for
+ * the typical one-shot response, or `Packet[]` for multi-message exchanges
+ * such as AXFR (RFC 5936). UDP only honours the first packet; TCP/TLS write
+ * all frames before closing the connection.
  */
 export type ServerRequestHandler = (
     request: Packet,
-    send: (response: Packet) => void,
+    send: (response: Packet | Packet[]) => void,
     client: unknown
 ) => void;
 

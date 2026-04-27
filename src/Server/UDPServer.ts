@@ -6,9 +6,17 @@ import {ServerOptions} from './ServerOptions.js';
 import {ServerPreRequest} from './ServerPreRequest.js';
 
 /**
+ * Reply payload accepted by the UDP `send` callback. UDP cannot stream
+ * multiple datagrams as one logical reply, so when an array is passed only
+ * the first element is sent and the rest are silently dropped (AXFR-style
+ * multi-message responses are TCP-only by design — RFC 5936 §4.2).
+ */
+export type UDPSendable = Packet | Packet[] | Buffer;
+
+/**
  * UDP Request Listener
  */
-export type UDPRequestListener = (msg: Packet, send: (msg: Packet | Buffer) => Promise<Buffer | void>, rinfo: dgram.RemoteInfo) => void;
+export type UDPRequestListener = (msg: Packet, send: (msg: UDPSendable) => Promise<Buffer | void>, rinfo: dgram.RemoteInfo) => void;
 
 /**
  * UDP Server
@@ -124,12 +132,23 @@ export class UDPServer {
     /**
      * response
      * @param {dgram.RemoteInfo} rinfo
-     * @param {Packet|Buffer} message
+     * @param {UDPSendable} message single packet, packet array (only first
+     *        used) or pre-encoded buffer
      * @return {Buffer}
      * @protected
      */
-    protected _response(rinfo: dgram.RemoteInfo, message: Packet|Buffer): Promise<Buffer|void> {
-        const tmessage = message instanceof Packet ? message.toBuffer() : message;
+    protected _response(rinfo: dgram.RemoteInfo, message: UDPSendable): Promise<Buffer|void> {
+        let payload: Packet|Buffer;
+
+        if (Array.isArray(message)) {
+            // AXFR-style multi-message responses don't fit into a UDP datagram;
+            // honour the first packet and drop the rest.
+            payload = message[0];
+        } else {
+            payload = message;
+        }
+
+        const tmessage = payload instanceof Packet ? payload.toBuffer() : payload;
 
         return new Promise((resolve, reject) => {
             this._socket.send(tmessage, rinfo.port, rinfo.address, (err): void => {

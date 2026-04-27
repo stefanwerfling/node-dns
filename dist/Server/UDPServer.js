@@ -47,7 +47,14 @@ export class UDPServer {
         }
     }
     _response(rinfo, message) {
-        const tmessage = message instanceof Packet ? message.toBuffer() : message;
+        let payload;
+        if (Array.isArray(message)) {
+            payload = message[0];
+        }
+        else {
+            payload = message;
+        }
+        const tmessage = payload instanceof Packet ? payload.toBuffer() : payload;
         return new Promise((resolve, reject) => {
             this._socket.send(tmessage, rinfo.port, rinfo.address, (err) => {
                 if (err) {

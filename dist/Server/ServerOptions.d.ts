@@ -7,7 +7,7 @@ import { Packet } from '../Packet/Packet.js';
 import { DohServerUseCors } from './DohServer.js';
 import { ServerPreConnection } from './ServerPreConnection.js';
 import { ServerPreRequest } from './ServerPreRequest.js';
-export type ServerRequestHandler = (request: Packet, send: (response: Packet) => void, client: unknown) => void;
+export type ServerRequestHandler = (request: Packet, send: (response: Packet | Packet[]) => void, client: unknown) => void;
 export type ServerUdpOptions = {
     type?: 'udp4' | 'udp6';
     preRequest?: ServerPreRequest<dgram.RemoteInfo>;
