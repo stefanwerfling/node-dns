@@ -33,6 +33,12 @@ example.
   step-by-step recipe for moving `lab.example.com` onto your own dns2ts
   server, multi-NS replication, sub-delegation, verification, common
   pitfalls.
+- **[Secure domain with desec.io](secure-domain-with-desec.md)** — a
+  concrete recipe: free DNSSEC via desec.io as the parent service,
+  every email-security record (SPF, DKIM, DMARC, MTA-STS, TLS-RPT,
+  DANE/TLSA) configured at the apex, and a subdomain delegated onward
+  to your own dns2ts server (insecure delegation today, full chain
+  once dns2ts gains DNSSEC signing).
 - **[Becoming a TLD](becoming-a-tld.md)** — honest walkthrough of the
   paths that actually exist (ICANN gTLD program, IETF special-use names,
   private/alternative roots), the costs and timelines, the ongoing

@@ -66,6 +66,10 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   with NS records: how to delegate `lab.example.com` to your own dns2ts
   server, glue records, multi-NS setups with NOTIFY/AXFR, sub-delegation,
   verification, and common pitfalls.
+- **[Secure domain with desec.io](docs/secure-domain-with-desec.md)** —
+  free DNSSEC via desec.io as the parent service, full email-security
+  record set (SPF, DKIM, DMARC, MTA-STS, TLS-RPT, DANE/TLSA), and a
+  subdomain delegated to your own dns2ts server.
 - **[Becoming a TLD](docs/becoming-a-tld.md)** — what's actually involved
   in operating a public TLD: ICANN gTLD process, IETF special-use names,
   private/alternative roots, registry-operator obligations (DNSSEC, EPP,
