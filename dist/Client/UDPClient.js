@@ -1,4 +1,5 @@
 import dgram from 'dgram';
+import { Random0x20 } from '../Lib/Random0x20.js';
 import { Packet } from '../Packet/Packet.js';
 import { PacketQuestion } from '../Packet/PacketQuestion.js';
 import { EDNS, EdnsECS } from '../Packet/Types/EDNS.js';
@@ -32,7 +33,8 @@ export class UDPClient extends AClient {
                     recursive = options.recursive;
                 }
             }
-            const query = UDPClient.makeQuery(name, type, cls, clientIp, recursive);
+            const sentName = option.use0x20 === true ? Random0x20.scramble(name) : name;
+            const query = UDPClient.makeQuery(sentName, type, cls, clientIp, recursive);
             const client = dgram.createSocket(socketType);
             const response = await new Promise((resolve, reject) => {
                 client.once('message', (message) => {
@@ -47,10 +49,16 @@ export class UDPClient extends AClient {
                     }
                 });
             });
+            if (option.use0x20 === true && response.questions.length > 0) {
+                if (!Random0x20.matches(sentName, response.questions[0].name)) {
+                    throw new Error(`0x20 mismatch: sent "${sentName}", got "${response.questions[0].name}" — response may be spoofed`);
+                }
+            }
             if (tcpFallback && response.header.tc === 1) {
                 const tcpResolve = TCPClient.request({
                     dns: dns,
-                    port: tcpFallbackPort
+                    port: tcpFallbackPort,
+                    use0x20: option.use0x20,
                 });
                 return tcpResolve(name, type, cls, options);
             }

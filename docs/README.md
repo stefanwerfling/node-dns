@@ -50,3 +50,7 @@ example.
 - **[Reverse proxy](reverse-proxy.md)** — putting nginx, HAProxy, or Envoy in
   front of a dns2ts server. TLS termination, TLS passthrough, PROXY-protocol
   IP transparency, and troubleshooting.
+- **[Security hardening](security-hardening.md)** — 0x20 query-name case
+  randomization (`Random0x20`, opt-in via `use0x20: true` on clients) and
+  bailiwick filtering (`Bailiwick.contains`, `Bailiwick.filter`) against
+  off-path spoofing and cache-poisoning attacks.

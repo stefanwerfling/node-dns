@@ -1,5 +1,6 @@
 import tcp from 'net';
 import tls from 'tls';
+import { Random0x20 } from '../Lib/Random0x20.js';
 import { SocketReader } from '../Lib/SocketReader.js';
 import { Packet } from '../Packet/Packet.js';
 import { PacketQuestion } from '../Packet/PacketQuestion.js';
@@ -62,7 +63,8 @@ export class TCPClient extends AClient {
                     recursive = options.recursive;
                 }
             }
-            const message = TCPClient.makeQuery(name, type, cls, clientIp, recursive);
+            const sentName = option.use0x20 === true ? Random0x20.scramble(name) : name;
+            const message = TCPClient.makeQuery(sentName, type, cls, clientIp, recursive);
             const [host] = option.dns.split(':');
             const client = TCPClient.getClient(protocol, host, port);
             TCPClient.sendQuery(client, message);
@@ -71,7 +73,13 @@ export class TCPClient extends AClient {
             if (!data.length) {
                 throw new Error('Empty response');
             }
-            return Packet.parse(data);
+            const response = Packet.parse(data);
+            if (option.use0x20 === true && response.questions.length > 0) {
+                if (!Random0x20.matches(sentName, response.questions[0].name)) {
+                    throw new Error(`0x20 mismatch: sent "${sentName}", got "${response.questions[0].name}" — response may be spoofed`);
+                }
+            }
+            return response;
         };
     }
 }

@@ -28,6 +28,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - IXFR incremental zone transfer (RFC 1995) — `Zone.toIxfrPackets` with optional `ZoneChangeSet` history, `IxfrClient` returning a no-change / incremental / AXFR-fallback discriminated union
 - NOTIFY zone-change notification (RFC 1996) — `NotifyClient` on the primary side, opcode-dispatch on the secondary side
 - DNS UPDATE (RFC 2136) — `UpdateBuilder` fluent API, `Update.applyToZone` reference engine, `UpdateClient` over UDP/TCP/TLS
+- 0x20 query-name case randomization (RFC 5452) and bailiwick filtering — opt-in spoofing and cache-poisoning defenses
 
 <hr>
 
@@ -79,6 +80,10 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
 - **[Reverse proxy](docs/reverse-proxy.md)** — putting nginx, HAProxy, or
   Envoy in front of a dns2ts server. TLS termination vs pass-through,
   PROXY-protocol IP transparency, complete configs, troubleshooting.
+- **[Security hardening](docs/security-hardening.md)** — 0x20 query-name
+  case randomization (`Random0x20`, `use0x20: true`) and bailiwick
+  filtering (`Bailiwick.contains`, `Bailiwick.filter`) against off-path
+  spoofing and cache poisoning.
 
 ### DNS Client (default UDP)
 

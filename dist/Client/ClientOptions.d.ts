@@ -11,4 +11,5 @@ export type ClientOptions = {
     port?: number;
     tcpFallback?: boolean;
     tcpFallbackPort?: number;
+    use0x20?: boolean;
 };

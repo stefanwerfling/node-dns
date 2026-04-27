@@ -24,4 +24,14 @@ export type ClientOptions = {
      * port, which matches the usual DNS setup (both on 53).
      */
     tcpFallbackPort?: number;
+
+    /**
+     * Apply 0x20 case-randomization to the QNAME and verify the response
+     * echoes back the same case (RFC 5452 §9.2). When the case-mismatch
+     * check fires, the resolver throws — the response is treated as a
+     * possible spoofing attempt rather than returned silently. Off by
+     * default; some legacy recursors normalize case in their replies and
+     * would break with `use0x20: true`.
+     */
+    use0x20?: boolean;
 };
