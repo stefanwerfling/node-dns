@@ -62,6 +62,10 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   Errors.
 - **[TSIG](docs/tsig.md)** — transaction-signature signing/verification,
   fudge window, request-MAC chaining.
+- **[Subdomain delegation](docs/subdomain-delegation.md)** — DNS structure
+  with NS records: how to delegate `lab.example.com` to your own dns2ts
+  server, glue records, multi-NS setups with NOTIFY/AXFR, sub-delegation,
+  verification, and common pitfalls.
 - **[Zone files](docs/zone-files.md)** — RFC 1035 master file parser and
   the `Zone` class. Directives, inheritance rules, supported RDATA, errors.
 - **[AXFR](docs/axfr.md)** — full zone transfer over TCP/TLS using `Zone`

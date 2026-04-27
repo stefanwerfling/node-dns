@@ -28,6 +28,11 @@ example.
 
 ## Authoritative serving
 
+- **[Subdomain delegation](subdomain-delegation.md)** — the DNS-structure
+  primer: how NS records delegate authority, when glue is required,
+  step-by-step recipe for moving `lab.example.com` onto your own dns2ts
+  server, multi-NS replication, sub-delegation, verification, common
+  pitfalls.
 - **[Zone files](zone-files.md)** — the RFC 1035 master file parser and the
   `Zone` class.
 - **[AXFR](axfr.md)** — full zone transfer over TCP/TLS with the `Zone`
