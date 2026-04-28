@@ -13,6 +13,7 @@ import { NAPTR } from './Types/NAPTR.js';
 import { NS } from './Types/NS.js';
 import { NSEC } from './Types/NSEC.js';
 import { NSEC3 } from './Types/NSEC3.js';
+import { NSEC3PARAM } from './Types/NSEC3PARAM.js';
 import { PTR } from './Types/PTR.js';
 import { RRSIG } from './Types/RRSIG.js';
 import { SOA } from './Types/SOA.js';
@@ -47,6 +48,7 @@ export class PacketTypeRegistry {
             PacketTypeRegistry._instance.registerPacket(PacketTypes.NSEC, NSEC);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.DNSKEY, DNSKEY);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.NSEC3, NSEC3);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.NSEC3PARAM, NSEC3PARAM);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.TLSA, TLSA);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.SVCB, SVCB);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.HTTPS, HTTPS);

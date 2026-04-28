@@ -30,6 +30,7 @@ export enum PacketTypes {
     NSEC = 0x2F,
     DNSKEY = 0x30,
     NSEC3 = 0x32,
+    NSEC3PARAM = 0x33,
     TLSA = 0x34,
     SVCB = 0x40,
     HTTPS = 0x41,

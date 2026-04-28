@@ -271,17 +271,34 @@ const {records, rrsigs} = Dnssec.signZone(zone, {
 });
 ```
 
+For NSEC3 instead of NSEC, pass `nsec3` instead of `nsec` (they are
+mutually exclusive):
+
+```ts
+const {records, rrsigs} = Dnssec.signZone(zone, {
+  ksk: {dnskey: kskDnskey, privateKey: ksk.privateKey},
+  zsk: {dnskey: zskDnskey, privateKey: zsk.privateKey},
+  inception: '20240101000000',
+  expiration: '20300101000000',
+  nsec3: {
+    salt: 'aabbccdd',  // hex; default '' (no salt)
+    iterations: 0,     // default 0 — RFC 9276 §3.1 strongly recommends 0
+    optOut: false,     // default false; sets the opt-out bit in every NSEC3
+  },
+});
+```
+
 What it still does **not** do (yet):
 
-- **Generate the NSEC3 chain.** The building blocks (`nsec3Hash`,
-  `nsec3CoversHash`, `base32hexEncode`) are exposed separately but the
-  end-to-end "build the hashed-owner chain with NSEC3PARAM" loop isn't
-  wired into `signZone`.
 - **Distinguish KSK from ZSK by SEP bit semantics.** `signZone` just
   takes the keys you give it and signs the DNSKEY RRset with the one
   you tagged `ksk`. The DNSKEY flags field is whatever you put on the
   DNSKEY object — typically `257` for KSK (SEP bit set) and `256` for
   ZSK (`publicKeyToDnskey`'s default is `257`).
+- **Skip insecure delegations from the NSEC3 chain when opt-out is on.**
+  We publish the opt-out bit but emit an NSEC3 record for every name
+  regardless. Real opt-out behavior (omitting NS-only owners from the
+  chain) is the caller's job for now.
 
 ## Negative-answer building blocks
 

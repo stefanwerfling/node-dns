@@ -39,6 +39,11 @@ export type DnssecSignZoneOptions = {
     expiration: string | number;
     dnskeyTtl?: number;
     nsec?: boolean;
+    nsec3?: {
+        salt?: string;
+        iterations?: number;
+        optOut?: boolean;
+    };
 };
 export type DnssecSignZoneResult = {
     records: PacketResource[];
@@ -53,6 +58,11 @@ export declare class Dnssec {
     static signRrset(owner: string, rrset: PacketResource[], dnskey: DNSKEY, privateKey: crypto.KeyObject, options: DnssecSignOptions): RRSIG;
     static signZone(zone: Zone, options: DnssecSignZoneOptions): DnssecSignZoneResult;
     protected static _generateNsecChain(records: PacketResource[], cls: number, ttl: number): PacketResource[];
+    protected static _generateNsec3Chain(records: PacketResource[], apex: string, cls: number, ttl: number, nsec3Options: {
+        salt?: string;
+        iterations?: number;
+        optOut?: boolean;
+    }): PacketResource[];
     protected static _defaultDnskeyTtl(zone: Zone): number;
     static publicKeyToDnskey(publicKey: crypto.KeyObject, algorithm: number, flags?: number, protocol?: number): DNSKEY;
     static buildSigningInput(owner: string, rrset: PacketResource[], rrsig: RRSIG): Buffer;

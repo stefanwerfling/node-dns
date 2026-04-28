@@ -7,6 +7,8 @@ import { PacketTypes } from '../Packet/PacketTypes.js';
 import { DNSKEY } from '../Packet/Types/DNSKEY.js';
 import { NAPTR } from '../Packet/Types/NAPTR.js';
 import { NSEC } from '../Packet/Types/NSEC.js';
+import { NSEC3 } from '../Packet/Types/NSEC3.js';
+import { NSEC3PARAM } from '../Packet/Types/NSEC3PARAM.js';
 import { RRSIG } from '../Packet/Types/RRSIG.js';
 import { SOA } from '../Packet/Types/SOA.js';
 import { SRV } from '../Packet/Types/SRV.js';
@@ -32,6 +34,7 @@ export class Dnssec {
         PacketTypes.DNSKEY,
         PacketTypes.DS,
         PacketTypes.NSEC3,
+        PacketTypes.NSEC3PARAM,
         PacketTypes.SPF,
         PacketTypes.SSHFP,
         PacketTypes.TLSA,
@@ -119,10 +122,17 @@ export class Dnssec {
         if (!sameKey) {
             dnskeyRRs.push(new PacketResource(apex, options.zsk.dnskey, cls, dnskeyTtl));
         }
+        if (options.nsec === true && options.nsec3 !== undefined) {
+            throw new Error('Dnssec.signZone: `nsec` and `nsec3` are mutually exclusive');
+        }
         let records = [...zone.records, ...dnskeyRRs];
         if (options.nsec === true) {
             const nsecRRs = Dnssec._generateNsecChain(records, cls, dnskeyTtl);
             records = [...records, ...nsecRRs];
+        }
+        else if (options.nsec3 !== undefined) {
+            const nsec3RRs = Dnssec._generateNsec3Chain(records, apex, cls, dnskeyTtl, options.nsec3);
+            records = [...records, ...nsec3RRs];
         }
         const rrsigs = [];
         const groups = new Map();
@@ -175,6 +185,47 @@ export class Dnssec {
             const nsec = new NSEC(next, types);
             result.push(new PacketResource(name, nsec, cls, ttl));
         }
+        return result;
+    }
+    static _generateNsec3Chain(records, apex, cls, ttl, nsec3Options) {
+        const salt = nsec3Options.salt ?? '';
+        const iterations = nsec3Options.iterations ?? 0;
+        const optOut = nsec3Options.optOut === true;
+        const flags = optOut ? 1 : 0;
+        const apexLower = apex.toLowerCase();
+        const nameToTypes = new Map();
+        for (const rr of records) {
+            const lower = rr.name.toLowerCase();
+            let types = nameToTypes.get(lower);
+            if (!types) {
+                types = new Set();
+                nameToTypes.set(lower, types);
+            }
+            types.add(rr.packetType.type);
+        }
+        for (const types of nameToTypes.values()) {
+            types.add(PacketTypes.RRSIG);
+        }
+        const entries = [];
+        for (const [name, types] of nameToTypes.entries()) {
+            const hash = Dnssec.nsec3Hash(name, salt, iterations);
+            entries.push({
+                hashHex: hash.toString('hex'),
+                types: [...types].sort((a, b) => a - b),
+            });
+        }
+        entries.sort((a, b) => Buffer.compare(Buffer.from(a.hashHex, 'hex'), Buffer.from(b.hashHex, 'hex')));
+        const result = [];
+        for (let i = 0; i < entries.length; i++) {
+            const cur = entries[i];
+            const next = entries[(i + 1) % entries.length];
+            const ownerLabel = Dnssec.base32hexEncode(Buffer.from(cur.hashHex, 'hex')).toLowerCase();
+            const ownerName = `${ownerLabel}.${apexLower}`;
+            const nsec3 = new NSEC3(1, flags, iterations, salt, next.hashHex, cur.types);
+            result.push(new PacketResource(ownerName, nsec3, cls, ttl));
+        }
+        const nsec3param = new NSEC3PARAM(1, 0, iterations, salt);
+        result.push(new PacketResource(apex, nsec3param, cls, ttl));
         return result;
     }
     static _defaultDnskeyTtl(zone) {

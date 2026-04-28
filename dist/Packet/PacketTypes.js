@@ -27,6 +27,7 @@ export var PacketTypes;
     PacketTypes[PacketTypes["NSEC"] = 47] = "NSEC";
     PacketTypes[PacketTypes["DNSKEY"] = 48] = "DNSKEY";
     PacketTypes[PacketTypes["NSEC3"] = 50] = "NSEC3";
+    PacketTypes[PacketTypes["NSEC3PARAM"] = 51] = "NSEC3PARAM";
     PacketTypes[PacketTypes["TLSA"] = 52] = "TLSA";
     PacketTypes[PacketTypes["SVCB"] = 64] = "SVCB";
     PacketTypes[PacketTypes["HTTPS"] = 65] = "HTTPS";

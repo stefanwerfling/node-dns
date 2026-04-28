@@ -1,6 +1,7 @@
 import assert from 'assert';
 import { Buffer } from 'buffer';
 import * as crypto from 'crypto';
+import {BufferReader} from '../Lib/BufferReader.js';
 import {Dnssec, DnssecAlgorithm, DnssecDigest} from '../Lib/Dnssec.js';
 import {PacketClass} from '../Packet/PacketClass.js';
 import {PacketResource} from '../Packet/PacketResource.js';
@@ -13,6 +14,8 @@ import {MX} from '../Packet/Types/MX.js';
 import {NAPTR} from '../Packet/Types/NAPTR.js';
 import {NS} from '../Packet/Types/NS.js';
 import {NSEC} from '../Packet/Types/NSEC.js';
+import {NSEC3} from '../Packet/Types/NSEC3.js';
+import {NSEC3PARAM} from '../Packet/Types/NSEC3PARAM.js';
 import {RRSIG} from '../Packet/Types/RRSIG.js';
 import {SOA} from '../Packet/Types/SOA.js';
 import {SRV} from '../Packet/Types/SRV.js';
@@ -1283,6 +1286,294 @@ test('Dnssec#signZone NSEC chain bitmap at non-apex names contains the type at t
 
     const types = (mailNsec!.packetType as NSEC).rdtypes.slice().sort((a, b) => a - b);
     assert.deepEqual(types, [PacketTypes.A, PacketTypes.RRSIG, PacketTypes.NSEC].sort((a, b) => a - b));
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3D: NSEC3 chain generation
+// ---------------------------------------------------------------------------
+
+test('Dnssec#NSEC3PARAM encode/decode round-trip via Packet', async () => {
+    // Smoke-test that the type is properly registered.
+    const p = new NSEC3PARAM(1, 0, 12, 'aabbccdd');
+    const buf = p.encode({} as PacketResource).subarray(2);
+    const reader = new BufferReader(buf);
+    const decoded = NSEC3PARAM.decode(reader, buf.length) as NSEC3PARAM;
+
+    assert.equal(decoded.hashAlgorithm, 1);
+    assert.equal(decoded.flags, 0);
+    assert.equal(decoded.iterations, 12);
+    assert.equal(decoded.salt, 'aabbccdd');
+});
+
+test('Dnssec#NSEC3PARAM with empty salt round-trips', () => {
+    const p = new NSEC3PARAM(1, 0, 0, '');
+    const buf = p.encode({} as PacketResource).subarray(2);
+    const reader = new BufferReader(buf);
+    const decoded = NSEC3PARAM.decode(reader, buf.length) as NSEC3PARAM;
+
+    assert.equal(decoded.salt, '');
+});
+
+test('Dnssec#signZone with nsec3 emits one NSEC3 per name plus NSEC3PARAM at apex', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    const result = Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        nsec3: {},
+    });
+
+    const nsec3Records = result.records.filter((r) => r.packetType.type === PacketTypes.NSEC3);
+    const nsec3paramRecords = result.records.filter((r) => r.packetType.type === PacketTypes.NSEC3PARAM);
+
+    // One NSEC3 per distinct original-owner name
+    const distinctOwners = new Set(
+        result.records
+            .filter((r) => r.packetType.type !== PacketTypes.NSEC3 && r.packetType.type !== PacketTypes.NSEC3PARAM)
+            .map((r) => r.name.toLowerCase())
+    );
+    assert.equal(nsec3Records.length, distinctOwners.size);
+
+    assert.equal(nsec3paramRecords.length, 1, 'one NSEC3PARAM at apex');
+    assert.equal(nsec3paramRecords[0].name, 'example.com');
+});
+
+test('Dnssec#signZone NSEC3 owner names are base32hex(hash).<apex> in lowercase', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    const result = Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        nsec3: {salt: 'aabbccdd', iterations: 12},
+    });
+
+    // The apex `example.com` should hash to a known value with these params
+    // (RFC 5155 Appendix A.1 uses zone "example."; we use "example.com" so
+    // we just compute on the fly to compare).
+    const apexHash = Dnssec.nsec3Hash('example.com', 'aabbccdd', 12);
+    const expectedLabel = Dnssec.base32hexEncode(apexHash).toLowerCase();
+    const expectedOwner = `${expectedLabel}.example.com`;
+
+    const apexNsec3 = result.records.find(
+        (r) => r.packetType.type === PacketTypes.NSEC3 && r.name === expectedOwner
+    );
+
+    assert.ok(apexNsec3, `NSEC3 for the apex must use owner ${expectedOwner}`);
+});
+
+test('Dnssec#signZone NSEC3 chain forms a closed cycle by hash bytes', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    const result = Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        nsec3: {},
+    });
+
+    type Entry = {ownerHashHex: string; nextHashHex: string};
+    const entries: Entry[] = result.records
+        .filter((r) => r.packetType.type === PacketTypes.NSEC3)
+        .map((r) => {
+            const label = r.name.split('.')[0];
+            const ownerHash = Buffer.from(
+                // base32hex decode the first label
+                (function decode(s: string): Buffer {
+                    const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUV';
+                    const upper = s.toUpperCase();
+                    let bits = 0;
+                    let value = 0;
+                    const out: number[] = [];
+                    for (const ch of upper) {
+                        // eslint-disable-next-line no-bitwise
+                        value = (value << 5) | alphabet.indexOf(ch);
+                        bits += 5;
+                        if (bits >= 8) {
+                            bits -= 8;
+                            // eslint-disable-next-line no-bitwise
+                            out.push((value >> bits) & 0xFF);
+                        }
+                    }
+                    return Buffer.from(out);
+                })(label)
+            );
+            return {
+                ownerHashHex: ownerHash.toString('hex'),
+                nextHashHex: (r.packetType as NSEC3).nextHashedOwner,
+            };
+        });
+
+    entries.sort((a, b) =>
+        Buffer.compare(Buffer.from(a.ownerHashHex, 'hex'), Buffer.from(b.ownerHashHex, 'hex'))
+    );
+
+    // Every entry's nextHashHex must equal the next entry's owner hash;
+    // the last must wrap to the first.
+    for (let i = 0; i < entries.length; i++) {
+        const cur = entries[i];
+        const next = entries[(i + 1) % entries.length];
+        assert.equal(cur.nextHashHex, next.ownerHashHex, `chain link ${i} broken`);
+    }
+});
+
+test('Dnssec#signZone NSEC3 chain proves a non-existent name', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    const salt = 'a1b2';
+    const iter = 5;
+
+    const result = Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        nsec3: {salt: salt, iterations: iter},
+    });
+
+    const queryHash = Dnssec.nsec3Hash('nonexistent.example.com', salt, iter);
+
+    const nsec3Records = result.records
+        .filter((r) => r.packetType.type === PacketTypes.NSEC3);
+
+    let covered = false;
+    for (const rr of nsec3Records) {
+        const nsec3 = rr.packetType as NSEC3;
+        // owner hash from the first label of the owner name
+        const ownerLabel = rr.name.split('.')[0].toUpperCase();
+        const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUV';
+        let bits = 0;
+        let value = 0;
+        const out: number[] = [];
+        for (const ch of ownerLabel) {
+            // eslint-disable-next-line no-bitwise
+            value = (value << 5) | alphabet.indexOf(ch);
+            bits += 5;
+            if (bits >= 8) {
+                bits -= 8;
+                // eslint-disable-next-line no-bitwise
+                out.push((value >> bits) & 0xFF);
+            }
+        }
+        const ownerHash = Buffer.from(out);
+        const nextHash = Buffer.from(nsec3.nextHashedOwner, 'hex');
+
+        if (Dnssec.nsec3CoversHash(ownerHash, nextHash, queryHash)) {
+            covered = true;
+            break;
+        }
+    }
+
+    assert.ok(covered, 'one NSEC3 in the chain must cover the queried hash');
+});
+
+test('Dnssec#signZone NSEC3 RRSIGs round-trip through verifyRrsig', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    const result = Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        nsec3: {},
+    });
+
+    // NSEC3 + NSEC3PARAM RRSIGs both need to verify
+    const dnssecRrsigs = result.rrsigs.filter((r) => {
+        const t = (r.packetType as RRSIG).sigType;
+        return t === PacketTypes.NSEC3 || t === PacketTypes.NSEC3PARAM;
+    });
+
+    assert.ok(dnssecRrsigs.length > 0);
+
+    for (const rrsigRR of dnssecRrsigs) {
+        const sig = rrsigRR.packetType as RRSIG;
+        const rrset = result.records.filter(
+            (r) => r.name === rrsigRR.name && r.packetType.type === sig.sigType
+        );
+        assert.ok(
+            Dnssec.verifyRrsig(rrsigRR.name, rrset, sig, cskDnskey, {now: NOW}),
+            `verify failed for ${rrsigRR.name}/${sig.sigType}`
+        );
+    }
+});
+
+test('Dnssec#signZone NSEC3 opt-out flag propagates into every NSEC3 record', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    const result = Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        nsec3: {optOut: true},
+    });
+
+    const nsec3Records = result.records.filter((r) => r.packetType.type === PacketTypes.NSEC3);
+    for (const rr of nsec3Records) {
+        assert.equal((rr.packetType as NSEC3).flags, 1, 'opt-out bit should be set in every NSEC3');
+    }
+
+    // NSEC3PARAM flags are MUST be 0 per RFC 5155 §4.1.2 even when NSEC3 has opt-out
+    const param = result.records.find((r) => r.packetType.type === PacketTypes.NSEC3PARAM);
+    assert.equal((param!.packetType as NSEC3PARAM).flags, 0);
+});
+
+test('Dnssec#signZone rejects nsec and nsec3 together', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    assert.throws(() => Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        nsec: true,
+        nsec3: {},
+    }));
+});
+
+test('Dnssec#signZone without nsec3 emits no NSEC3 records (default behavior unchanged)', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    const result = Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+
+    const nsec3 = result.records.filter((r) => r.packetType.type === PacketTypes.NSEC3);
+    const nsec3param = result.records.filter((r) => r.packetType.type === PacketTypes.NSEC3PARAM);
+    assert.equal(nsec3.length, 0);
+    assert.equal(nsec3param.length, 0);
 });
 
 test('Dnssec#signZone without nsec:true emits no NSEC records (default behavior unchanged)', () => {

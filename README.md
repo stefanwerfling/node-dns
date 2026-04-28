@@ -19,7 +19,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - Zero production dependencies
 - ESM module format (NodeNext)
 - Transports: UDP, TCP, TLS (DoT, RFC 7858) and HTTPS (DoH, RFC 8484), client + server
-- 24 record types: A, AAAA, MX, NS, CNAME, DNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS, DNSKEY, DS, NAPTR, NSEC, NSEC3, RRSIG, SSHFP, TLSA, SVCB, HTTPS (RFC 9460), TSIG
+- 25 record types: A, AAAA, MX, NS, CNAME, DNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS, DNSKEY, DS, NAPTR, NSEC, NSEC3, NSEC3PARAM, RRSIG, SSHFP, TLSA, SVCB, HTTPS (RFC 9460), TSIG
 - EDNS(0) options: ECS (RFC 7871), Cookies (RFC 7873 + RFC 9018 server-cookie algorithm), Padding (RFC 7830), NSID (RFC 5001), TCP Keepalive (RFC 7828), Extended DNS Errors (RFC 8914)
 - TSIG transaction signing (RFC 8945) — HMAC-based request/response authentication with hmac-md5/sha1/sha224/sha256/sha384/sha512
 - PROXY protocol v1 and v2 support (UDP per-datagram, TCP per-connection) for transparent load-balancer deployments
@@ -652,9 +652,28 @@ const {records, rrsigs} = Dnssec.signZone(zone, {
 });
 ```
 
-NSEC3 chain generation isn't wired into `signZone` yet (the building
-blocks `nsec3Hash`, `nsec3CoversHash`, `base32hexEncode` are exposed
-separately).
+For NSEC3 (RFC 5155), pass `nsec3: {salt?, iterations?, optOut?}`
+instead. Defaults follow RFC 9276 (salt empty, iterations 0,
+opt-out off):
+
+```ts
+const {records, rrsigs} = Dnssec.signZone(zone, {
+  ksk: {dnskey: kskDnskey, privateKey: ksk.privateKey},
+  zsk: {dnskey: zskDnskey, privateKey: zsk.privateKey},
+  inception: '20240101000000',
+  expiration: '20300101000000',
+  nsec3: {
+    // salt: 'aabbccdd',  // hex, default '' (no salt)
+    // iterations: 0,     // default 0
+    // optOut: false,     // default false
+  },
+});
+```
+
+The hashed owner names form the chain (sorted by hash bytes, wrapping
+at the tail), and an NSEC3PARAM RR at the apex publishes the
+parameters so validating resolvers can hash their query names the
+same way. `nsec` and `nsec3` are mutually exclusive — pick one.
 
 For negative answers, NSEC and NSEC3 building blocks are shipped:
 

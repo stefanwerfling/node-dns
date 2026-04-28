@@ -58,6 +58,7 @@ export {DS} from './Packet/Types/DS.js';
 export {NAPTR} from './Packet/Types/NAPTR.js';
 export {NSEC} from './Packet/Types/NSEC.js';
 export {NSEC3} from './Packet/Types/NSEC3.js';
+export {NSEC3PARAM} from './Packet/Types/NSEC3PARAM.js';
 export {RRSIG} from './Packet/Types/RRSIG.js';
 export {SSHFP} from './Packet/Types/SSHFP.js';
 export {SVCB, SvcParamKey} from './Packet/Types/SVCB.js';

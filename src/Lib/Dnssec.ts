@@ -12,6 +12,8 @@ import {MX} from '../Packet/Types/MX.js';
 import {NAPTR} from '../Packet/Types/NAPTR.js';
 import {NS} from '../Packet/Types/NS.js';
 import {NSEC} from '../Packet/Types/NSEC.js';
+import {NSEC3} from '../Packet/Types/NSEC3.js';
+import {NSEC3PARAM} from '../Packet/Types/NSEC3PARAM.js';
 import {PTR} from '../Packet/Types/PTR.js';
 import {RRSIG} from '../Packet/Types/RRSIG.js';
 import {SOA} from '../Packet/Types/SOA.js';
@@ -147,8 +149,32 @@ export type DnssecSignZoneOptions = {
      *
      * Without this flag, negative-answer validation against the signed
      * zone won't work — only positive answers verify.
+     *
+     * Mutually exclusive with `nsec3`.
      */
     nsec?: boolean;
+
+    /**
+     * Generate an NSEC3 chain (RFC 5155) instead of an NSEC chain. Each
+     * unique owner name is hashed with the configured salt + iterations,
+     * the hashes are sorted, and one NSEC3 RR is emitted per hash with
+     * `nextHashedOwner` pointing to the next entry (wrapping at the
+     * tail). An NSEC3PARAM RR is added at the apex publishing the same
+     * parameters.
+     *
+     * Defaults follow RFC 9276: salt empty, iterations 0, opt-out off.
+     * Mutually exclusive with `nsec`.
+     */
+    nsec3?: {
+        /** Hex-encoded salt; empty string means "no salt". Default: ''. */
+        salt?: string;
+
+        /** Additional hash rounds beyond the first SHA-1. Default: 0. */
+        iterations?: number;
+
+        /** RFC 5155 §6 opt-out flag (set in every NSEC3 RR). Default: false. */
+        optOut?: boolean;
+    };
 };
 
 /**
@@ -205,6 +231,7 @@ export class Dnssec {
         PacketTypes.DNSKEY,
         PacketTypes.DS,
         PacketTypes.NSEC3,
+        PacketTypes.NSEC3PARAM,
         PacketTypes.SPF,
         PacketTypes.SSHFP,
         PacketTypes.TLSA,
@@ -413,11 +440,24 @@ export class Dnssec {
             dnskeyRRs.push(new PacketResource(apex, options.zsk.dnskey, cls, dnskeyTtl));
         }
 
+        if (options.nsec === true && options.nsec3 !== undefined) {
+            throw new Error('Dnssec.signZone: `nsec` and `nsec3` are mutually exclusive');
+        }
+
         let records: PacketResource[] = [...zone.records, ...dnskeyRRs];
 
         if (options.nsec === true) {
             const nsecRRs = Dnssec._generateNsecChain(records, cls, dnskeyTtl);
             records = [...records, ...nsecRRs];
+        } else if (options.nsec3 !== undefined) {
+            const nsec3RRs = Dnssec._generateNsec3Chain(
+                records,
+                apex,
+                cls,
+                dnskeyTtl,
+                options.nsec3
+            );
+            records = [...records, ...nsec3RRs];
         }
 
         const rrsigs: PacketResource[] = [];
@@ -505,6 +545,95 @@ export class Dnssec {
             const nsec = new NSEC(next, types);
             result.push(new PacketResource(name, nsec, cls, ttl));
         }
+
+        return result;
+    }
+
+    /**
+     * RFC 5155 NSEC3 chain generator. Hashes every unique owner name
+     * with the configured salt + iterations, sorts by hash, then emits
+     * one NSEC3 RR per hash with the bitmap describing the types
+     * present at the *original* (unhashed) owner. The last NSEC3 wraps
+     * back to the first hash. An NSEC3PARAM RR is added at the apex
+     * publishing the same parameters so validating resolvers know how
+     * to hash their query names.
+     *
+     * Defaults (RFC 9276 §3.1): salt empty, iterations 0, opt-out off.
+     * The opt-out flag, when set, propagates into every NSEC3 RR's
+     * flags byte, but this generator does not actually skip insecure
+     * delegations from the chain — it just publishes the flag.
+     * @protected
+     */
+    protected static _generateNsec3Chain(
+        records: PacketResource[],
+        apex: string,
+        cls: number,
+        ttl: number,
+        nsec3Options: {salt?: string; iterations?: number; optOut?: boolean}
+    ): PacketResource[] {
+        const salt = nsec3Options.salt ?? '';
+        const iterations = nsec3Options.iterations ?? 0;
+        const optOut = nsec3Options.optOut === true;
+        const flags = optOut ? 1 : 0;
+        const apexLower = apex.toLowerCase();
+
+        const nameToTypes = new Map<string, Set<number>>();
+
+        for (const rr of records) {
+            const lower = rr.name.toLowerCase();
+            let types = nameToTypes.get(lower);
+
+            if (!types) {
+                types = new Set<number>();
+                nameToTypes.set(lower, types);
+            }
+
+            types.add(rr.packetType.type);
+        }
+
+        // Every original name will have at least one RRSIG once signing
+        // completes; the bitmap reflects that.
+        for (const types of nameToTypes.values()) {
+            types.add(PacketTypes.RRSIG);
+        }
+
+        type Entry = {hashHex: string; types: number[]};
+        const entries: Entry[] = [];
+
+        for (const [name, types] of nameToTypes.entries()) {
+            const hash = Dnssec.nsec3Hash(name, salt, iterations);
+            entries.push({
+                hashHex: hash.toString('hex'),
+                types: [...types].sort((a, b) => a - b),
+            });
+        }
+
+        entries.sort((a, b) =>
+            Buffer.compare(Buffer.from(a.hashHex, 'hex'), Buffer.from(b.hashHex, 'hex'))
+        );
+
+        const result: PacketResource[] = [];
+
+        for (let i = 0; i < entries.length; i++) {
+            const cur = entries[i];
+            const next = entries[(i + 1) % entries.length];
+            const ownerLabel = Dnssec.base32hexEncode(Buffer.from(cur.hashHex, 'hex')).toLowerCase();
+            const ownerName = `${ownerLabel}.${apexLower}`;
+            const nsec3 = new NSEC3(
+                1,
+                flags,
+                iterations,
+                salt,
+                next.hashHex,
+                cur.types
+            );
+            result.push(new PacketResource(ownerName, nsec3, cls, ttl));
+        }
+
+        // RFC 5155 §4.1.2: NSEC3PARAM flags MUST be 0; the opt-out flag
+        // is meaningful only inside NSEC3 records.
+        const nsec3param = new NSEC3PARAM(1, 0, iterations, salt);
+        result.push(new PacketResource(apex, nsec3param, cls, ttl));
 
         return result;
     }
