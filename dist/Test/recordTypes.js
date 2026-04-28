@@ -3,7 +3,10 @@ import { Packet } from '../Packet/Packet.js';
 import { PacketClass } from '../Packet/PacketClass.js';
 import { PacketResource } from '../Packet/PacketResource.js';
 import { PacketTypes } from '../Packet/PacketTypes.js';
+import { CDNSKEY } from '../Packet/Types/CDNSKEY.js';
+import { CDS } from '../Packet/Types/CDS.js';
 import { DNAME } from '../Packet/Types/DNAME.js';
+import { DNSKEY } from '../Packet/Types/DNSKEY.js';
 import { DS } from '../Packet/Types/DS.js';
 import { HTTPS } from '../Packet/Types/HTTPS.js';
 import { NAPTR } from '../Packet/Types/NAPTR.js';
@@ -168,6 +171,64 @@ test('DNAME#target written without compression (RFC 6672 §3.1)', () => {
     const parsed = Packet.parse(buf);
     assert.equal(parsed.answers[0].packetType.target, 'foo.example.org');
     assert.equal(parsed.answers[1].packetType.target, 'bar.example.org');
+});
+test('CDS#encode+decode (RFC 7344)', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('example.com', new CDS(12345, 8, 2, 'aabbccdd0011223344556677'), PacketClass.IN, 300));
+    const parsed = Packet.parse(packet.toBuffer());
+    assert.ok(parsed.answers[0].packetType instanceof CDS);
+    const cds = parsed.answers[0].packetType;
+    assert.equal(cds.type, PacketTypes.CDS);
+    assert.equal(cds.keyTag, 12345);
+    assert.equal(cds.algorithm, 8);
+    assert.equal(cds.digestType, 2);
+    assert.equal(cds.digest, 'aabbccdd0011223344556677');
+});
+test('CDS#delete sentinel (RFC 8078: 0 0 0 00) round-trips', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('example.com', new CDS(0, 0, 0, '00'), PacketClass.IN, 300));
+    const parsed = Packet.parse(packet.toBuffer());
+    const cds = parsed.answers[0].packetType;
+    assert.equal(cds.keyTag, 0);
+    assert.equal(cds.algorithm, 0);
+    assert.equal(cds.digestType, 0);
+    assert.equal(cds.digest, '00');
+});
+test('CDNSKEY#encode+decode (RFC 7344)', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('example.com', new CDNSKEY(257, 3, 15, 'AAEC'), PacketClass.IN, 300));
+    const parsed = Packet.parse(packet.toBuffer());
+    assert.ok(parsed.answers[0].packetType instanceof CDNSKEY);
+    const cdnskey = parsed.answers[0].packetType;
+    assert.equal(cdnskey.type, PacketTypes.CDNSKEY);
+    assert.equal(cdnskey.flags, 257);
+    assert.equal(cdnskey.protocol, 3);
+    assert.equal(cdnskey.algorithm, 15);
+    assert.equal(cdnskey.key, 'AAEC');
+});
+test('CDNSKEY#delete sentinel (RFC 8078: 0 3 0 AA==) round-trips', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('example.com', new CDNSKEY(0, 3, 0, 'AA=='), PacketClass.IN, 300));
+    const parsed = Packet.parse(packet.toBuffer());
+    const cdnskey = parsed.answers[0].packetType;
+    assert.equal(cdnskey.flags, 0);
+    assert.equal(cdnskey.protocol, 3);
+    assert.equal(cdnskey.algorithm, 0);
+    assert.equal(cdnskey.key, 'AA==');
+});
+test('CDS / CDNSKEY: a DS instance does not pass instanceof CDS', () => {
+    const ds = new DS(1, 8, 2, 'aabb');
+    const cds = new CDS(1, 8, 2, 'aabb');
+    const dnskey = new DNSKEY(257, 3, 8, 'AAEC');
+    const cdnskey = new CDNSKEY(257, 3, 8, 'AAEC');
+    assert.ok(cds instanceof DS, 'CDS is a DS');
+    assert.ok(!(ds instanceof CDS), 'DS is not a CDS');
+    assert.ok(cdnskey instanceof DNSKEY, 'CDNSKEY is a DNSKEY');
+    assert.ok(!(dnskey instanceof CDNSKEY), 'DNSKEY is not a CDNSKEY');
 });
 test('TLSA#encode+decode', () => {
     const packet = new Packet();

@@ -34,6 +34,8 @@ import {PacketTypes} from '../Packet/PacketTypes.js';
 import {A} from '../Packet/Types/A.js';
 import {AAAA} from '../Packet/Types/AAAA.js';
 import {CAA} from '../Packet/Types/CAA.js';
+import {CDNSKEY} from '../Packet/Types/CDNSKEY.js';
+import {CDS} from '../Packet/Types/CDS.js';
 import {CNAME} from '../Packet/Types/CNAME.js';
 import {DNAME} from '../Packet/Types/DNAME.js';
 import {DNSKEY} from '../Packet/Types/DNSKEY.js';
@@ -532,6 +534,46 @@ test('zone#HTTPS uses HTTPS subclass with same wire format', () => {
     const https = records[0].packetType as HTTPS;
     assert.equal(https.priority, 1);
     assert.deepEqual(https.params.alpn, ['h2', 'h3']);
+});
+
+test('zone#CDS parses with same fields as DS', () => {
+    const {records} = ZoneParser.parse(
+        '@ 3600 IN CDS 31589 8 2 AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899',
+        {origin: 'example.com.'}
+    );
+    assert.ok(records[0].packetType instanceof CDS);
+    const cds = records[0].packetType as CDS;
+    assert.equal(cds.keyTag, 31589);
+    assert.equal(cds.algorithm, 8);
+    assert.equal(cds.digestType, 2);
+    assert.equal(
+        cds.digest,
+        'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899'
+    );
+});
+
+test('zone#CDS delete sentinel (0 0 0 00) parses', () => {
+    const {records} = ZoneParser.parse(
+        '@ 3600 IN CDS 0 0 0 00',
+        {origin: 'example.com.'}
+    );
+    const cds = records[0].packetType as CDS;
+    assert.equal(cds.keyTag, 0);
+    assert.equal(cds.digest, '00');
+});
+
+test('zone#CDNSKEY parses with same fields as DNSKEY', () => {
+    const zone = `
+        $ORIGIN example.com.
+        @ 3600 IN CDNSKEY 257 3 15 AAEC
+    `;
+    const {records} = ZoneParser.parse(dedent(zone));
+    assert.ok(records[0].packetType instanceof CDNSKEY);
+    const cdnskey = records[0].packetType as CDNSKEY;
+    assert.equal(cdnskey.flags, 257);
+    assert.equal(cdnskey.protocol, 3);
+    assert.equal(cdnskey.algorithm, 15);
+    assert.equal(cdnskey.key, 'AAEC');
 });
 
 test('zone#errors on missing RRSIG fields', () => {

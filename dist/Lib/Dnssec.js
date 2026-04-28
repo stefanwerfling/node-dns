@@ -31,6 +31,8 @@ export class Dnssec {
         PacketTypes.A,
         PacketTypes.AAAA,
         PacketTypes.CAA,
+        PacketTypes.CDNSKEY,
+        PacketTypes.CDS,
         PacketTypes.DNSKEY,
         PacketTypes.DS,
         PacketTypes.NSEC3,

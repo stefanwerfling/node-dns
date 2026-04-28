@@ -78,17 +78,21 @@ The parser dispatches RDATA parsing per type. 21 types are covered:
 | Group           | Types |
 | --------------- | ----- |
 | Common          | A, AAAA, NS, CNAME, DNAME, PTR, MX, TXT (multi-character-string), SOA, SRV, CAA |
-| DNSSEC          | DNSKEY, DS, RRSIG, NSEC, NSEC3 |
+| DNSSEC          | DNSKEY, DS, CDS, CDNSKEY, RRSIG, NSEC, NSEC3 |
 | Service binding | SVCB, HTTPS (RFC 9460 presentation form) |
 | Auth / fingerprint | SSHFP, TLSA |
 | Misc            | NAPTR |
 
 Notes per type:
 
-- **DNSKEY**, **DS**, **SSHFP**, **TLSA**, **RRSIG** — base64 / hex blobs
-  are joined across multiple tokens, so a key or signature spread across
-  parens-wrapped lines is parsed correctly. Hex output is normalized to
-  lowercase to match what `encode()` produces on round-trip.
+- **DNSKEY**, **DS**, **CDS**, **CDNSKEY**, **SSHFP**, **TLSA**, **RRSIG**
+  — base64 / hex blobs are joined across multiple tokens, so a key or
+  signature spread across parens-wrapped lines is parsed correctly. Hex
+  output is normalized to lowercase to match what `encode()` produces
+  on round-trip.
+- **CDS** / **CDNSKEY** (RFC 7344) — same field shape as DS / DNSKEY.
+  RFC 8078 delete sentinels (`0 0 0 00` for CDS, `0 3 0 AA==` for
+  CDNSKEY) parse without special handling.
 - **NSEC** — type bit map is given as a space-separated list of mnemonics
   (`A AAAA RRSIG NSEC`). The generic `TYPEnnn` form from RFC 3597 is
   accepted for unknown / future types.

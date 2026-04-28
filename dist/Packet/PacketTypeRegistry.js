@@ -2,6 +2,8 @@ import { PacketTypes } from './PacketTypes.js';
 import { A } from './Types/A.js';
 import { AAAA } from './Types/AAAA.js';
 import { CAA } from './Types/CAA.js';
+import { CDNSKEY } from './Types/CDNSKEY.js';
+import { CDS } from './Types/CDS.js';
 import { CNAME } from './Types/CNAME.js';
 import { DNAME } from './Types/DNAME.js';
 import { DNSKEY } from './Types/DNSKEY.js';
@@ -49,6 +51,8 @@ export class PacketTypeRegistry {
             PacketTypeRegistry._instance.registerPacket(PacketTypes.DNSKEY, DNSKEY);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.NSEC3, NSEC3);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.NSEC3PARAM, NSEC3PARAM);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.CDS, CDS);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.CDNSKEY, CDNSKEY);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.TLSA, TLSA);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.SVCB, SVCB);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.HTTPS, HTTPS);

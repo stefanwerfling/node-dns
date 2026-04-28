@@ -19,7 +19,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - Zero production dependencies
 - ESM module format (NodeNext)
 - Transports: UDP, TCP, TLS (DoT, RFC 7858) and HTTPS (DoH, RFC 8484), client + server
-- 25 record types: A, AAAA, MX, NS, CNAME, DNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS, DNSKEY, DS, NAPTR, NSEC, NSEC3, NSEC3PARAM, RRSIG, SSHFP, TLSA, SVCB, HTTPS (RFC 9460), TSIG
+- 27 record types: A, AAAA, MX, NS, CNAME, DNAME, PTR, SRV, SOA, TXT, SPF, CAA, EDNS, DNSKEY, DS, CDS, CDNSKEY, NAPTR, NSEC, NSEC3, NSEC3PARAM, RRSIG, SSHFP, TLSA, SVCB, HTTPS (RFC 9460), TSIG
 - EDNS(0) options: ECS (RFC 7871), Cookies (RFC 7873 + RFC 9018 server-cookie algorithm), Padding (RFC 7830), NSID (RFC 5001), TCP Keepalive (RFC 7828), Extended DNS Errors (RFC 8914)
 - TSIG transaction signing (RFC 8945) — HMAC-based request/response authentication with hmac-md5/sha1/sha224/sha256/sha384/sha512
 - PROXY protocol v1 and v2 support (UDP per-datagram, TCP per-connection) for transparent load-balancer deployments
@@ -726,6 +726,8 @@ npm run lint      # ESLint check
 + [RFC-4648 - The Base16, Base32, and Base64 Data Encodings](https://datatracker.ietf.org/doc/html/rfc4648) (base32hex for NSEC3)
 + [RFC-5155 - DNS Security (DNSSEC) Hashed Authenticated Denial of Existence](https://datatracker.ietf.org/doc/html/rfc5155) (NSEC3 wire format, presentation, and SHA-1 hash with iterations)
 + [RFC-9276 - Guidance for NSEC3 Parameter Settings](https://datatracker.ietf.org/doc/html/rfc9276) (only NSEC3 hash algorithm 1 / SHA-1 is allowed in production)
++ [RFC-7344 - Automating DNSSEC Delegation Trust Maintenance](https://datatracker.ietf.org/doc/html/rfc7344) (CDS / CDNSKEY at the child apex)
++ [RFC-8078 - Managing DS Records from the Parent via CDS/CDNSKEY](https://datatracker.ietf.org/doc/html/rfc8078) (delete sentinel for DS removal)
 + [RFC-6605 - Elliptic Curve Digital Signature Algorithm (DSA) for DNSSEC](https://datatracker.ietf.org/doc/html/rfc6605) (ECDSA P-256 / P-384)
 + [RFC-6840 - Clarifications and Implementation Notes for DNS Security (DNSSEC)bis](https://datatracker.ietf.org/doc/html/rfc6840) (no-compression rule for DNSSEC RRs)
 + [RFC-8080 - Edwards-Curve DSA for DNSSEC](https://datatracker.ietf.org/doc/html/rfc8080) (Ed25519 / Ed448)

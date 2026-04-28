@@ -32,6 +32,8 @@ export enum PacketTypes {
     NSEC3 = 0x32,
     NSEC3PARAM = 0x33,
     TLSA = 0x34,
+    CDS = 0x3B,
+    CDNSKEY = 0x3C,
     SVCB = 0x40,
     HTTPS = 0x41,
     SPF = 0x63,

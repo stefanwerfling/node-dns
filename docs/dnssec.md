@@ -300,6 +300,47 @@ What it still does **not** do (yet):
   regardless. Real opt-out behavior (omitting NS-only owners from the
   chain) is the caller's job for now.
 
+### Automated key rollover with CDS / CDNSKEY
+
+[RFC 7344](https://datatracker.ietf.org/doc/html/rfc7344) defines two
+record types — CDS (type 59) and CDNSKEY (type 60) — that the child
+zone publishes at its apex to tell the parent which DS / DNSKEY records
+should be active. A registrar that polls for CDS / CDNSKEY updates can
+keep the parent's DS RRset in sync with the child's keys without manual
+intervention. Wire format is identical to DS and DNSKEY respectively;
+the type code is the only thing that differs.
+
+```ts
+import {CDS, CDNSKEY, Dnssec} from 'dns2ts';
+
+// Publish a CDS pointing at the new KSK
+const newKsk = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ED25519);
+const cds = new CDS(
+  Dnssec.computeKeyTag(newKsk),
+  newKsk.algorithm,
+  2 /* SHA-256 */,
+  Dnssec.computeDsDigest('example.com', newKsk, 2),
+);
+
+// Or publish the CDNSKEY directly so the parent can compute the digest
+// itself (lets the parent pick a digest type the child may not support)
+const cdnskey = new CDNSKEY(newKsk.flags, newKsk.protocol, newKsk.algorithm, newKsk.key);
+```
+
+[RFC 8078](https://datatracker.ietf.org/doc/html/rfc8078) defines a
+"delete" sentinel that asks the parent to remove all DS records:
+
+```ts
+new CDS(0, 0, 0, '00');           // CDS  0 0 0 00
+new CDNSKEY(0, 3, 0, 'AA==');     // CDNSKEY 0 3 0 <one zero byte>
+```
+
+The library doesn't poll or push CDS / CDNSKEY changes itself —
+that's the registrar / parent operator's job. dns2ts only ships the
+wire types and the zone-file parser dispatch, so you can serve the
+records from your authoritative server and parse them back into
+typed objects on the consumer side.
+
 ## Negative-answer building blocks
 
 NSEC and NSEC3 prove a non-existence claim. The records get fetched

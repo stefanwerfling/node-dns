@@ -55,6 +55,8 @@ export {EdnsExtendedError, ExtendedDnsErrorCode} from './Packet/Types/EdnsExtend
 export {EdnsCookie} from './Packet/Types/EdnsCookie.js';
 export {DNSKEY} from './Packet/Types/DNSKEY.js';
 export {DS} from './Packet/Types/DS.js';
+export {CDS} from './Packet/Types/CDS.js';
+export {CDNSKEY} from './Packet/Types/CDNSKEY.js';
 export {NAPTR} from './Packet/Types/NAPTR.js';
 export {NSEC} from './Packet/Types/NSEC.js';
 export {NSEC3} from './Packet/Types/NSEC3.js';

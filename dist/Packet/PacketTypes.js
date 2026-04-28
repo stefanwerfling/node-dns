@@ -29,6 +29,8 @@ export var PacketTypes;
     PacketTypes[PacketTypes["NSEC3"] = 50] = "NSEC3";
     PacketTypes[PacketTypes["NSEC3PARAM"] = 51] = "NSEC3PARAM";
     PacketTypes[PacketTypes["TLSA"] = 52] = "TLSA";
+    PacketTypes[PacketTypes["CDS"] = 59] = "CDS";
+    PacketTypes[PacketTypes["CDNSKEY"] = 60] = "CDNSKEY";
     PacketTypes[PacketTypes["SVCB"] = 64] = "SVCB";
     PacketTypes[PacketTypes["HTTPS"] = 65] = "HTTPS";
     PacketTypes[PacketTypes["SPF"] = 99] = "SPF";

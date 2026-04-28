@@ -6,6 +6,8 @@ import {A} from '../Packet/Types/A.js';
 import {AAAA} from '../Packet/Types/AAAA.js';
 import {CAA} from '../Packet/Types/CAA.js';
 import {CNAME} from '../Packet/Types/CNAME.js';
+import {CDNSKEY} from '../Packet/Types/CDNSKEY.js';
+import {CDS} from '../Packet/Types/CDS.js';
 import {DNAME} from '../Packet/Types/DNAME.js';
 import {DNSKEY} from '../Packet/Types/DNSKEY.js';
 import {DS} from '../Packet/Types/DS.js';
@@ -560,6 +562,28 @@ export class ZoneParser {
                 const digestType = parseInt(v(2), 10);
                 const digest = rdata.slice(3).map((t) => t.value).join('').toLowerCase();
                 return new DS(keyTag, algorithm, digestType, digest);
+            }
+
+            case 'CDS': {
+                // RFC 7344 — same RDATA shape as DS, different type code.
+                need(4, 'CDS (keyTag algorithm digestType digest)');
+
+                const keyTag = parseInt(v(0), 10);
+                const algorithm = parseInt(v(1), 10);
+                const digestType = parseInt(v(2), 10);
+                const digest = rdata.slice(3).map((t) => t.value).join('').toLowerCase();
+                return new CDS(keyTag, algorithm, digestType, digest);
+            }
+
+            case 'CDNSKEY': {
+                // RFC 7344 — same RDATA shape as DNSKEY, different type code.
+                need(4, 'CDNSKEY (flags protocol algorithm key)');
+
+                const flags = parseInt(v(0), 10);
+                const protocol = parseInt(v(1), 10);
+                const algorithm = parseInt(v(2), 10);
+                const key = rdata.slice(3).map((t) => t.value).join('');
+                return new CDNSKEY(flags, protocol, algorithm, key);
             }
 
             case 'SSHFP': {
