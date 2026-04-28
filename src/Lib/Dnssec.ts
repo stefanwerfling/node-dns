@@ -16,6 +16,7 @@ import {PTR} from '../Packet/Types/PTR.js';
 import {RRSIG} from '../Packet/Types/RRSIG.js';
 import {SOA} from '../Packet/Types/SOA.js';
 import {SRV} from '../Packet/Types/SRV.js';
+import {Zone} from '../Packet/Zone.js';
 
 /**
  * IANA-registered DNSSEC Signing Algorithms (subset that we implement
@@ -89,10 +90,71 @@ export type DnssecSignOptions = {
     /**
      * Number of labels in the original (pre-wildcard-expansion) owner
      * name (RFC 4034 §3.1.3). Defaults to the non-empty label count of
-     * `owner`. Override when signing a wildcard RR set so the verifier
-     * knows it's a wildcard.
+     * `owner`, with a leading `*` skipped automatically.
      */
     labels?: number;
+};
+
+/**
+ * One signing key bundle for `Dnssec.signZone`.
+ */
+export type DnssecZoneSigner = {
+    /**
+     * DNSKEY published in the zone for this signer.
+     */
+    dnskey: DNSKEY;
+
+    /**
+     * Matching Node `KeyObject` private key.
+     */
+    privateKey: crypto.KeyObject;
+};
+
+/**
+ * Options for `Dnssec.signZone`.
+ *
+ * `ksk` and `zsk` may reference the same `DNSKEY`/`KeyObject` pair —
+ * that's the CSK ("combined signing key") configuration that small
+ * zones often use. Otherwise they are independent: KSK signs only the
+ * DNSKEY RRset, ZSK signs every other RRset.
+ */
+export type DnssecSignZoneOptions = {
+    /** Key-signing key. Signs the DNSKEY RRset. */
+    ksk: DnssecZoneSigner;
+
+    /** Zone-signing key. Signs every non-DNSKEY RRset. */
+    zsk: DnssecZoneSigner;
+
+    /** Signature inception, same format as `signRrset`. */
+    inception: string | number;
+
+    /** Signature expiration, same format as `signRrset`. */
+    expiration: string | number;
+
+    /**
+     * TTL to use for the synthesized DNSKEY records. Defaults to the
+     * zone's SOA minimum, falling back to 3600 if the zone has no SOA.
+     */
+    dnskeyTtl?: number;
+};
+
+/**
+ * Result of `Dnssec.signZone`.
+ */
+export type DnssecSignZoneResult = {
+    /**
+     * Every record that should be served as part of the signed zone:
+     * the original zone records plus the synthesized DNSKEY RRset at
+     * the apex.
+     */
+    records: PacketResource[];
+
+    /**
+     * RRSIG records covering every RRset in `records`. The DNSKEY RRset
+     * is signed with the KSK; everything else is signed with the ZSK
+     * (or both, if `ksk === zsk`, which is the CSK case).
+     */
+    rrsigs: PacketResource[];
 };
 
 /**
@@ -276,8 +338,10 @@ export class Dnssec {
         const inception = Dnssec._normalizeSigDate(options.inception);
         const expiration = Dnssec._normalizeSigDate(options.expiration);
 
-        const labels = options.labels
-            ?? owner.split('.').filter((l) => l.length > 0).length;
+        // RFC 4034 §3.1.3: a leading `*` wildcard label is not counted.
+        const ownerLabels = owner.split('.').filter((l) => l.length > 0);
+        const wildcardOffset = ownerLabels[0] === '*' ? 1 : 0;
+        const labels = options.labels ?? (ownerLabels.length - wildcardOffset);
 
         const rrsig = new RRSIG(
             rrset[0].packetType.type,
@@ -296,6 +360,96 @@ export class Dnssec {
         rrsig.signature = signature.toString('base64');
 
         return rrsig;
+    }
+
+    /**
+     * Sign every RRset in a zone and synthesize the apex DNSKEY RRset.
+     *
+     * Returns the records that should be served (originals + DNSKEYs)
+     * plus a parallel array of RRSIGs covering each RRset. The KSK
+     * signs the DNSKEY RRset; the ZSK signs everything else. For a CSK
+     * setup, pass the same key pair as both `ksk` and `zsk` — the
+     * function picks up that they're the same and emits one signature
+     * per RRset.
+     *
+     * Wildcard owners (e.g. `*.example.com`) are signed correctly:
+     * `signRrset`'s default skips the leading `*` from the labels
+     * field, so the verifier under any expanded query name
+     * reconstructs the wildcard form before hashing.
+     *
+     * What this does **not** do (yet):
+     *   - Generate the NSEC / NSEC3 chain. Negative answers from the
+     *     resulting zone won't validate without those records.
+     *   - Distinguish "key signing" from "zone signing" beyond the
+     *     KSK/ZSK split. RFC 4034 §2.1.1 SEP-bit conventions are the
+     *     caller's responsibility (typically: `flags = 257` for KSK,
+     *     `flags = 256` for ZSK).
+     */
+    public static signZone(zone: Zone, options: DnssecSignZoneOptions): DnssecSignZoneResult {
+        const apex = zone.origin.endsWith('.') ? zone.origin.slice(0, -1) : zone.origin;
+        const apexLower = apex.toLowerCase();
+
+        const dnskeyTtl = options.dnskeyTtl ?? Dnssec._defaultDnskeyTtl(zone);
+        const cls = zone.records.length > 0 ? zone.records[0].class : 1; /* IN */
+        const sameKey = options.ksk.dnskey === options.zsk.dnskey;
+
+        const dnskeyRRs: PacketResource[] = [];
+        dnskeyRRs.push(new PacketResource(apex, options.ksk.dnskey, cls, dnskeyTtl));
+
+        if (!sameKey) {
+            dnskeyRRs.push(new PacketResource(apex, options.zsk.dnskey, cls, dnskeyTtl));
+        }
+
+        const records: PacketResource[] = [...zone.records, ...dnskeyRRs];
+        const rrsigs: PacketResource[] = [];
+
+        // Group records by (lowercased owner name, type) so canonical
+        // form differences in case don't split a single RRset.
+        const groups = new Map<string, PacketResource[]>();
+
+        for (const rr of records) {
+            const key = `${rr.name.toLowerCase()}/${rr.packetType.type}`;
+            const existing = groups.get(key);
+
+            if (existing) {
+                existing.push(rr);
+            } else {
+                groups.set(key, [rr]);
+            }
+        }
+
+        for (const group of groups.values()) {
+            const owner = group[0].name;
+            const isApexDnskey =
+                group[0].packetType.type === PacketTypes.DNSKEY
+                && owner.toLowerCase() === apexLower;
+
+            const signer = isApexDnskey ? options.ksk : options.zsk;
+
+            const rrsig = Dnssec.signRrset(owner, group, signer.dnskey, signer.privateKey, {
+                inception: options.inception,
+                expiration: options.expiration,
+                originalTtl: group[0].ttl,
+                signer: apex,
+            });
+
+            rrsigs.push(new PacketResource(owner, rrsig, group[0].class, group[0].ttl));
+        }
+
+        return {records: records, rrsigs: rrsigs};
+    }
+
+    /**
+     * Default TTL for synthesized DNSKEY records: the zone's SOA
+     * minimum if there is one, otherwise 3600.
+     * @protected
+     */
+    protected static _defaultDnskeyTtl(zone: Zone): number {
+        try {
+            return zone.soaRdata().minimum;
+        } catch (_err) {
+            return 3600;
+        }
     }
 
     /**

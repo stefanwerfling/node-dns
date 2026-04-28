@@ -4,6 +4,7 @@ import { PacketResource } from '../Packet/PacketResource.js';
 import { DNSKEY } from '../Packet/Types/DNSKEY.js';
 import { DS } from '../Packet/Types/DS.js';
 import { RRSIG } from '../Packet/Types/RRSIG.js';
+import { Zone } from '../Packet/Zone.js';
 export declare enum DnssecAlgorithm {
     RSASHA256 = 8,
     RSASHA512 = 10,
@@ -27,6 +28,21 @@ export type DnssecSignOptions = {
     signer?: string;
     labels?: number;
 };
+export type DnssecZoneSigner = {
+    dnskey: DNSKEY;
+    privateKey: crypto.KeyObject;
+};
+export type DnssecSignZoneOptions = {
+    ksk: DnssecZoneSigner;
+    zsk: DnssecZoneSigner;
+    inception: string | number;
+    expiration: string | number;
+    dnskeyTtl?: number;
+};
+export type DnssecSignZoneResult = {
+    records: PacketResource[];
+    rrsigs: PacketResource[];
+};
 export declare class Dnssec {
     protected static readonly _RAW_CANONICAL_TYPES: ReadonlySet<number>;
     static computeKeyTag(dnskey: DNSKEY): number;
@@ -34,6 +50,8 @@ export declare class Dnssec {
     static verifyDs(owner: string, dnskey: DNSKEY, ds: DS): boolean;
     static verifyRrsig(owner: string, rrset: PacketResource[], rrsig: RRSIG, dnskey: DNSKEY, options?: DnssecVerifyOptions): boolean;
     static signRrset(owner: string, rrset: PacketResource[], dnskey: DNSKEY, privateKey: crypto.KeyObject, options: DnssecSignOptions): RRSIG;
+    static signZone(zone: Zone, options: DnssecSignZoneOptions): DnssecSignZoneResult;
+    protected static _defaultDnskeyTtl(zone: Zone): number;
     static publicKeyToDnskey(publicKey: crypto.KeyObject, algorithm: number, flags?: number, protocol?: number): DNSKEY;
     static buildSigningInput(owner: string, rrset: PacketResource[], rrsig: RRSIG): Buffer;
     static canonicalNameCompare(a: string, b: string): number;

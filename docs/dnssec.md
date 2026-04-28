@@ -217,6 +217,60 @@ DS, DNSKEY, TXT, CAA, TLSA, SSHFP, NSEC3, DNAME, PTR, RRSIG. Each
 record's class and embedded names are canonicalized the same way the
 verifier expects.
 
+### Signing a whole zone
+
+`Dnssec.signZone(zone, options)` is the convenience wrapper that
+takes a `Zone` and produces records + RRSIGs ready to serve:
+
+```ts
+import {Dnssec, DnssecAlgorithm, Zone} from 'dns2ts';
+
+const zone = Zone.fromZoneFile(zoneFileText);
+
+const ksk = crypto.generateKeyPairSync('ed25519');
+const zsk = crypto.generateKeyPairSync('ed25519');
+const kskDnskey = Dnssec.publicKeyToDnskey(ksk.publicKey, DnssecAlgorithm.ED25519, 257);
+const zskDnskey = Dnssec.publicKeyToDnskey(zsk.publicKey, DnssecAlgorithm.ED25519, 256);
+
+const {records, rrsigs} = Dnssec.signZone(zone, {
+  ksk: {dnskey: kskDnskey, privateKey: ksk.privateKey},
+  zsk: {dnskey: zskDnskey, privateKey: zsk.privateKey},
+  inception: '20240101000000',
+  expiration: '20300101000000',
+  // dnskeyTtl: 3600,  // optional, defaults to SOA minimum or 3600
+});
+```
+
+What it does:
+
+1. **Group records by lowercased (name, type)** so case differences in
+   owner names don't accidentally split an RRset.
+2. **Synthesize the DNSKEY RRset at the zone apex** from the `ksk` and
+   `zsk` keys. If `ksk === zsk` (CSK case), only one DNSKEY is added.
+3. **Sign each RRset**: the DNSKEY RRset with the KSK, every other
+   RRset with the ZSK. Wildcard owners are handled via `signRrset`'s
+   default labels behavior — the leading `*` is excluded from the
+   labels count automatically.
+4. **Return** `{records, rrsigs}`. `records` is the original zone
+   plus the synthesized DNSKEY records; `rrsigs` is one RRSIG record
+   per RRset.
+
+What it does **not** do (yet):
+
+- **Generate the NSEC or NSEC3 chain.** Negative answers from the
+  resulting zone won't validate without those records. Add the chain
+  manually using the NSEC / NSEC3 building blocks below — sort the
+  owner names canonically (`canonicalNameCompare`), then emit one NSEC
+  per name pointing to the next in the chain (with the last entry
+  pointing back at the apex). For NSEC3, hash each name with
+  `nsec3Hash`, sort by hash bytes, and emit one NSEC3 per hashed
+  owner.
+- **Distinguish KSK from ZSK by SEP bit semantics.** `signZone` just
+  takes the keys you give it and signs the DNSKEY RRset with the one
+  you tagged `ksk`. The DNSKEY flags field is whatever you put on the
+  DNSKEY object — typically `257` for KSK (SEP bit set) and `256` for
+  ZSK (`publicKeyToDnskey`'s default is `257`).
+
 ## Negative-answer building blocks
 
 NSEC and NSEC3 prove a non-existence claim. The records get fetched

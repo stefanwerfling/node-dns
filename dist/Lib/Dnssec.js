@@ -2,6 +2,7 @@ import { Buffer } from 'buffer';
 import * as crypto from 'crypto';
 import { BufferWriter } from './BufferWriter.js';
 import { PacketName } from '../Packet/PacketName.js';
+import { PacketResource } from '../Packet/PacketResource.js';
 import { PacketTypes } from '../Packet/PacketTypes.js';
 import { DNSKEY } from '../Packet/Types/DNSKEY.js';
 import { NAPTR } from '../Packet/Types/NAPTR.js';
@@ -98,13 +99,61 @@ export class Dnssec {
         }
         const inception = Dnssec._normalizeSigDate(options.inception);
         const expiration = Dnssec._normalizeSigDate(options.expiration);
-        const labels = options.labels
-            ?? owner.split('.').filter((l) => l.length > 0).length;
+        const ownerLabels = owner.split('.').filter((l) => l.length > 0);
+        const wildcardOffset = ownerLabels[0] === '*' ? 1 : 0;
+        const labels = options.labels ?? (ownerLabels.length - wildcardOffset);
         const rrsig = new RRSIG(rrset[0].packetType.type, dnskey.algorithm, labels, options.originalTtl ?? rrset[0].ttl, expiration, inception, Dnssec.computeKeyTag(dnskey), options.signer ?? owner, '');
         const input = Dnssec.buildSigningInput(owner, rrset, rrsig);
         const signature = Dnssec._signWithAlgorithm(dnskey.algorithm, input, privateKey);
         rrsig.signature = signature.toString('base64');
         return rrsig;
+    }
+    static signZone(zone, options) {
+        const apex = zone.origin.endsWith('.') ? zone.origin.slice(0, -1) : zone.origin;
+        const apexLower = apex.toLowerCase();
+        const dnskeyTtl = options.dnskeyTtl ?? Dnssec._defaultDnskeyTtl(zone);
+        const cls = zone.records.length > 0 ? zone.records[0].class : 1;
+        const sameKey = options.ksk.dnskey === options.zsk.dnskey;
+        const dnskeyRRs = [];
+        dnskeyRRs.push(new PacketResource(apex, options.ksk.dnskey, cls, dnskeyTtl));
+        if (!sameKey) {
+            dnskeyRRs.push(new PacketResource(apex, options.zsk.dnskey, cls, dnskeyTtl));
+        }
+        const records = [...zone.records, ...dnskeyRRs];
+        const rrsigs = [];
+        const groups = new Map();
+        for (const rr of records) {
+            const key = `${rr.name.toLowerCase()}/${rr.packetType.type}`;
+            const existing = groups.get(key);
+            if (existing) {
+                existing.push(rr);
+            }
+            else {
+                groups.set(key, [rr]);
+            }
+        }
+        for (const group of groups.values()) {
+            const owner = group[0].name;
+            const isApexDnskey = group[0].packetType.type === PacketTypes.DNSKEY
+                && owner.toLowerCase() === apexLower;
+            const signer = isApexDnskey ? options.ksk : options.zsk;
+            const rrsig = Dnssec.signRrset(owner, group, signer.dnskey, signer.privateKey, {
+                inception: options.inception,
+                expiration: options.expiration,
+                originalTtl: group[0].ttl,
+                signer: apex,
+            });
+            rrsigs.push(new PacketResource(owner, rrsig, group[0].class, group[0].ttl));
+        }
+        return { records: records, rrsigs: rrsigs };
+    }
+    static _defaultDnskeyTtl(zone) {
+        try {
+            return zone.soaRdata().minimum;
+        }
+        catch (_err) {
+            return 3600;
+        }
     }
     static publicKeyToDnskey(publicKey, algorithm, flags = 257, protocol = 3) {
         const keyBase64 = Dnssec._encodeDnskeyKeyField(publicKey, algorithm);

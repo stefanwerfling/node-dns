@@ -601,8 +601,42 @@ const rrsig = Dnssec.signRrset(
 both are normalized to YYYYMMDDHHMMSS on the returned RRSIG.
 `publicKeyToDnskey` produces RFC-3110-format RSA, raw-point ECDSA, or
 32-byte raw Ed25519 wire formats from a Node `KeyObject`. Wildcard
-signing: pass `labels: 2` (or whatever the wildcard count is) so the
-verifier reconstructs `*.<trailing>` for any expansion.
+signing is automatic — when the owner starts with `*.`, the leading
+label is excluded from the labels count per RFC 4034 §3.1.3.
+
+#### Signing a whole zone
+
+`Dnssec.signZone(zone, {ksk, zsk, inception, expiration})` is the
+convenience wrapper for the common case "I have a `Zone` and two key
+pairs, give me records + RRSIGs":
+
+```ts
+import {Dnssec, DnssecAlgorithm, Zone} from 'dns2ts';
+
+const zone = Zone.fromZoneFile(zoneFileText);
+
+const ksk = crypto.generateKeyPairSync('ed25519');
+const zsk = crypto.generateKeyPairSync('ed25519');
+const kskDnskey = Dnssec.publicKeyToDnskey(ksk.publicKey, DnssecAlgorithm.ED25519, 257);
+const zskDnskey = Dnssec.publicKeyToDnskey(zsk.publicKey, DnssecAlgorithm.ED25519, 256);
+
+const {records, rrsigs} = Dnssec.signZone(zone, {
+  ksk: {dnskey: kskDnskey, privateKey: ksk.privateKey},
+  zsk: {dnskey: zskDnskey, privateKey: zsk.privateKey},
+  inception: '20240101000000',
+  expiration: '20300101000000',
+  // optional: dnskeyTtl: 3600,  // defaults to SOA minimum
+});
+
+// `records` = original zone + synthesized DNSKEY RRset at the apex.
+// `rrsigs` = one RRSIG per RRset (DNSKEY signed by KSK, rest by ZSK).
+```
+
+For a CSK setup (one key signs everything), pass the same signer object
+as both `ksk` and `zsk`. NSEC/NSEC3 chain generation is not yet wired
+into `signZone` — negative answers won't validate without it. Add the
+chain manually using the NSEC / NSEC3 helpers shown below if your zone
+needs it.
 
 For negative answers, NSEC and NSEC3 building blocks are shipped:
 

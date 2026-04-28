@@ -501,7 +501,7 @@ test('Dnssec#signRrset defaults: signer=owner, originalTtl=rrset[0].ttl, labels=
     assert.equal(rrsig.originalTtl, ORIGINAL_TTL);
     assert.equal(rrsig.labels, 2);
 });
-test('Dnssec#signRrset wildcard: labels override produces RRSIG that verifies under expansion', () => {
+test('Dnssec#signRrset wildcard: labels default skips the * label, RRSIG verifies under expansion', () => {
     const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
     const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ED25519);
     const wildcardOwner = '*.example.com';
@@ -511,8 +511,8 @@ test('Dnssec#signRrset wildcard: labels override produces RRSIG that verifies un
     const rrsig = Dnssec.signRrset(wildcardOwner, wildcardRrset, dnskey, privateKey, {
         inception: SIGN_INCEPTION,
         expiration: SIGN_EXPIRATION,
-        labels: 2,
     });
+    assert.equal(rrsig.labels, 2, 'wildcard label must not be counted');
     const expandedRrset = [
         new PacketResource('host.example.com', new A('192.0.2.1'), PacketClass.IN, ORIGINAL_TTL)
     ];
@@ -552,6 +552,145 @@ test('Dnssec#sign + verify multi-record RRset round-trip', () => {
     });
     const shuffled = [rrset[2], rrset[0], rrset[1]];
     assert.ok(Dnssec.verifyRrsig(OWNER, shuffled, rrsig, dnskey, { now: NOW }));
+});
+import { Zone } from '../Packet/Zone.js';
+const buildSignableZone = () => {
+    return Zone.fromZoneFile(`
+        $ORIGIN example.com.
+        $TTL 3600
+        @       IN SOA  ns1 admin (1 7200 3600 1209600 3600)
+        @       IN NS   ns1
+        @       IN MX   10 mail
+        ns1     IN A    192.0.2.1
+        mail    IN A    192.0.2.2
+        www     IN A    192.0.2.3
+        www     IN A    192.0.2.4
+        *.wild  IN A    192.0.2.5
+    `.replace(/^ {8}/gm, ''));
+};
+test('Dnssec#signZone produces RRSIG for every RRset and adds DNSKEY at apex', () => {
+    const zone = buildSignableZone();
+    const ksk = crypto.generateKeyPairSync('ed25519');
+    const zsk = crypto.generateKeyPairSync('ed25519');
+    const kskDnskey = Dnssec.publicKeyToDnskey(ksk.publicKey, DnssecAlgorithm.ED25519, 257);
+    const zskDnskey = Dnssec.publicKeyToDnskey(zsk.publicKey, DnssecAlgorithm.ED25519, 256);
+    const result = Dnssec.signZone(zone, {
+        ksk: { dnskey: kskDnskey, privateKey: ksk.privateKey },
+        zsk: { dnskey: zskDnskey, privateKey: zsk.privateKey },
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+    assert.equal(result.rrsigs.length, 8);
+    const dnskeyRRs = result.records.filter((r) => r.packetType.type === PacketTypes.DNSKEY && r.name === 'example.com');
+    assert.equal(dnskeyRRs.length, 2, 'KSK + ZSK published as DNSKEY records');
+});
+test('Dnssec#signZone DNSKEY RRset is signed by the KSK; other RRsets by the ZSK', () => {
+    const zone = buildSignableZone();
+    const ksk = crypto.generateKeyPairSync('ed25519');
+    const zsk = crypto.generateKeyPairSync('ed25519');
+    const kskDnskey = Dnssec.publicKeyToDnskey(ksk.publicKey, DnssecAlgorithm.ED25519, 257);
+    const zskDnskey = Dnssec.publicKeyToDnskey(zsk.publicKey, DnssecAlgorithm.ED25519, 256);
+    const kskTag = Dnssec.computeKeyTag(kskDnskey);
+    const zskTag = Dnssec.computeKeyTag(zskDnskey);
+    const result = Dnssec.signZone(zone, {
+        ksk: { dnskey: kskDnskey, privateKey: ksk.privateKey },
+        zsk: { dnskey: zskDnskey, privateKey: zsk.privateKey },
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+    for (const rrsigRR of result.rrsigs) {
+        const sig = rrsigRR.packetType;
+        const expectedTag = sig.sigType === PacketTypes.DNSKEY ? kskTag : zskTag;
+        assert.equal(sig.keyTag, expectedTag, `RRSIG for type ${sig.sigType} has wrong key tag`);
+    }
+});
+test('Dnssec#signZone every RRSIG round-trips through verifyRrsig', () => {
+    const zone = buildSignableZone();
+    const ksk = crypto.generateKeyPairSync('ed25519');
+    const zsk = crypto.generateKeyPairSync('ed25519');
+    const kskDnskey = Dnssec.publicKeyToDnskey(ksk.publicKey, DnssecAlgorithm.ED25519, 257);
+    const zskDnskey = Dnssec.publicKeyToDnskey(zsk.publicKey, DnssecAlgorithm.ED25519, 256);
+    const result = Dnssec.signZone(zone, {
+        ksk: { dnskey: kskDnskey, privateKey: ksk.privateKey },
+        zsk: { dnskey: zskDnskey, privateKey: zsk.privateKey },
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+    for (const rrsigRR of result.rrsigs) {
+        const sig = rrsigRR.packetType;
+        const rrset = result.records.filter((r) => r.name === rrsigRR.name
+            && r.packetType.type === sig.sigType);
+        const matchingKey = sig.keyTag === Dnssec.computeKeyTag(kskDnskey)
+            ? kskDnskey
+            : zskDnskey;
+        const ok = Dnssec.verifyRrsig(rrsigRR.name, rrset, sig, matchingKey, { now: NOW });
+        assert.ok(ok, `verify failed for ${rrsigRR.name}/${sig.sigType}`);
+    }
+});
+test('Dnssec#signZone wildcard RRset gets correct labels count via signRrset default', () => {
+    const zone = buildSignableZone();
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+    const result = Dnssec.signZone(zone, {
+        ksk: { dnskey: cskDnskey, privateKey: csk.privateKey },
+        zsk: { dnskey: cskDnskey, privateKey: csk.privateKey },
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+    const wildcardRrsig = result.rrsigs.find((r) => r.name === '*.wild.example.com');
+    assert.ok(wildcardRrsig, 'wildcard RRset must be signed');
+    assert.equal(wildcardRrsig.packetType.labels, 3);
+    const expanded = [
+        new PacketResource('host.wild.example.com', new A('192.0.2.5'), PacketClass.IN, 3600)
+    ];
+    assert.ok(Dnssec.verifyRrsig('host.wild.example.com', expanded, wildcardRrsig.packetType, cskDnskey, { now: NOW }));
+});
+test('Dnssec#signZone CSK case (ksk === zsk) emits one DNSKEY and signs everything', () => {
+    const zone = buildSignableZone();
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+    const signer = { dnskey: cskDnskey, privateKey: csk.privateKey };
+    const result = Dnssec.signZone(zone, {
+        ksk: signer,
+        zsk: signer,
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+    const dnskeyRRs = result.records.filter((r) => r.packetType.type === PacketTypes.DNSKEY);
+    assert.equal(dnskeyRRs.length, 1, 'CSK case adds exactly one DNSKEY');
+    const cskTag = Dnssec.computeKeyTag(cskDnskey);
+    for (const rrsigRR of result.rrsigs) {
+        assert.equal(rrsigRR.packetType.keyTag, cskTag);
+    }
+});
+test('Dnssec#signZone falls back to TTL 3600 when zone has no SOA', () => {
+    const zone = new Zone('example.com.', [
+        new PacketResource('example.com', new A('192.0.2.1'), PacketClass.IN, 60),
+    ]);
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+    const result = Dnssec.signZone(zone, {
+        ksk: { dnskey: cskDnskey, privateKey: csk.privateKey },
+        zsk: { dnskey: cskDnskey, privateKey: csk.privateKey },
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+    const dnskey = result.records.find((r) => r.packetType.type === PacketTypes.DNSKEY);
+    assert.equal(dnskey.ttl, 3600);
+});
+test('Dnssec#signZone honors dnskeyTtl override', () => {
+    const zone = buildSignableZone();
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+    const result = Dnssec.signZone(zone, {
+        ksk: { dnskey: cskDnskey, privateKey: csk.privateKey },
+        zsk: { dnskey: cskDnskey, privateKey: csk.privateKey },
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        dnskeyTtl: 86400,
+    });
+    const dnskey = result.records.find((r) => r.packetType.type === PacketTypes.DNSKEY);
+    assert.equal(dnskey.ttl, 86400);
 });
 test('Dnssec#sign + verify SOA round-trip uses canonical RDATA on both sides', () => {
     const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
