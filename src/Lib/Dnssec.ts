@@ -254,6 +254,158 @@ export class Dnssec {
     }
 
     /**
+     * RFC 4034 §6.1 canonical DNS name order. Returns -1, 0, or +1 when
+     * `a` is respectively before, equal to, or after `b` in the
+     * NSEC-chain ordering.
+     *
+     * Comparison is right-to-left, label-by-label: the rightmost label
+     * (TLD) has the highest order. Within a label, octets are compared
+     * as unsigned values after lowercasing the ASCII letters. A name
+     * that is a strict suffix of another sorts first (parent < child).
+     *
+     * Useful for sorting NSEC chains and locating an NSEC RR that
+     * covers a given query name.
+     */
+    public static canonicalNameCompare(a: string, b: string): number {
+        const aLabels = a.toLowerCase().split('.').filter((l) => l.length > 0);
+        const bLabels = b.toLowerCase().split('.').filter((l) => l.length > 0);
+
+        const overlap = Math.min(aLabels.length, bLabels.length);
+
+        for (let i = 0; i < overlap; i++) {
+            const labelA = aLabels[aLabels.length - 1 - i];
+            const labelB = bLabels[bLabels.length - 1 - i];
+            const cmp = Buffer.compare(Buffer.from(labelA, 'utf8'), Buffer.from(labelB, 'utf8'));
+
+            if (cmp !== 0) {
+                return cmp < 0 ? -1 : 1;
+            }
+        }
+
+        if (aLabels.length === bLabels.length) {
+            return 0;
+        }
+
+        return aLabels.length < bLabels.length ? -1 : 1;
+    }
+
+    /**
+     * Does an NSEC RR at `ownerName` with `nextDomain` prove that
+     * `queryName` does not exist? RFC 4035 §5.4 NSEC name-error proof
+     * needs `ownerName < queryName < nextDomain` in canonical order.
+     *
+     * Wrap-around case: at the end of the zone, the last NSEC's
+     * `nextDomain` points back to the apex, so `nextDomain ≤ ownerName`
+     * canonically. In that case, `queryName` is covered if it sorts
+     * after `ownerName` OR strictly before `nextDomain` — i.e. it falls
+     * into the "tail" of the chain.
+     */
+    public static nsecCovers(ownerName: string, nextDomain: string, queryName: string): boolean {
+        const ownerVsQuery = Dnssec.canonicalNameCompare(ownerName, queryName);
+        const queryVsNext = Dnssec.canonicalNameCompare(queryName, nextDomain);
+        const ownerVsNext = Dnssec.canonicalNameCompare(ownerName, nextDomain);
+
+        if (ownerVsNext < 0) {
+            // Normal range: owner < next, query must be strictly between.
+            return ownerVsQuery < 0 && queryVsNext < 0;
+        }
+
+        // Wrap-around (last NSEC in the chain): owner ≥ next.
+        // queryName is covered if it's strictly after owner OR strictly
+        // before next.
+        return ownerVsQuery < 0 || queryVsNext < 0;
+    }
+
+    /**
+     * RFC 5155 §5 NSEC3 hash. Per RFC 9276, only algorithm 1 (SHA-1) is
+     * defined for production; any other value throws.
+     *
+     * The "iterations" field counts *additional* hash rounds beyond the
+     * first, so iterations=0 → 1 SHA-1 call, iterations=N → N+1 calls.
+     *
+     * Returns the raw 20-byte hash. Use `base32hexEncode` to turn it
+     * into the label that NSEC3 owner names use.
+     */
+    public static nsec3Hash(
+        name: string,
+        saltHex: string,
+        iterations: number,
+        algorithm: number = 1
+    ): Buffer {
+        if (algorithm !== 1) {
+            throw new Error(
+                `Dnssec: unsupported NSEC3 hash algorithm ${algorithm} (RFC 9276: only SHA-1 = 1 is allowed)`
+            );
+        }
+
+        const salt = saltHex.length > 0 ? Buffer.from(saltHex, 'hex') : Buffer.alloc(0);
+        const nameBuf = Dnssec._canonicalNameBytes(name);
+
+        let hash = crypto.createHash('sha1').update(nameBuf).update(salt).digest();
+
+        for (let i = 0; i < iterations; i++) {
+            hash = crypto.createHash('sha1').update(hash).update(salt).digest();
+        }
+
+        return hash;
+    }
+
+    /**
+     * Does an NSEC3 RR with `ownerHash` (the hashed first label of its
+     * owner name) and `nextHash` (the wire-format Next Hashed Owner)
+     * cover `queryHash`?
+     *
+     * Same wrap-around logic as `nsecCovers`, but on raw hash bytes
+     * compared as unsigned big-endian integers (`Buffer.compare`).
+     */
+    public static nsec3CoversHash(ownerHash: Buffer, nextHash: Buffer, queryHash: Buffer): boolean {
+        const ownerVsQuery = Buffer.compare(ownerHash, queryHash);
+        const queryVsNext = Buffer.compare(queryHash, nextHash);
+        const ownerVsNext = Buffer.compare(ownerHash, nextHash);
+
+        if (ownerVsNext < 0) {
+            return ownerVsQuery < 0 && queryVsNext < 0;
+        }
+
+        return ownerVsQuery < 0 || queryVsNext < 0;
+    }
+
+    /**
+     * RFC 4648 §7 base32hex (extended hex alphabet, no padding).
+     * Used to render an NSEC3 hash as the first label of a hashed
+     * owner name (`<base32hex(hash)>.<zone>`).
+     */
+    public static base32hexEncode(buf: Buffer): string {
+        const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUV';
+        let value = 0;
+        let bits = 0;
+        let result = '';
+
+        for (const byte of buf) {
+            // eslint-disable-next-line no-bitwise
+            value = (value << 8) | byte;
+            bits += 8;
+
+            while (bits >= 5) {
+                bits -= 5;
+                // eslint-disable-next-line no-bitwise
+                result += alphabet[(value >>> bits) & 0x1F];
+                // Drop the bits we just emitted so `value` stays bounded
+                // and 32-bit-arithmetic-safe.
+                // eslint-disable-next-line no-bitwise
+                value &= (1 << bits) - 1;
+            }
+        }
+
+        if (bits > 0) {
+            // eslint-disable-next-line no-bitwise
+            result += alphabet[(value << (5 - bits)) & 0x1F];
+        }
+
+        return result;
+    }
+
+    /**
      * RFC 4034 §3.1.3: when `rrsig.labels` is less than the actual label
      * count of `owner` (root and any leading wildcard label excluded), the
      * authoritative server expanded a wildcard. The signer's input used

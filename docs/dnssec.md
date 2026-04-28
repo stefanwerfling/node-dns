@@ -43,14 +43,18 @@ on:
 
 ## What's *not* covered (yet)
 
-This library deliberately stops at the cryptographic primitive. A real
-validator also has to:
+This library stops short of the message-shape conventions a recursive
+resolver imposes. The cryptographic primitives are all here. A
+production validator on top of dns2ts still has to:
 
 - **Walk the chain of trust** from a configured trust anchor (the root
   KSK) down to the zone whose answer it's validating. That requires a
   recursive resolver — see the roadmap.
-- **Prove negative answers** with NSEC / NSEC3 (RFC 4035 §5.4 and
-  RFC 5155). The records are parsed; the proof logic isn't here yet.
+- **Compose end-to-end NXDOMAIN / NODATA proofs** from the NSEC /
+  NSEC3 building blocks below. The shape of the proof depends on what
+  the authoritative server returned (closest-encloser candidate,
+  wildcard, opt-out flag, …); we leave that to the resolver layer
+  rather than picking a calling convention here.
 - **Sign your own zones**. The library only verifies. If you operate
   the authoritative side, you'll need an external signer (BIND
   `dnssec-signzone`, Knot's `keymgr`, OpenDNSSEC, ldns-signzone) for
@@ -125,6 +129,59 @@ roll, for example):
 ```ts
 const digestHex = Dnssec.computeDsDigest('example.com', dnskey, 2 /* SHA-256 */);
 ```
+
+## Negative-answer building blocks
+
+NSEC and NSEC3 prove a non-existence claim. The records get fetched
+and parsed by the existing types; the question is then "does this
+specific NSEC / NSEC3 record cover the queried name?" These primitives
+answer that question:
+
+```ts
+// Right-to-left, label-by-label, octet-compare canonical order
+// (RFC 4034 §6.1). Returns -1, 0, or +1.
+Dnssec.canonicalNameCompare('z.example.com', 'a.example.com');  // +1
+
+// NSEC: does an NSEC RR at `owner` with NextDomain `next` prove
+// `query` doesn't exist? Handles the end-of-zone wrap-around case
+// (the last NSEC's NextDomain points back at the apex, so
+// `next < owner` canonically — anything strictly between owner and
+// the apex is still covered).
+Dnssec.nsecCovers('a.example.com', 'c.example.com', 'b.example.com'); // true
+Dnssec.nsecCovers('z.example.com', 'example.com', 'zz.example.com');  // wrap-around
+
+// NSEC3: hash a name per RFC 5155 §5. The iterations field counts
+// *additional* rounds, so iterations=N means N+1 SHA-1 calls.
+// algorithm defaults to 1 (SHA-1) — RFC 9276 forbids any other
+// value in production.
+const hash = Dnssec.nsec3Hash('host.example.com', 'aabbccdd', 12);
+
+// Compare a 20-byte query hash against a chain entry's owner-hash and
+// nextHashedOwner (also 20 bytes each). Same wrap-around logic as
+// nsecCovers, just on raw bytes.
+Dnssec.nsec3CoversHash(ownerHashBuf, nextHashBuf, hash);
+
+// RFC 4648 §7 base32hex (extended-hex alphabet, no padding) for
+// rendering an NSEC3 hash as the first label of a hashed owner name.
+Dnssec.base32hexEncode(hash);  // 32-char lowercase string
+```
+
+`nsec3Hash` matches the published RFC 5155 Appendix A.1 fixtures
+exactly — the test suite checks all 11 hashed names from the example
+zone (`example.`, `a.example.`, `*.w.example.`, `xx.example.`, …).
+
+### When you'd compose these
+
+A typical NSEC3 NXDOMAIN proof needs three records: the NSEC3 of the
+closest encloser, the NSEC3 covering the "next-closer name" (one label
+longer than the encloser, on the path to the queried name), and the
+NSEC3 covering `*.<closest-encloser>`. The shape varies for NODATA
+answers, opt-out delegations, and DS / wildcard cases. A library-level
+`Dnssec.proveNxdomain(...)` would have to pick one calling convention
+for all of those — which is something better done where the
+authoritative answer arrives. So instead we expose `nsec3Hash` and
+`nsec3CoversHash` and let you write the composition once your resolver
+knows what shape it has.
 
 ## Computing a key tag
 

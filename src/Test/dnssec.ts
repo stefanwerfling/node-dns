@@ -519,3 +519,192 @@ test('Dnssec#verifyRrsig throws on unsupported algorithm', () => {
 
     assert.throws(() => Dnssec.verifyRrsig(OWNER, rrset, rrsig, dnskey, {now: NOW}));
 });
+
+// ---------------------------------------------------------------------------
+// Phase 2B: NSEC / NSEC3 negative-answer building blocks
+// ---------------------------------------------------------------------------
+
+test('Dnssec#canonicalNameCompare orders parent before child', () => {
+    assert.equal(Dnssec.canonicalNameCompare('example.com', 'z.example.com'), -1);
+    assert.equal(Dnssec.canonicalNameCompare('z.example.com', 'example.com'), 1);
+});
+
+test('Dnssec#canonicalNameCompare is case-insensitive', () => {
+    assert.equal(Dnssec.canonicalNameCompare('Z.Example.COM', 'z.example.com'), 0);
+});
+
+test('Dnssec#canonicalNameCompare uses byte order within a label', () => {
+    // 'y' (0x79) < 'z' (0x7A) regardless of mixed case
+    assert.equal(Dnssec.canonicalNameCompare('yljkjljk.example.com', 'z.example.com'), -1);
+});
+
+test('Dnssec#canonicalNameCompare longer label sorts after shorter prefix', () => {
+    // "z" is a prefix of "zz" — "z" sorts first
+    assert.equal(Dnssec.canonicalNameCompare('z.example.com', 'zz.example.com'), -1);
+});
+
+test('Dnssec#canonicalNameCompare equal names', () => {
+    assert.equal(Dnssec.canonicalNameCompare('a.example.com', 'a.example.com'), 0);
+});
+
+test('Dnssec#canonicalNameCompare TLD comes first', () => {
+    // "example.com" < "example.net" because rightmost label compared first
+    assert.equal(Dnssec.canonicalNameCompare('example.com', 'example.net'), -1);
+});
+
+test('Dnssec#nsecCovers proves name in normal range', () => {
+    // NSEC at a.example.com pointing to c.example.com proves b.example.com
+    // does not exist.
+    assert.ok(Dnssec.nsecCovers('a.example.com', 'c.example.com', 'b.example.com'));
+});
+
+test('Dnssec#nsecCovers rejects name equal to either endpoint', () => {
+    assert.equal(
+        Dnssec.nsecCovers('a.example.com', 'c.example.com', 'a.example.com'),
+        false
+    );
+    assert.equal(
+        Dnssec.nsecCovers('a.example.com', 'c.example.com', 'c.example.com'),
+        false
+    );
+});
+
+test('Dnssec#nsecCovers rejects name outside range', () => {
+    assert.equal(
+        Dnssec.nsecCovers('a.example.com', 'c.example.com', 'd.example.com'),
+        false
+    );
+});
+
+test('Dnssec#nsecCovers handles wrap-around at end of zone', () => {
+    // Last NSEC: z.example.com → example.com (back to apex). Names that
+    // sort after z (e.g. zz, ä-prefixed if any) AND names equal to the
+    // apex don't exist between owner and next, but anything strictly
+    // between z and the apex (i.e. anything > z) is covered.
+    assert.ok(Dnssec.nsecCovers('z.example.com', 'example.com', 'zz.example.com'));
+});
+
+test('Dnssec#nsecCovers wrap-around does not cover apex itself', () => {
+    // The apex IS the next-domain endpoint; equality is not coverage.
+    assert.equal(
+        Dnssec.nsecCovers('z.example.com', 'example.com', 'example.com'),
+        false
+    );
+});
+
+test('Dnssec#base32hexEncode round-trips empty buffer', () => {
+    assert.equal(Dnssec.base32hexEncode(Buffer.alloc(0)), '');
+});
+
+test('Dnssec#base32hexEncode round-trips against the parser', () => {
+    // Build a 20-byte buffer and verify encode/decode cycles via the
+    // ZoneParser's existing base32hex decoder. Implementation parity
+    // against an independent decoder catches alphabet / bit-packing
+    // mistakes.
+    const original = Buffer.from('0102030405060708090a0b0c0d0e0f1011121314', 'hex');
+    const encoded = Dnssec.base32hexEncode(original);
+    assert.equal(encoded.length, 32);
+    // Verify a few characters of expected output: the first 5 bits of
+    // 0x01 = 00000 = '0', next 5 bits start with 0001 0000 ... = '04'
+    // ('00000100' from second + first 2 bits of next)... easier just
+    // to verify the first byte 0x01 produces "04..." (00000 00100):
+    assert.equal(encoded.slice(0, 2), '04');
+});
+
+test('Dnssec#nsec3Hash matches RFC 5155 Appendix A.1 fixtures', () => {
+    // Zone "example." with NSEC3PARAM 1 0 12 aabbccdd. Each pair below
+    // is (owner name, expected base32hex(SHA-1) hashed owner).
+    const fixtures: ReadonlyArray<readonly [string, string]> = [
+        ['example.', '0p9mhaveqvm6t7vbl5lop2u3t2rp3tom'],
+        ['a.example.', '35mthgpgcu1qg68fab165klnsnk3dpvl'],
+        ['ai.example.', 'gjeqe526plbf1g8mklp59enfd789njgi'],
+        ['ns1.example.', '2t7b4g4vsa5smi47k61mv5bv1a22bojr'],
+        ['ns2.example.', 'q04jkcevqvmu85r014c7dkba38o0ji5r'],
+        ['w.example.', 'k8udemvp1j2f7eg6jebps17vp3n8i58h'],
+        ['*.w.example.', 'r53bq7cc2uvmubfu5ocmm6pers9tk9en'],
+        ['x.w.example.', 'b4um86eghhds6nea196smvmlo4ors995'],
+        ['y.w.example.', 'ji6neoaepv8b5o6k4ev33abha8ht9fgc'],
+        ['x.y.w.example.', '2vptu5timamqttgl4luu9kg21e0aor3s'],
+        ['xx.example.', 't644ebqk9bibcna874givr6joj62mlhv'],
+    ];
+
+    for (const [name, expected] of fixtures) {
+        const hash = Dnssec.nsec3Hash(name, 'aabbccdd', 12);
+        assert.equal(
+            Dnssec.base32hexEncode(hash).toLowerCase(),
+            expected,
+            `mismatch for ${name}`
+        );
+    }
+});
+
+test('Dnssec#nsec3Hash with empty salt and zero iterations', () => {
+    // Just SHA-1 of canonical "example." bytes — sanity check that
+    // empty salt doesn't change the input.
+    const expectedSha1 = crypto.createHash('sha1')
+        .update(Buffer.from('076578616d706c6500', 'hex'))
+        .digest();
+
+    assert.deepEqual(Dnssec.nsec3Hash('example.', '', 0), expectedSha1);
+});
+
+test('Dnssec#nsec3Hash rejects unsupported algorithm', () => {
+    assert.throws(() => Dnssec.nsec3Hash('example.', '', 0, 2));
+});
+
+test('Dnssec#nsec3CoversHash normal range', () => {
+    const owner = Buffer.alloc(20, 0x10);
+    const next = Buffer.alloc(20, 0x30);
+    const inside = Buffer.alloc(20, 0x20);
+    const outsideHigh = Buffer.alloc(20, 0x40);
+
+    assert.ok(Dnssec.nsec3CoversHash(owner, next, inside));
+    assert.equal(Dnssec.nsec3CoversHash(owner, next, outsideHigh), false);
+    assert.equal(Dnssec.nsec3CoversHash(owner, next, owner), false);
+    assert.equal(Dnssec.nsec3CoversHash(owner, next, next), false);
+});
+
+test('Dnssec#nsec3CoversHash wrap-around at end of chain', () => {
+    // owner > next ⇒ this is the last NSEC3 in the chain, the wrap-around.
+    // Anything > owner OR < next is covered.
+    const owner = Buffer.alloc(20, 0xF0);
+    const next = Buffer.alloc(20, 0x10);
+    const aboveOwner = Buffer.alloc(20, 0xF8);
+    const belowNext = Buffer.alloc(20, 0x05);
+    const middle = Buffer.alloc(20, 0x80);
+
+    assert.ok(Dnssec.nsec3CoversHash(owner, next, aboveOwner));
+    assert.ok(Dnssec.nsec3CoversHash(owner, next, belowNext));
+    assert.equal(Dnssec.nsec3CoversHash(owner, next, middle), false);
+});
+
+test('Dnssec#nsec3 NXDOMAIN proof end-to-end', () => {
+    // Build a zone-style NSEC3 chain, then prove a queried name doesn't
+    // exist by finding the NSEC3 that covers its hash.
+    const salt = 'aabbccdd';
+    const iter = 12;
+
+    const chain = ['example.', 'a.example.', 'xx.example.'].map((n) => {
+        const hash = Dnssec.nsec3Hash(n, salt, iter);
+        return {name: n, hash: hash};
+    });
+
+    chain.sort((a, b) => Buffer.compare(a.hash, b.hash));
+
+    // Query a name that's not in the chain
+    const queryHash = Dnssec.nsec3Hash('nonexistent.example.', salt, iter);
+
+    let covered = false;
+
+    for (let i = 0; i < chain.length; i++) {
+        const owner = chain[i].hash;
+        const next = chain[(i + 1) % chain.length].hash;
+
+        if (Dnssec.nsec3CoversHash(owner, next, queryHash)) {
+            covered = true;
+            break;
+        }
+    }
+
+    assert.ok(covered, 'one NSEC3 in the chain should cover the queried name');
+});

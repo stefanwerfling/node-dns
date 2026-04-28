@@ -24,7 +24,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - TSIG transaction signing (RFC 8945) — HMAC-based request/response authentication with hmac-md5/sha1/sha224/sha256/sha384/sha512
 - PROXY protocol v1 and v2 support (UDP per-datagram, TCP per-connection) for transparent load-balancer deployments
 - RFC 1035 master file ("zone file") parser — `$ORIGIN`, `$TTL`, `@`, multi-line records via parens, quoted strings; RDATA for A, AAAA, NS, CNAME, DNAME, PTR, MX, TXT, SOA, SRV, CAA, DNSKEY, DS, SSHFP, TLSA, NAPTR, NSEC, NSEC3, RRSIG, SVCB, HTTPS (RFC 3597 generic `TYPEnnn` mnemonic, base32hex for NSEC3, RFC 9460 SVCB presentation form)
-- DNSSEC validation (RFC 4034 / 4035) — stateless `Dnssec.verifyRrsig`, `Dnssec.computeKeyTag`, `Dnssec.computeDsDigest`, `Dnssec.verifyDs`. Algorithms 8 (RSA/SHA-256), 10 (RSA/SHA-512), 13 (ECDSA P-256), 14 (ECDSA P-384), 15 (Ed25519). DS digest types 1/2/4. Canonical RDATA covers every supported RR type with embedded-name lowercasing (RFC 4034 §6.2) and automatic wildcard label-count reconstruction (§3.1.3). Out of scope: NSEC/NSEC3 negative proofs, chain-of-trust traversal — those belong in the recursive resolver layer.
+- DNSSEC validation (RFC 4034 / 4035) — stateless `Dnssec.verifyRrsig`, `Dnssec.computeKeyTag`, `Dnssec.computeDsDigest`, `Dnssec.verifyDs`. Algorithms 8 (RSA/SHA-256), 10 (RSA/SHA-512), 13 (ECDSA P-256), 14 (ECDSA P-384), 15 (Ed25519). DS digest types 1/2/4. Canonical RDATA covers every supported RR type with embedded-name lowercasing (RFC 4034 §6.2) and automatic wildcard label-count reconstruction (§3.1.3). Negative-answer building blocks shipped: `canonicalNameCompare` (§6.1), `nsecCovers` (with zone-wrap-around), `nsec3Hash` (RFC 5155 §5 SHA-1 with iterations), `nsec3CoversHash`, `base32hexEncode`. Composing them into a full NXDOMAIN/NODATA proof and the chain-of-trust traversal belong in the recursive resolver layer.
 - AXFR zone transfer (RFC 5936) — `Zone` class for in-memory zones, `AxfrClient` for fetching, `send(Packet[])` server hook for serving
 - IXFR incremental zone transfer (RFC 1995) — `Zone.toIxfrPackets` with optional `ZoneChangeSet` history, `IxfrClient` returning a no-change / incremental / AXFR-fallback discriminated union
 - NOTIFY zone-change notification (RFC 1996) — `NotifyClient` on the primary side, opcode-dispatch on the secondary side
@@ -562,8 +562,33 @@ reconstruction is automatic: when `rrsig.labels` is less than the owner's
 actual label count, the validator infers `*.<trailing labels>` as the
 signed owner before hashing.
 
+For negative answers, NSEC and NSEC3 building blocks are shipped:
+
+```ts
+// NSEC: does the chain entry at `owner` (with NextDomain `next`) prove
+// `query` doesn't exist? Handles the end-of-zone wrap-around case.
+Dnssec.nsecCovers(ownerName, nextDomain, queryName);    // boolean
+
+// Canonical DNS name order (RFC 4034 §6.1) for sorting an NSEC chain
+Dnssec.canonicalNameCompare(a, b);                      // -1 / 0 / +1
+
+// NSEC3: hash a name per RFC 5155 §5 (SHA-1, iterations + 1 calls)
+const queryHash = Dnssec.nsec3Hash('host.example.com', 'aabbccdd', 12);
+
+// Compare hashes against a chain entry's owner / nextHashedOwner
+Dnssec.nsec3CoversHash(ownerHashBuf, nextHashBuf, queryHash);   // boolean
+
+// Render a hash as the base32hex label that NSEC3 owner names use
+const label = Dnssec.base32hexEncode(queryHash);
+```
+
+These are deliberately primitives — composing them into a full NXDOMAIN
+or NODATA proof (closest-encloser + next-closer + wildcard) lives one
+layer up in the recursive resolver, where the answer's structure
+provides the closest-encloser candidate.
+
 See [`docs/dnssec.md`](docs/dnssec.md) for the deeper guide and the current
-limitations (no NSEC/NSEC3 negative proofs, no chain-of-trust walk, no
+limitations (no end-to-end NXDOMAIN composer, no chain-of-trust walk, no
 zone signing).
 
 ### Build & Development
@@ -586,7 +611,8 @@ npm run lint      # ESLint check
 + [RFC-4035 - Protocol Modifications for the DNS Security Extensions](https://datatracker.ietf.org/doc/html/rfc4035) (validation requirements)
 + [RFC-4509 - Use of SHA-256 in DNSSEC Delegation Signer (DS) Resource Records](https://datatracker.ietf.org/doc/html/rfc4509)
 + [RFC-4648 - The Base16, Base32, and Base64 Data Encodings](https://datatracker.ietf.org/doc/html/rfc4648) (base32hex for NSEC3)
-+ [RFC-5155 - DNS Security (DNSSEC) Hashed Authenticated Denial of Existence](https://datatracker.ietf.org/doc/html/rfc5155) (NSEC3 wire format + presentation)
++ [RFC-5155 - DNS Security (DNSSEC) Hashed Authenticated Denial of Existence](https://datatracker.ietf.org/doc/html/rfc5155) (NSEC3 wire format, presentation, and SHA-1 hash with iterations)
++ [RFC-9276 - Guidance for NSEC3 Parameter Settings](https://datatracker.ietf.org/doc/html/rfc9276) (only NSEC3 hash algorithm 1 / SHA-1 is allowed in production)
 + [RFC-6605 - Elliptic Curve Digital Signature Algorithm (DSA) for DNSSEC](https://datatracker.ietf.org/doc/html/rfc6605) (ECDSA P-256 / P-384)
 + [RFC-6840 - Clarifications and Implementation Notes for DNS Security (DNSSEC)bis](https://datatracker.ietf.org/doc/html/rfc6840) (no-compression rule for DNSSEC RRs)
 + [RFC-8080 - Edwards-Curve DSA for DNSSEC](https://datatracker.ietf.org/doc/html/rfc8080) (Ed25519 / Ed448)

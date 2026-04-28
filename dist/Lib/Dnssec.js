@@ -110,6 +110,72 @@ export class Dnssec {
         }
         return Buffer.concat(parts);
     }
+    static canonicalNameCompare(a, b) {
+        const aLabels = a.toLowerCase().split('.').filter((l) => l.length > 0);
+        const bLabels = b.toLowerCase().split('.').filter((l) => l.length > 0);
+        const overlap = Math.min(aLabels.length, bLabels.length);
+        for (let i = 0; i < overlap; i++) {
+            const labelA = aLabels[aLabels.length - 1 - i];
+            const labelB = bLabels[bLabels.length - 1 - i];
+            const cmp = Buffer.compare(Buffer.from(labelA, 'utf8'), Buffer.from(labelB, 'utf8'));
+            if (cmp !== 0) {
+                return cmp < 0 ? -1 : 1;
+            }
+        }
+        if (aLabels.length === bLabels.length) {
+            return 0;
+        }
+        return aLabels.length < bLabels.length ? -1 : 1;
+    }
+    static nsecCovers(ownerName, nextDomain, queryName) {
+        const ownerVsQuery = Dnssec.canonicalNameCompare(ownerName, queryName);
+        const queryVsNext = Dnssec.canonicalNameCompare(queryName, nextDomain);
+        const ownerVsNext = Dnssec.canonicalNameCompare(ownerName, nextDomain);
+        if (ownerVsNext < 0) {
+            return ownerVsQuery < 0 && queryVsNext < 0;
+        }
+        return ownerVsQuery < 0 || queryVsNext < 0;
+    }
+    static nsec3Hash(name, saltHex, iterations, algorithm = 1) {
+        if (algorithm !== 1) {
+            throw new Error(`Dnssec: unsupported NSEC3 hash algorithm ${algorithm} (RFC 9276: only SHA-1 = 1 is allowed)`);
+        }
+        const salt = saltHex.length > 0 ? Buffer.from(saltHex, 'hex') : Buffer.alloc(0);
+        const nameBuf = Dnssec._canonicalNameBytes(name);
+        let hash = crypto.createHash('sha1').update(nameBuf).update(salt).digest();
+        for (let i = 0; i < iterations; i++) {
+            hash = crypto.createHash('sha1').update(hash).update(salt).digest();
+        }
+        return hash;
+    }
+    static nsec3CoversHash(ownerHash, nextHash, queryHash) {
+        const ownerVsQuery = Buffer.compare(ownerHash, queryHash);
+        const queryVsNext = Buffer.compare(queryHash, nextHash);
+        const ownerVsNext = Buffer.compare(ownerHash, nextHash);
+        if (ownerVsNext < 0) {
+            return ownerVsQuery < 0 && queryVsNext < 0;
+        }
+        return ownerVsQuery < 0 || queryVsNext < 0;
+    }
+    static base32hexEncode(buf) {
+        const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUV';
+        let value = 0;
+        let bits = 0;
+        let result = '';
+        for (const byte of buf) {
+            value = (value << 8) | byte;
+            bits += 8;
+            while (bits >= 5) {
+                bits -= 5;
+                result += alphabet[(value >>> bits) & 0x1F];
+                value &= (1 << bits) - 1;
+            }
+        }
+        if (bits > 0) {
+            result += alphabet[(value << (5 - bits)) & 0x1F];
+        }
+        return result;
+    }
     static _reconstructSignedOwner(owner, signerLabels) {
         const ownerLabels = owner.split('.').filter((l) => l.length > 0);
         if (signerLabels >= ownerLabels.length) {
