@@ -9,9 +9,13 @@ import {DNAME} from '../Packet/Types/DNAME.js';
 import {DNSKEY} from '../Packet/Types/DNSKEY.js';
 import {DS} from '../Packet/Types/DS.js';
 import {MX} from '../Packet/Types/MX.js';
+import {NAPTR} from '../Packet/Types/NAPTR.js';
 import {NS} from '../Packet/Types/NS.js';
+import {NSEC} from '../Packet/Types/NSEC.js';
 import {PTR} from '../Packet/Types/PTR.js';
 import {RRSIG} from '../Packet/Types/RRSIG.js';
+import {SOA} from '../Packet/Types/SOA.js';
+import {SRV} from '../Packet/Types/SRV.js';
 
 /**
  * IANA-registered DNSSEC Signing Algorithms (subset that we implement
@@ -188,6 +192,14 @@ export class Dnssec {
             return false;
         }
 
+        // RFC 4035 §5.3.1: the labels field must be ≤ the owner's label
+        // count (excluding root). A larger value is a malformed signature.
+        const ownerLabelCount = rrset[0].name.split('.').filter((l) => l.length > 0).length;
+
+        if (rrsig.labels > ownerLabelCount) {
+            return false;
+        }
+
         if (options.skipValidityWindow !== true) {
             const now = options.now ?? Math.floor(Date.now() / 1000);
             const inception = Dnssec._parseSigDate(rrsig.inception);
@@ -219,7 +231,8 @@ export class Dnssec {
         rrsig: RRSIG
     ): Buffer {
         const sigHeader = Dnssec._rrsigSignedHeader(rrsig);
-        const ownerBuf = Dnssec._canonicalNameBytes(owner);
+        const signedOwner = Dnssec._reconstructSignedOwner(owner, rrsig.labels);
+        const ownerBuf = Dnssec._canonicalNameBytes(signedOwner);
         const rrType = rrset[0].packetType.type;
         const rrClass = rrset[0].class;
 
@@ -238,6 +251,28 @@ export class Dnssec {
         }
 
         return Buffer.concat(parts);
+    }
+
+    /**
+     * RFC 4034 §3.1.3: when `rrsig.labels` is less than the actual label
+     * count of `owner` (root and any leading wildcard label excluded), the
+     * authoritative server expanded a wildcard. The signer's input used
+     * `*.<trailing labels>` rather than the expanded owner, so the
+     * verifier has to reconstruct the same name before hashing.
+     *
+     * If `rrsig.labels` matches the owner's label count, the owner is
+     * returned unchanged.
+     * @protected
+     */
+    protected static _reconstructSignedOwner(owner: string, signerLabels: number): string {
+        const ownerLabels = owner.split('.').filter((l) => l.length > 0);
+
+        if (signerLabels >= ownerLabels.length) {
+            return owner;
+        }
+
+        const trailing = ownerLabels.slice(ownerLabels.length - signerLabels);
+        return `*.${trailing.join('.')}`;
     }
 
     /**
@@ -272,14 +307,14 @@ export class Dnssec {
     }
 
     /**
-     * Canonical RDATA for one record. For RR types whose RDATA holds no
-     * domain names the wire-format encode is already canonical. For
-     * single-name and one-integer-then-name types we recompute the bytes
-     * with the name lowercased and uncompressed.
+     * Canonical RDATA for one record per RFC 4034 §6.2: types whose RDATA
+     * holds no domain names use their wire-format encode as-is; types with
+     * embedded names re-emit them lowercased and uncompressed.
      *
-     * Throws for types that contain multiple embedded names (SOA, SRV,
-     * NAPTR, NSEC, RRSIG of an RRSIG, …) — those need per-type
-     * canonicalization that we have not implemented yet.
+     * Multi-name types (SOA, SRV, NAPTR, NSEC, RRSIG) are handled by
+     * cloning the record with lowercased name fields and calling the
+     * existing `encode` — the type's own encode already builds RDATA in a
+     * fresh writer, so no compression leaks in.
      * @protected
      */
     protected static _canonicalRdataBytes(resource: PacketResource): Buffer {
@@ -313,6 +348,73 @@ export class Dnssec {
                 w.write(mx.priority, 16);
                 PacketName.encode(mx.exchange.toLowerCase(), w);
                 return w.toBuffer();
+            }
+
+            case PacketTypes.SOA: {
+                const soa = pt as SOA;
+                const lowered = new SOA(
+                    soa.primary.toLowerCase(),
+                    soa.admin.toLowerCase(),
+                    soa.serial,
+                    soa.refresh,
+                    soa.retry,
+                    soa.expiration,
+                    soa.minimum
+                );
+                return lowered.encode({} as PacketResource).subarray(2);
+            }
+
+            case PacketTypes.SRV: {
+                const srv = pt as SRV;
+                const lowered = new SRV(
+                    srv.priority,
+                    srv.weight,
+                    srv.port,
+                    srv.target.toLowerCase()
+                );
+                return lowered.encode({} as PacketResource).subarray(2);
+            }
+
+            case PacketTypes.NAPTR: {
+                // RFC 4034 §6.2 step 2 lowercases only the embedded *name*
+                // (replacement). The flags/services/regexp character-strings
+                // are not subject to case canonicalization.
+                const naptr = pt as NAPTR;
+                const lowered = new NAPTR(
+                    naptr.order,
+                    naptr.preference,
+                    naptr.flags,
+                    naptr.services,
+                    naptr.regexp,
+                    naptr.replacement.toLowerCase()
+                );
+                return lowered.encode({} as PacketResource).subarray(2);
+            }
+
+            case PacketTypes.NSEC: {
+                const nsec = pt as NSEC;
+                const lowered = new NSEC(nsec.nextDomain.toLowerCase(), nsec.rdtypes);
+                return lowered.encode({} as PacketResource).subarray(2);
+            }
+
+            case PacketTypes.RRSIG: {
+                // Canonical RDATA for an RRSIG keeps the signature bytes
+                // untouched; only the embedded signer name is lowercased.
+                // (Signing an RRSIG with another RRSIG is unusual but
+                // allowed.)
+                const rr = pt as RRSIG;
+                const lowered = new RRSIG(
+                    rr.sigType,
+                    rr.algorithm,
+                    rr.labels,
+                    rr.originalTtl,
+                    rr.expiration,
+                    rr.inception,
+                    rr.keyTag,
+                    rr.signer.toLowerCase(),
+                    rr.signature
+                );
+                return lowered.encode({} as PacketResource).subarray(2);
             }
 
             default:

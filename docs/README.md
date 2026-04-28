@@ -81,4 +81,6 @@ example.
   `Dnssec.verifyRrsig`, `Dnssec.verifyDs`, `Dnssec.computeKeyTag`,
   `Dnssec.computeDsDigest`. Algorithms 8 (RSA/SHA-256), 10 (RSA/SHA-512),
   13 (ECDSA P-256), 14 (ECDSA P-384), 15 (Ed25519). DS digest types
-  1/2/4. Chain-of-trust walking is the caller's responsibility.
+  1/2/4. Canonical RDATA for every supported type, automatic wildcard
+  label-count reconstruction. Chain-of-trust walking and NSEC/NSEC3
+  negative proofs are still the caller's responsibility.

@@ -3,6 +3,11 @@ import * as crypto from 'crypto';
 import { BufferWriter } from './BufferWriter.js';
 import { PacketName } from '../Packet/PacketName.js';
 import { PacketTypes } from '../Packet/PacketTypes.js';
+import { NAPTR } from '../Packet/Types/NAPTR.js';
+import { NSEC } from '../Packet/Types/NSEC.js';
+import { RRSIG } from '../Packet/Types/RRSIG.js';
+import { SOA } from '../Packet/Types/SOA.js';
+import { SRV } from '../Packet/Types/SRV.js';
 export var DnssecAlgorithm;
 (function (DnssecAlgorithm) {
     DnssecAlgorithm[DnssecAlgorithm["RSASHA256"] = 8] = "RSASHA256";
@@ -70,6 +75,10 @@ export class Dnssec {
         if (rrsig.keyTag !== Dnssec.computeKeyTag(dnskey)) {
             return false;
         }
+        const ownerLabelCount = rrset[0].name.split('.').filter((l) => l.length > 0).length;
+        if (rrsig.labels > ownerLabelCount) {
+            return false;
+        }
         if (options.skipValidityWindow !== true) {
             const now = options.now ?? Math.floor(Date.now() / 1000);
             const inception = Dnssec._parseSigDate(rrsig.inception);
@@ -84,7 +93,8 @@ export class Dnssec {
     }
     static buildSigningInput(owner, rrset, rrsig) {
         const sigHeader = Dnssec._rrsigSignedHeader(rrsig);
-        const ownerBuf = Dnssec._canonicalNameBytes(owner);
+        const signedOwner = Dnssec._reconstructSignedOwner(owner, rrsig.labels);
+        const ownerBuf = Dnssec._canonicalNameBytes(signedOwner);
         const rrType = rrset[0].packetType.type;
         const rrClass = rrset[0].class;
         const canonicalRdatas = rrset.map((rr) => Dnssec._canonicalRdataBytes(rr));
@@ -99,6 +109,14 @@ export class Dnssec {
             parts.push(ownerBuf, fixed, rdata);
         }
         return Buffer.concat(parts);
+    }
+    static _reconstructSignedOwner(owner, signerLabels) {
+        const ownerLabels = owner.split('.').filter((l) => l.length > 0);
+        if (signerLabels >= ownerLabels.length) {
+            return owner;
+        }
+        const trailing = ownerLabels.slice(ownerLabels.length - signerLabels);
+        return `*.${trailing.join('.')}`;
     }
     static _rrsigSignedHeader(rrsig) {
         const w = new BufferWriter();
@@ -141,6 +159,31 @@ export class Dnssec {
                 w.write(mx.priority, 16);
                 PacketName.encode(mx.exchange.toLowerCase(), w);
                 return w.toBuffer();
+            }
+            case PacketTypes.SOA: {
+                const soa = pt;
+                const lowered = new SOA(soa.primary.toLowerCase(), soa.admin.toLowerCase(), soa.serial, soa.refresh, soa.retry, soa.expiration, soa.minimum);
+                return lowered.encode({}).subarray(2);
+            }
+            case PacketTypes.SRV: {
+                const srv = pt;
+                const lowered = new SRV(srv.priority, srv.weight, srv.port, srv.target.toLowerCase());
+                return lowered.encode({}).subarray(2);
+            }
+            case PacketTypes.NAPTR: {
+                const naptr = pt;
+                const lowered = new NAPTR(naptr.order, naptr.preference, naptr.flags, naptr.services, naptr.regexp, naptr.replacement.toLowerCase());
+                return lowered.encode({}).subarray(2);
+            }
+            case PacketTypes.NSEC: {
+                const nsec = pt;
+                const lowered = new NSEC(nsec.nextDomain.toLowerCase(), nsec.rdtypes);
+                return lowered.encode({}).subarray(2);
+            }
+            case PacketTypes.RRSIG: {
+                const rr = pt;
+                const lowered = new RRSIG(rr.sigType, rr.algorithm, rr.labels, rr.originalTtl, rr.expiration, rr.inception, rr.keyTag, rr.signer.toLowerCase(), rr.signature);
+                return lowered.encode({}).subarray(2);
             }
             default:
                 throw new Error(`Dnssec: canonical RDATA for type ${pt.type} is not implemented — ` +

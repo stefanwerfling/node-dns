@@ -27,6 +27,7 @@ export declare class Dnssec {
     static verifyDs(owner: string, dnskey: DNSKEY, ds: DS): boolean;
     static verifyRrsig(owner: string, rrset: PacketResource[], rrsig: RRSIG, dnskey: DNSKEY, options?: DnssecVerifyOptions): boolean;
     static buildSigningInput(owner: string, rrset: PacketResource[], rrsig: RRSIG): Buffer;
+    protected static _reconstructSignedOwner(owner: string, signerLabels: number): string;
     protected static _rrsigSignedHeader(rrsig: RRSIG): Buffer;
     protected static _canonicalNameBytes(name: string): Buffer;
     protected static _canonicalRdataBytes(resource: PacketResource): Buffer;

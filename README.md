@@ -24,7 +24,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - TSIG transaction signing (RFC 8945) — HMAC-based request/response authentication with hmac-md5/sha1/sha224/sha256/sha384/sha512
 - PROXY protocol v1 and v2 support (UDP per-datagram, TCP per-connection) for transparent load-balancer deployments
 - RFC 1035 master file ("zone file") parser — `$ORIGIN`, `$TTL`, `@`, multi-line records via parens, quoted strings; RDATA for A, AAAA, NS, CNAME, DNAME, PTR, MX, TXT, SOA, SRV, CAA, DNSKEY, DS, SSHFP, TLSA, NAPTR, NSEC, NSEC3, RRSIG, SVCB, HTTPS (RFC 3597 generic `TYPEnnn` mnemonic, base32hex for NSEC3, RFC 9460 SVCB presentation form)
-- DNSSEC validation (RFC 4034 / 4035) — stateless `Dnssec.verifyRrsig`, `Dnssec.computeKeyTag`, `Dnssec.computeDsDigest`, `Dnssec.verifyDs`. Algorithms 8 (RSA/SHA-256), 10 (RSA/SHA-512), 13 (ECDSA P-256), 14 (ECDSA P-384), 15 (Ed25519). DS digest types 1/2/4. Out of scope for now: wildcard label-count reconstruction, NSEC/NSEC3 negative proofs, chain-of-trust traversal — those belong in the recursive resolver layer.
+- DNSSEC validation (RFC 4034 / 4035) — stateless `Dnssec.verifyRrsig`, `Dnssec.computeKeyTag`, `Dnssec.computeDsDigest`, `Dnssec.verifyDs`. Algorithms 8 (RSA/SHA-256), 10 (RSA/SHA-512), 13 (ECDSA P-256), 14 (ECDSA P-384), 15 (Ed25519). DS digest types 1/2/4. Canonical RDATA covers every supported RR type with embedded-name lowercasing (RFC 4034 §6.2) and automatic wildcard label-count reconstruction (§3.1.3). Out of scope: NSEC/NSEC3 negative proofs, chain-of-trust traversal — those belong in the recursive resolver layer.
 - AXFR zone transfer (RFC 5936) — `Zone` class for in-memory zones, `AxfrClient` for fetching, `send(Packet[])` server hook for serving
 - IXFR incremental zone transfer (RFC 1995) — `Zone.toIxfrPackets` with optional `ZoneChangeSet` history, `IxfrClient` returning a no-change / incremental / AXFR-fallback discriminated union
 - NOTIFY zone-change notification (RFC 1996) — `NotifyClient` on the primary side, opcode-dispatch on the secondary side
@@ -553,15 +553,18 @@ const keyTag = Dnssec.computeKeyTag(dnskey);
 const digest = Dnssec.computeDsDigest('example.com', dnskey, 2 /* SHA-256 */);
 ```
 
-Canonical RDATA encoding is implemented for types whose wire form is already
-canonical (A, AAAA, DS, DNSKEY, TXT, SPF, CAA, TLSA, SSHFP, NSEC3) plus the
-common single-name types with embedded-name lowercasing (NS, CNAME, DNAME,
-PTR, MX). Multi-field-name types (SOA, SRV, NAPTR, RRSIG-of-RRSIG, NSEC) raise
-a clear "not implemented" — extend per type as your zone needs.
+Canonical RDATA encoding covers every supported record type — wire-already-
+canonical types (A, AAAA, DS, DNSKEY, TXT, SPF, CAA, TLSA, SSHFP, NSEC3) use
+their wire-format encode as-is, and embedded-name types (NS, CNAME, DNAME,
+PTR, MX, SOA, SRV, NAPTR, NSEC, RRSIG) re-emit with names lowercased and
+uncompressed per RFC 4034 §6.2. RFC 4034 §3.1.3 wildcard label-count
+reconstruction is automatic: when `rrsig.labels` is less than the owner's
+actual label count, the validator infers `*.<trailing labels>` as the
+signed owner before hashing.
 
-See [`docs/dnssec.md`](docs/dnssec.md) for a deeper guide and the current
-limitations (no wildcard label-count reconstruction, no NSEC/NSEC3 negative
-proofs, no chain-of-trust walk).
+See [`docs/dnssec.md`](docs/dnssec.md) for the deeper guide and the current
+limitations (no NSEC/NSEC3 negative proofs, no chain-of-trust walk, no
+zone signing).
 
 ### Build & Development
 

@@ -49,21 +49,23 @@ validator also has to:
 - **Walk the chain of trust** from a configured trust anchor (the root
   KSK) down to the zone whose answer it's validating. That requires a
   recursive resolver — see the roadmap.
-- **Reconstruct wildcard owner names** using the `labels` field of the
-  RRSIG (RFC 4034 §3.1.3). For non-wildcard RRsets the current API
-  works; for `*.example.com` answers you need to feed the verifier the
-  expanded owner name and tell it the original was a wildcard.
 - **Prove negative answers** with NSEC / NSEC3 (RFC 4035 §5.4 and
   RFC 5155). The records are parsed; the proof logic isn't here yet.
 - **Sign your own zones**. The library only verifies. If you operate
-  the authoritative side, you'll need an external signer (BIND `dnssec-signzone`,
-  Knot's `keymgr`, OpenDNSSEC, ldns-signzone) for now.
+  the authoritative side, you'll need an external signer (BIND
+  `dnssec-signzone`, Knot's `keymgr`, OpenDNSSEC, ldns-signzone) for
+  now.
 
-If you hit one of those gaps and want to extend the module, the canonical
-RDATA encoding (`Dnssec._canonicalRdataBytes`) is the natural extension
-point — it currently throws on multi-field-name types like SOA, SRV,
-NAPTR, RRSIG-of-RRSIG, NSEC. Add a per-type case and lowercase the
-embedded names per [RFC 4034 §6.2](https://datatracker.ietf.org/doc/html/rfc4034#section-6.2).
+Wildcard owner-name reconstruction *is* covered — when `rrsig.labels`
+is less than the owner's actual label count, the verifier infers
+`*.<trailing labels>` as the signed owner per [RFC 4034 §3.1.3](https://datatracker.ietf.org/doc/html/rfc4034#section-3.1.3)
+before computing the signing input. Just pass the expanded owner name
+(the one returned in the answer) to `verifyRrsig` and the
+reconstruction happens automatically.
+
+Canonical RDATA is implemented for every record type the library
+parses. If you wire up a brand-new record type with embedded domain
+names, add a case to `Dnssec._canonicalRdataBytes` per [RFC 4034 §6.2](https://datatracker.ietf.org/doc/html/rfc4034#section-6.2).
 
 ## Verifying an RRset
 
