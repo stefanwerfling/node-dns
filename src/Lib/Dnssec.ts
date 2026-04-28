@@ -136,6 +136,19 @@ export type DnssecSignZoneOptions = {
      * zone's SOA minimum, falling back to 3600 if the zone has no SOA.
      */
     dnskeyTtl?: number;
+
+    /**
+     * Generate an NSEC chain (RFC 4034 §4) covering every owner name in
+     * the zone. Each NSEC RR's NextDomain points to the canonically
+     * next owner; the last entry wraps back to the apex. Every name's
+     * type bit map includes the types actually present at that name
+     * plus RRSIG and NSEC. The NSEC RRsets themselves are signed with
+     * the ZSK like any other RRset.
+     *
+     * Without this flag, negative-answer validation against the signed
+     * zone won't work — only positive answers verify.
+     */
+    nsec?: boolean;
 };
 
 /**
@@ -400,7 +413,13 @@ export class Dnssec {
             dnskeyRRs.push(new PacketResource(apex, options.zsk.dnskey, cls, dnskeyTtl));
         }
 
-        const records: PacketResource[] = [...zone.records, ...dnskeyRRs];
+        let records: PacketResource[] = [...zone.records, ...dnskeyRRs];
+
+        if (options.nsec === true) {
+            const nsecRRs = Dnssec._generateNsecChain(records, cls, dnskeyTtl);
+            records = [...records, ...nsecRRs];
+        }
+
         const rrsigs: PacketResource[] = [];
 
         // Group records by (lowercased owner name, type) so canonical
@@ -437,6 +456,57 @@ export class Dnssec {
         }
 
         return {records: records, rrsigs: rrsigs};
+    }
+
+    /**
+     * RFC 4034 §4 NSEC chain generator. Walks `records`, collects the
+     * set of types present at each owner name, lower-cases the names
+     * for canonical comparison, sorts canonically, and emits one NSEC
+     * RR per name pointing to the next in the chain. The last NSEC
+     * wraps back to the first (the zone apex).
+     *
+     * Every name's type bit map includes the types actually present at
+     * that name plus RRSIG and NSEC — the NSEC RRset itself will exist
+     * after this call returns, and `signZone` will sign every RRset
+     * (so RRSIG is universally present too).
+     * @protected
+     */
+    protected static _generateNsecChain(
+        records: PacketResource[],
+        cls: number,
+        ttl: number
+    ): PacketResource[] {
+        const nameToTypes = new Map<string, Set<number>>();
+
+        for (const rr of records) {
+            const lower = rr.name.toLowerCase();
+            let types = nameToTypes.get(lower);
+
+            if (!types) {
+                types = new Set<number>();
+                nameToTypes.set(lower, types);
+            }
+
+            types.add(rr.packetType.type);
+        }
+
+        for (const types of nameToTypes.values()) {
+            types.add(PacketTypes.RRSIG);
+            types.add(PacketTypes.NSEC);
+        }
+
+        const sortedNames = [...nameToTypes.keys()].sort(Dnssec.canonicalNameCompare);
+        const result: PacketResource[] = [];
+
+        for (let i = 0; i < sortedNames.length; i++) {
+            const name = sortedNames[i];
+            const next = sortedNames[(i + 1) % sortedNames.length];
+            const types = [...nameToTypes.get(name)!].sort((a, b) => a - b);
+            const nsec = new NSEC(next, types);
+            result.push(new PacketResource(name, nsec, cls, ttl));
+        }
+
+        return result;
     }
 
     /**

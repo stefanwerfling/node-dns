@@ -1102,6 +1102,206 @@ test('Dnssec#signZone honors dnskeyTtl override', () => {
     assert.equal(dnskey!.ttl, 86400);
 });
 
+// ---------------------------------------------------------------------------
+// Phase 3C: NSEC chain generation
+// ---------------------------------------------------------------------------
+
+test('Dnssec#signZone with nsec:true emits one NSEC per owner name', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    const result = Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        nsec: true,
+    });
+
+    const nsecRecords = result.records.filter((r) => r.packetType.type === PacketTypes.NSEC);
+    const ownerNames = new Set(result.records.map((r) => r.name.toLowerCase()));
+    assert.equal(
+        nsecRecords.length,
+        ownerNames.size,
+        'one NSEC per distinct owner name'
+    );
+});
+
+test('Dnssec#signZone NSEC chain is canonically ordered with apex wrap-around', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    const result = Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        nsec: true,
+    });
+
+    const nsecRecords = result.records
+        .filter((r) => r.packetType.type === PacketTypes.NSEC);
+
+    // Sort by canonical owner so we can walk the chain in order.
+    nsecRecords.sort((a, b) => Dnssec.canonicalNameCompare(a.name, b.name));
+
+    // Each NSEC's NextDomain should equal the next entry's owner; the
+    // last entry should wrap to the first (the apex).
+    for (let i = 0; i < nsecRecords.length; i++) {
+        const cur = nsecRecords[i];
+        const next = nsecRecords[(i + 1) % nsecRecords.length];
+        assert.equal(
+            (cur.packetType as NSEC).nextDomain.toLowerCase(),
+            next.name.toLowerCase(),
+            `chain link ${i} broken: ${cur.name} -> ${(cur.packetType as NSEC).nextDomain} (expected ${next.name})`
+        );
+    }
+});
+
+test('Dnssec#signZone apex NSEC bitmap covers SOA, NS, MX, DNSKEY, RRSIG, NSEC', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    const result = Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        nsec: true,
+    });
+
+    const apexNsec = result.records.find(
+        (r) => r.packetType.type === PacketTypes.NSEC && r.name === 'example.com'
+    );
+
+    assert.ok(apexNsec, 'apex NSEC must exist');
+
+    const bitmap = new Set((apexNsec!.packetType as NSEC).rdtypes);
+
+    for (const expected of [
+        PacketTypes.SOA,
+        PacketTypes.NS,
+        PacketTypes.MX,
+        PacketTypes.DNSKEY,
+        PacketTypes.RRSIG,
+        PacketTypes.NSEC,
+    ]) {
+        assert.ok(bitmap.has(expected), `apex NSEC bitmap missing type ${expected}`);
+    }
+});
+
+test('Dnssec#signZone NSEC RRSIGs round-trip through verifyRrsig', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    const result = Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        nsec: true,
+    });
+
+    const nsecRrsigs = result.rrsigs.filter(
+        (r) => (r.packetType as RRSIG).sigType === PacketTypes.NSEC
+    );
+
+    assert.ok(nsecRrsigs.length > 0, 'at least one NSEC RRSIG should exist');
+
+    for (const rrsigRR of nsecRrsigs) {
+        const sig = rrsigRR.packetType as RRSIG;
+        const rrset = result.records.filter(
+            (r) => r.name === rrsigRR.name && r.packetType.type === PacketTypes.NSEC
+        );
+        assert.ok(
+            Dnssec.verifyRrsig(rrsigRR.name, rrset, sig, cskDnskey, {now: NOW}),
+            `verify failed for NSEC at ${rrsigRR.name}`
+        );
+    }
+});
+
+test('Dnssec#signZone NSEC chain proves a non-existent name', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    const result = Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        nsec: true,
+    });
+
+    const nsecRecords = result.records
+        .filter((r) => r.packetType.type === PacketTypes.NSEC);
+
+    // Query a name we know isn't in the zone.
+    const queryName = 'nonexistent.example.com';
+
+    let covered = false;
+    for (const nsecRR of nsecRecords) {
+        if (Dnssec.nsecCovers(nsecRR.name, (nsecRR.packetType as NSEC).nextDomain, queryName)) {
+            covered = true;
+            break;
+        }
+    }
+
+    assert.ok(covered, 'one NSEC in the generated chain must cover the non-existent name');
+});
+
+test('Dnssec#signZone NSEC chain bitmap at non-apex names contains the type at that name', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    const result = Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        nsec: true,
+    });
+
+    // mail.example.com has only an A record. Its NSEC bitmap must
+    // include A, RRSIG and NSEC — and nothing else.
+    const mailNsec = result.records.find(
+        (r) => r.packetType.type === PacketTypes.NSEC && r.name === 'mail.example.com'
+    );
+
+    assert.ok(mailNsec, 'mail.example.com NSEC must exist');
+
+    const types = (mailNsec!.packetType as NSEC).rdtypes.slice().sort((a, b) => a - b);
+    assert.deepEqual(types, [PacketTypes.A, PacketTypes.RRSIG, PacketTypes.NSEC].sort((a, b) => a - b));
+});
+
+test('Dnssec#signZone without nsec:true emits no NSEC records (default behavior unchanged)', () => {
+    const zone = buildSignableZone();
+
+    const csk = crypto.generateKeyPairSync('ed25519');
+    const cskDnskey = Dnssec.publicKeyToDnskey(csk.publicKey, DnssecAlgorithm.ED25519);
+
+    const result = Dnssec.signZone(zone, {
+        ksk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        zsk: {dnskey: cskDnskey, privateKey: csk.privateKey},
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+
+    const nsecRecords = result.records.filter((r) => r.packetType.type === PacketTypes.NSEC);
+    assert.equal(nsecRecords.length, 0);
+});
+
 test('Dnssec#sign + verify SOA round-trip uses canonical RDATA on both sides', () => {
     const {publicKey, privateKey} = crypto.generateKeyPairSync('ed25519');
     const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ED25519);

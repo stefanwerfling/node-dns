@@ -633,10 +633,28 @@ const {records, rrsigs} = Dnssec.signZone(zone, {
 ```
 
 For a CSK setup (one key signs everything), pass the same signer object
-as both `ksk` and `zsk`. NSEC/NSEC3 chain generation is not yet wired
-into `signZone` — negative answers won't validate without it. Add the
-chain manually using the NSEC / NSEC3 helpers shown below if your zone
-needs it.
+as both `ksk` and `zsk`.
+
+Pass `nsec: true` to generate an RFC 4034 §4 NSEC chain alongside the
+RRSIGs — every owner name gets an NSEC record pointing to the next in
+canonical order, wrapping at the apex, with type bit maps listing every
+type at that name (plus RRSIG and NSEC). Without it, only positive
+answers will validate; negative answers (NXDOMAIN, NODATA) need the
+chain to be present and signed:
+
+```ts
+const {records, rrsigs} = Dnssec.signZone(zone, {
+  ksk: {dnskey: kskDnskey, privateKey: ksk.privateKey},
+  zsk: {dnskey: zskDnskey, privateKey: zsk.privateKey},
+  inception: '20240101000000',
+  expiration: '20300101000000',
+  nsec: true,
+});
+```
+
+NSEC3 chain generation isn't wired into `signZone` yet (the building
+blocks `nsec3Hash`, `nsec3CoversHash`, `base32hexEncode` are exposed
+separately).
 
 For negative answers, NSEC and NSEC3 building blocks are shipped:
 

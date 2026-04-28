@@ -119,7 +119,11 @@ export class Dnssec {
         if (!sameKey) {
             dnskeyRRs.push(new PacketResource(apex, options.zsk.dnskey, cls, dnskeyTtl));
         }
-        const records = [...zone.records, ...dnskeyRRs];
+        let records = [...zone.records, ...dnskeyRRs];
+        if (options.nsec === true) {
+            const nsecRRs = Dnssec._generateNsecChain(records, cls, dnskeyTtl);
+            records = [...records, ...nsecRRs];
+        }
         const rrsigs = [];
         const groups = new Map();
         for (const rr of records) {
@@ -146,6 +150,32 @@ export class Dnssec {
             rrsigs.push(new PacketResource(owner, rrsig, group[0].class, group[0].ttl));
         }
         return { records: records, rrsigs: rrsigs };
+    }
+    static _generateNsecChain(records, cls, ttl) {
+        const nameToTypes = new Map();
+        for (const rr of records) {
+            const lower = rr.name.toLowerCase();
+            let types = nameToTypes.get(lower);
+            if (!types) {
+                types = new Set();
+                nameToTypes.set(lower, types);
+            }
+            types.add(rr.packetType.type);
+        }
+        for (const types of nameToTypes.values()) {
+            types.add(PacketTypes.RRSIG);
+            types.add(PacketTypes.NSEC);
+        }
+        const sortedNames = [...nameToTypes.keys()].sort(Dnssec.canonicalNameCompare);
+        const result = [];
+        for (let i = 0; i < sortedNames.length; i++) {
+            const name = sortedNames[i];
+            const next = sortedNames[(i + 1) % sortedNames.length];
+            const types = [...nameToTypes.get(name)].sort((a, b) => a - b);
+            const nsec = new NSEC(next, types);
+            result.push(new PacketResource(name, nsec, cls, ttl));
+        }
+        return result;
     }
     static _defaultDnskeyTtl(zone) {
         try {

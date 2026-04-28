@@ -255,16 +255,28 @@ What it does:
    plus the synthesized DNSKEY records; `rrsigs` is one RRSIG record
    per RRset.
 
-What it does **not** do (yet):
+Pass `nsec: true` to also generate the RFC 4034 §4 NSEC chain — one
+NSEC record per owner name, sorted canonically, wrapping back at the
+apex. Each name's type bit map lists the types actually present plus
+RRSIG and NSEC. The NSEC RRsets themselves are signed with the ZSK
+just like every other RRset:
 
-- **Generate the NSEC or NSEC3 chain.** Negative answers from the
-  resulting zone won't validate without those records. Add the chain
-  manually using the NSEC / NSEC3 building blocks below — sort the
-  owner names canonically (`canonicalNameCompare`), then emit one NSEC
-  per name pointing to the next in the chain (with the last entry
-  pointing back at the apex). For NSEC3, hash each name with
-  `nsec3Hash`, sort by hash bytes, and emit one NSEC3 per hashed
-  owner.
+```ts
+const {records, rrsigs} = Dnssec.signZone(zone, {
+  ksk: {dnskey: kskDnskey, privateKey: ksk.privateKey},
+  zsk: {dnskey: zskDnskey, privateKey: zsk.privateKey},
+  inception: '20240101000000',
+  expiration: '20300101000000',
+  nsec: true,
+});
+```
+
+What it still does **not** do (yet):
+
+- **Generate the NSEC3 chain.** The building blocks (`nsec3Hash`,
+  `nsec3CoversHash`, `base32hexEncode`) are exposed separately but the
+  end-to-end "build the hashed-owner chain with NSEC3PARAM" loop isn't
+  wired into `signZone`.
 - **Distinguish KSK from ZSK by SEP bit semantics.** `signZone` just
   takes the keys you give it and signs the DNSKEY RRset with the one
   you tagged `ksk`. The DNSKEY flags field is whatever you put on the

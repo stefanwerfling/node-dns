@@ -38,6 +38,7 @@ export type DnssecSignZoneOptions = {
     inception: string | number;
     expiration: string | number;
     dnskeyTtl?: number;
+    nsec?: boolean;
 };
 export type DnssecSignZoneResult = {
     records: PacketResource[];
@@ -51,6 +52,7 @@ export declare class Dnssec {
     static verifyRrsig(owner: string, rrset: PacketResource[], rrsig: RRSIG, dnskey: DNSKEY, options?: DnssecVerifyOptions): boolean;
     static signRrset(owner: string, rrset: PacketResource[], dnskey: DNSKEY, privateKey: crypto.KeyObject, options: DnssecSignOptions): RRSIG;
     static signZone(zone: Zone, options: DnssecSignZoneOptions): DnssecSignZoneResult;
+    protected static _generateNsecChain(records: PacketResource[], cls: number, ttl: number): PacketResource[];
     protected static _defaultDnskeyTtl(zone: Zone): number;
     static publicKeyToDnskey(publicKey: crypto.KeyObject, algorithm: number, flags?: number, protocol?: number): DNSKEY;
     static buildSigningInput(owner: string, rrset: PacketResource[], rrsig: RRSIG): Buffer;
