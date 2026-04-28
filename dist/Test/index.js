@@ -11,6 +11,7 @@ import './ixfr.js';
 import './notify.js';
 import './update.js';
 import './security.js';
+import './dnssec.js';
 import './serverDoh.js';
 import './serverIntegration.js';
 import './serverTls.js';

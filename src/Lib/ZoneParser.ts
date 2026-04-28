@@ -1,15 +1,27 @@
+import { Buffer } from 'buffer';
 import {PacketClass} from '../Packet/PacketClass.js';
 import {PacketResource} from '../Packet/PacketResource.js';
+import {PacketTypes} from '../Packet/PacketTypes.js';
 import {A} from '../Packet/Types/A.js';
 import {AAAA} from '../Packet/Types/AAAA.js';
 import {CAA} from '../Packet/Types/CAA.js';
 import {CNAME} from '../Packet/Types/CNAME.js';
 import {DNAME} from '../Packet/Types/DNAME.js';
+import {DNSKEY} from '../Packet/Types/DNSKEY.js';
+import {DS} from '../Packet/Types/DS.js';
+import {HTTPS} from '../Packet/Types/HTTPS.js';
 import {MX} from '../Packet/Types/MX.js';
+import {NAPTR} from '../Packet/Types/NAPTR.js';
 import {NS} from '../Packet/Types/NS.js';
+import {NSEC} from '../Packet/Types/NSEC.js';
+import {NSEC3} from '../Packet/Types/NSEC3.js';
 import {PTR} from '../Packet/Types/PTR.js';
+import {RRSIG} from '../Packet/Types/RRSIG.js';
 import {SOA} from '../Packet/Types/SOA.js';
 import {SRV} from '../Packet/Types/SRV.js';
+import {SSHFP} from '../Packet/Types/SSHFP.js';
+import {SVCB, SvcParams, SvcParamUnknown} from '../Packet/Types/SVCB.js';
+import {TLSA} from '../Packet/Types/TLSA.js';
 import {TXT} from '../Packet/Types/TXT.js';
 import {PacketType} from '../Packet/PacketType.js';
 
@@ -69,10 +81,11 @@ export type ZoneParseOptions = {
  *   - `$ORIGIN`, `$TTL` directives
  *   - `@` shortcut for the current origin
  *   - TTL/class inheritance from the previous record
- *   - RDATA for A, AAAA, NS, CNAME, DNAME, PTR, MX, TXT, SOA, SRV, CAA
+ *   - RDATA for A, AAAA, NS, CNAME, DNAME, PTR, MX, TXT, SOA, SRV, CAA,
+ *     DNSKEY, DS, SSHFP, TLSA, NAPTR, NSEC, NSEC3, RRSIG, SVCB, HTTPS
  *
  * Not yet supported (intentional): `$INCLUDE` (filesystem I/O),
- * generic-encoding `\#`, DNSSEC RDATA types (DNSKEY/DS/RRSIG/…).
+ * generic-encoding `\#`.
  *
  * @docs https://datatracker.ietf.org/doc/html/rfc1035#section-5
  */
@@ -398,6 +411,62 @@ export class ZoneParser {
     }
 
     /**
+     * Look up the numeric type code for a presentation-form mnemonic
+     * (e.g. "A" → 1, "AAAA" → 28). Also accepts the generic `TYPEnnn`
+     * form from RFC 3597 for unknown / future types.
+     * @protected
+     */
+    protected static _typeMnemonicToNumber(mnemonic: string, lineNumber: number): number {
+        const upper = mnemonic.toUpperCase();
+        const generic = upper.match(/^TYPE(\d+)$/);
+
+        if (generic) {
+            return parseInt(generic[1], 10);
+        }
+
+        const value = (PacketTypes as Record<string, number|string>)[upper];
+
+        if (typeof value === 'number') {
+            return value;
+        }
+
+        throw new Error(`line ${lineNumber}: unknown record type mnemonic ${mnemonic}`);
+    }
+
+    /**
+     * Decode a base32hex string (RFC 4648 §7) into bytes. Whitespace and
+     * trailing `=` padding are tolerated. Used by NSEC3 next-hashed-owner.
+     * @protected
+     */
+    protected static _base32hexDecode(input: string): Buffer {
+        const cleaned = input.toUpperCase().replace(/=+$/u, '').replace(/\s+/gu, '');
+        const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUV';
+        const out: number[] = [];
+        let buffer = 0;
+        let bitsLeft = 0;
+
+        for (const ch of cleaned) {
+            const idx = alphabet.indexOf(ch);
+
+            if (idx < 0) {
+                throw new Error(`invalid base32hex character "${ch}"`);
+            }
+
+            // eslint-disable-next-line no-bitwise
+            buffer = (buffer << 5) | idx;
+            bitsLeft += 5;
+
+            if (bitsLeft >= 8) {
+                bitsLeft -= 8;
+                // eslint-disable-next-line no-bitwise
+                out.push((buffer >> bitsLeft) & 0xFF);
+            }
+        }
+
+        return Buffer.from(out);
+    }
+
+    /**
      * Dispatch to per-type RDATA parsers. Throws on unsupported types so the
      * caller knows to extend the parser rather than silently dropping data.
      * @protected
@@ -405,6 +474,11 @@ export class ZoneParser {
     protected static _parseRdata(typeStr: string, rdata: ZoneToken[], origin: string, lineNumber: number): PacketType {
         const v = (n: number): string => rdata[n].value;
         const fqdn = (raw: string): string => ZoneParser._qualifyName(raw, origin);
+        const need = (n: number, label: string): void => {
+            if (rdata.length < n) {
+                throw new Error(`line ${lineNumber}: ${label} needs ${n} fields`);
+            }
+        };
 
         switch (typeStr) {
             case 'A':
@@ -435,9 +509,7 @@ export class ZoneParser {
             }
 
             case 'SOA': {
-                if (rdata.length < 7) {
-                    throw new Error(`line ${lineNumber}: SOA needs 7 fields`);
-                }
+                need(7, 'SOA');
 
                 return new SOA(
                     fqdn(v(0)),
@@ -451,9 +523,7 @@ export class ZoneParser {
             }
 
             case 'SRV': {
-                if (rdata.length < 4) {
-                    throw new Error(`line ${lineNumber}: SRV needs 4 fields`);
-                }
+                need(4, 'SRV');
 
                 return new SRV(
                     parseInt(v(0), 10),
@@ -464,9 +534,7 @@ export class ZoneParser {
             }
 
             case 'CAA': {
-                if (rdata.length < 3) {
-                    throw new Error(`line ${lineNumber}: CAA needs 3 fields (flag tag value)`);
-                }
+                need(3, 'CAA (flag tag value)');
 
                 const flag = parseInt(v(0), 10);
                 const tag = v(1);
@@ -474,8 +542,289 @@ export class ZoneParser {
                 return new CAA(flag, tag, value);
             }
 
+            case 'DNSKEY': {
+                need(4, 'DNSKEY (flags protocol algorithm key)');
+
+                const flags = parseInt(v(0), 10);
+                const protocol = parseInt(v(1), 10);
+                const algorithm = parseInt(v(2), 10);
+                const key = rdata.slice(3).map((t) => t.value).join('');
+                return new DNSKEY(flags, protocol, algorithm, key);
+            }
+
+            case 'DS': {
+                need(4, 'DS (keyTag algorithm digestType digest)');
+
+                const keyTag = parseInt(v(0), 10);
+                const algorithm = parseInt(v(1), 10);
+                const digestType = parseInt(v(2), 10);
+                const digest = rdata.slice(3).map((t) => t.value).join('').toLowerCase();
+                return new DS(keyTag, algorithm, digestType, digest);
+            }
+
+            case 'SSHFP': {
+                need(3, 'SSHFP (algorithm fpType fingerprint)');
+
+                const algorithm = parseInt(v(0), 10);
+                const fpType = parseInt(v(1), 10);
+                const fingerprint = rdata.slice(2).map((t) => t.value).join('').toLowerCase();
+                return new SSHFP(algorithm, fpType, fingerprint);
+            }
+
+            case 'TLSA': {
+                need(4, 'TLSA (usage selector matchingType cert)');
+
+                const usage = parseInt(v(0), 10);
+                const selector = parseInt(v(1), 10);
+                const matchingType = parseInt(v(2), 10);
+                const cert = rdata.slice(3).map((t) => t.value).join('').toLowerCase();
+                return new TLSA(usage, selector, matchingType, cert);
+            }
+
+            case 'NAPTR': {
+                need(6, 'NAPTR (order pref flags services regexp replacement)');
+
+                const order = parseInt(v(0), 10);
+                const preference = parseInt(v(1), 10);
+                const flags = rdata[2].value;
+                const services = rdata[3].value;
+                const regexp = rdata[4].value;
+                const replacement = fqdn(rdata[5].value);
+                return new NAPTR(order, preference, flags, services, regexp, replacement);
+            }
+
+            case 'NSEC': {
+                need(1, 'NSEC (nextDomain types…)');
+
+                const nextDomain = fqdn(v(0));
+                const types = rdata.slice(1).map((t) => ZoneParser._typeMnemonicToNumber(t.value, lineNumber));
+                return new NSEC(nextDomain, types);
+            }
+
+            case 'NSEC3': {
+                need(5, 'NSEC3 (hashAlg flags iterations salt nextHashed types…)');
+
+                const hashAlgorithm = parseInt(v(0), 10);
+                const flags = parseInt(v(1), 10);
+                const iterations = parseInt(v(2), 10);
+                const saltRaw = v(3);
+                const salt = saltRaw === '-' ? '' : saltRaw.toLowerCase();
+                const nextHashedOwner = ZoneParser._base32hexDecode(v(4)).toString('hex');
+                const types = rdata.slice(5).map((t) => ZoneParser._typeMnemonicToNumber(t.value, lineNumber));
+                return new NSEC3(hashAlgorithm, flags, iterations, salt, nextHashedOwner, types);
+            }
+
+            case 'RRSIG': {
+                need(9, 'RRSIG (typeCovered alg labels origTtl exp inc keyTag signer signature)');
+
+                const sigType = ZoneParser._typeMnemonicToNumber(v(0), lineNumber);
+                const algorithm = parseInt(v(1), 10);
+                const labels = parseInt(v(2), 10);
+                const originalTtl = ZoneParser._parseTtl(v(3));
+                const expiration = v(4);
+                const inception = v(5);
+                const keyTag = parseInt(v(6), 10);
+                const signer = fqdn(v(7));
+                const signature = rdata.slice(8).map((t) => t.value).join('');
+                return new RRSIG(sigType, algorithm, labels, originalTtl, expiration, inception, keyTag, signer, signature);
+            }
+
+            case 'SVCB':
+                return ZoneParser._parseSvcb(rdata, origin, lineNumber, false);
+
+            case 'HTTPS':
+                return ZoneParser._parseSvcb(rdata, origin, lineNumber, true);
+
             default:
                 throw new Error(`line ${lineNumber}: unsupported record type ${typeStr}`);
+        }
+    }
+
+    /**
+     * Parse an SVCB / HTTPS RDATA token list (RFC 9460 §2.1):
+     *   priority TargetName [SvcParams]
+     *
+     * Each SvcParam is `key=value`, `key="value with spaces"`, or a bare
+     * `key` (boolean — currently only `no-default-alpn`). When a token ends
+     * with `=` and is followed by a quoted token, the two are joined.
+     * Comma-separated lists (e.g. `alpn=h2,h3`) are split on commas; values
+     * that contain commas should be passed as multiple `key=` pairs in
+     * structured form when needed.
+     * @protected
+     */
+    protected static _parseSvcb(
+        rdata: ZoneToken[],
+        origin: string,
+        lineNumber: number,
+        isHttps: boolean
+    ): SVCB {
+        if (rdata.length < 2) {
+            throw new Error(`line ${lineNumber}: SVCB/HTTPS needs priority + target`);
+        }
+
+        const priority = parseInt(rdata[0].value, 10);
+
+        if (!Number.isInteger(priority) || priority < 0 || priority > 0xFFFF) {
+            throw new Error(`line ${lineNumber}: SVCB/HTTPS invalid priority`);
+        }
+
+        const targetRaw = rdata[1].value;
+        const target = targetRaw === '.' ? '' : ZoneParser._qualifyName(targetRaw, origin);
+        const params: SvcParams = {};
+
+        for (let i = 2; i < rdata.length; i++) {
+            const token = rdata[i].value;
+            const eqIdx = token.indexOf('=');
+            let key: string;
+            let value: string|null;
+
+            if (eqIdx < 0) {
+                key = token;
+                value = null;
+            } else {
+                key = token.slice(0, eqIdx);
+                value = token.slice(eqIdx + 1);
+
+                // `key=` followed by a quoted token: glue them together so
+                // `dohpath="/dns-query{?dns}"` round-trips correctly.
+                if (value.length === 0 && i + 1 < rdata.length && rdata[i + 1].quoted) {
+                    i++;
+                    value = rdata[i].value;
+                }
+            }
+
+            ZoneParser._applySvcParam(params, key, value, lineNumber);
+        }
+
+        return isHttps ? new HTTPS(priority, target, params) : new SVCB(priority, target, params);
+    }
+
+    /**
+     * Apply a single `key=value` (or bare `key`) pair to a SvcParams object.
+     * Unknown keys round-trip via the `unknown` array so the parser doesn't
+     * have to know every IANA registration.
+     * @protected
+     */
+    protected static _applySvcParam(
+        params: SvcParams,
+        key: string,
+        value: string|null,
+        lineNumber: number
+    ): void {
+        switch (key) {
+            case 'mandatory':
+                params.mandatory = ZoneParser._splitList(value, key, lineNumber)
+                    .map((m) => ZoneParser._svcParamKeyToNumber(m, lineNumber));
+                return;
+
+            case 'alpn':
+                params.alpn = ZoneParser._splitList(value, key, lineNumber);
+                return;
+
+            case 'no-default-alpn':
+                params.noDefaultAlpn = true;
+                return;
+
+            case 'port':
+                if (value === null) {
+                    throw new Error(`line ${lineNumber}: SVCB port= requires a value`);
+                }
+
+                params.port = parseInt(value, 10);
+                return;
+
+            case 'ipv4hint':
+                params.ipv4hint = ZoneParser._splitList(value, key, lineNumber);
+                return;
+
+            case 'ipv6hint':
+                params.ipv6hint = ZoneParser._splitList(value, key, lineNumber);
+                return;
+
+            case 'ech':
+                if (value === null) {
+                    throw new Error(`line ${lineNumber}: SVCB ech= requires a value`);
+                }
+
+                params.ech = Buffer.from(value, 'base64');
+                return;
+
+            case 'dohpath':
+                if (value === null) {
+                    throw new Error(`line ${lineNumber}: SVCB dohpath= requires a value`);
+                }
+
+                params.dohpath = value;
+                return;
+
+            default: {
+                const generic = key.match(/^key(\d+)$/u);
+
+                if (!generic) {
+                    throw new Error(`line ${lineNumber}: unknown SvcParamKey "${key}"`);
+                }
+
+                const numericKey = parseInt(generic[1], 10);
+                const entry: SvcParamUnknown = {
+                    key: numericKey,
+                    value: value === null ? Buffer.alloc(0) : Buffer.from(value, 'utf8'),
+                };
+
+                if (!params.unknown) {
+                    params.unknown = [];
+                }
+
+                params.unknown.push(entry);
+            }
+        }
+    }
+
+    /**
+     * Convert a comma-separated SVCB value list to a string array. Throws
+     * if the value is missing — the keys that use lists never tolerate an
+     * empty value in presentation form.
+     * @protected
+     */
+    protected static _splitList(value: string|null, key: string, lineNumber: number): string[] {
+        if (value === null || value.length === 0) {
+            throw new Error(`line ${lineNumber}: SVCB ${key}= requires a value`);
+        }
+
+        return value.split(',');
+    }
+
+    /**
+     * Map a SVCB `mandatory` list entry to the numeric SvcParamKey. Accepts
+     * the same mnemonics the encoder produces plus the generic `keyN` form.
+     * @protected
+     */
+    protected static _svcParamKeyToNumber(name: string, lineNumber: number): number {
+        switch (name) {
+            case 'mandatory':
+                return 0;
+            case 'alpn':
+                return 1;
+            case 'no-default-alpn':
+                return 2;
+            case 'port':
+                return 3;
+            case 'ipv4hint':
+                return 4;
+            case 'ech':
+                return 5;
+            case 'ipv6hint':
+                return 6;
+            case 'dohpath':
+                return 7;
+            default: {
+                const generic = name.match(/^key(\d+)$/u);
+
+                if (generic) {
+                    return parseInt(generic[1], 10);
+                }
+
+                throw new Error(`line ${lineNumber}: unknown SvcParamKey mnemonic "${name}"`);
+            }
         }
     }
 

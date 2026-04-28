@@ -73,11 +73,37 @@ Returns:
 
 ### Supported RDATA types
 
-The parser dispatches RDATA parsing per type. The 10 most common are
-covered:
+The parser dispatches RDATA parsing per type. 21 types are covered:
 
-A, AAAA, NS, CNAME, DNAME, PTR, MX, TXT (incl. multiple character-strings),
-SOA, SRV, CAA.
+| Group           | Types |
+| --------------- | ----- |
+| Common          | A, AAAA, NS, CNAME, DNAME, PTR, MX, TXT (multi-character-string), SOA, SRV, CAA |
+| DNSSEC          | DNSKEY, DS, RRSIG, NSEC, NSEC3 |
+| Service binding | SVCB, HTTPS (RFC 9460 presentation form) |
+| Auth / fingerprint | SSHFP, TLSA |
+| Misc            | NAPTR |
+
+Notes per type:
+
+- **DNSKEY**, **DS**, **SSHFP**, **TLSA**, **RRSIG** — base64 / hex blobs
+  are joined across multiple tokens, so a key or signature spread across
+  parens-wrapped lines is parsed correctly. Hex output is normalized to
+  lowercase to match what `encode()` produces on round-trip.
+- **NSEC** — type bit map is given as a space-separated list of mnemonics
+  (`A AAAA RRSIG NSEC`). The generic `TYPEnnn` form from RFC 3597 is
+  accepted for unknown / future types.
+- **NSEC3** — `salt` is hex (or `-` for empty), `nextHashedOwner` is
+  base32hex per RFC 5155 §3.3 and is converted to the internal hex
+  representation. Type bit map mnemonics work the same as NSEC.
+- **RRSIG** — accepts either `YYYYMMDDHHMMSS` (UTC) or unsigned-decimal
+  unix-seconds for inception / expiration; the signer name is qualified
+  against the current `$ORIGIN`.
+- **SVCB / HTTPS** — RFC 9460 §2.1 presentation form: `priority TARGET
+  key=value …`. Common keys (`alpn`, `port`, `ipv4hint`, `ipv6hint`,
+  `mandatory`, `no-default-alpn`, `dohpath`, `ech`) are recognized;
+  `keyN=…` with arbitrary key numbers round-trips through the
+  `params.unknown[]` array. Quoted values (`dohpath="/dns-query{?dns}"`)
+  are supported.
 
 Unsupported types raise a clear error with the offending line number
 rather than silently dropping data:
@@ -86,17 +112,13 @@ rather than silently dropping data:
 Error: line 14: unsupported record type AFSDB
 ```
 
-If you need a type that isn't in the list — DNSKEY, DS, RRSIG, NSEC, NSEC3,
-TLSA, SSHFP, NAPTR, SVCB, HTTPS — the structured wire-format classes exist;
-the zone-file form just isn't wired up yet. Contributions welcome.
-
 ### Not yet supported
 
 - **`$INCLUDE`** — would require filesystem access; not yet implemented.
 - **Generic encoding `\#`** (RFC 3597) — would let arbitrary RR types be
-  parsed by length+hex; not yet implemented.
-- **DNSSEC RDATA in zone-file syntax** — see above; the wire-format types
-  exist, the text parser doesn't dispatch to them yet.
+  parsed by length+hex; not yet implemented. The mnemonic form
+  `TYPEnnn` for *unknown* type codes is supported only inside NSEC/NSEC3
+  type bit maps and RRSIG `typeCovered`.
 
 ### Errors
 

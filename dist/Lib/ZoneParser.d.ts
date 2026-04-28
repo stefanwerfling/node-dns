@@ -1,5 +1,7 @@
+import { Buffer } from 'buffer';
 import { PacketClass } from '../Packet/PacketClass.js';
 import { PacketResource } from '../Packet/PacketResource.js';
+import { SVCB, SvcParams } from '../Packet/Types/SVCB.js';
 import { PacketType } from '../Packet/PacketType.js';
 export type ZoneToken = {
     value: string;
@@ -32,5 +34,11 @@ export declare class ZoneParser {
     protected static _absolute(name: string): string;
     protected static _stripFinalDot(name: string): string;
     protected static _parseTtl(raw: string): number;
+    protected static _typeMnemonicToNumber(mnemonic: string, lineNumber: number): number;
+    protected static _base32hexDecode(input: string): Buffer;
     protected static _parseRdata(typeStr: string, rdata: ZoneToken[], origin: string, lineNumber: number): PacketType;
+    protected static _parseSvcb(rdata: ZoneToken[], origin: string, lineNumber: number, isHttps: boolean): SVCB;
+    protected static _applySvcParam(params: SvcParams, key: string, value: string | null, lineNumber: number): void;
+    protected static _splitList(value: string | null, key: string, lineNumber: number): string[];
+    protected static _svcParamKeyToNumber(name: string, lineNumber: number): number;
 }

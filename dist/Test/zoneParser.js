@@ -18,7 +18,11 @@ const dedent = (input) => {
     return lines.map((ln) => ln.slice(min)).join('\n');
 };
 import { PacketClass } from '../Packet/PacketClass.js';
+import { PacketTypes } from '../Packet/PacketTypes.js';
+import { HTTPS } from '../Packet/Types/HTTPS.js';
+import { RRSIG } from '../Packet/Types/RRSIG.js';
 import { SOA } from '../Packet/Types/SOA.js';
+import { BufferReader } from '../Lib/BufferReader.js';
 import { test } from './test.js';
 test('zone#single A record with origin', () => {
     const { records, origin } = ZoneParser.parse('www 300 IN A 192.0.2.1', { origin: 'example.com' });
@@ -207,5 +211,200 @@ test('zone#errors on inheritance with no previous name', () => {
 });
 test('zone#errors on unknown directive', () => {
     assert.throws(() => ZoneParser.parse('$INCLUDE other.zone'));
+});
+test('zone#DNSKEY parses flags/protocol/algorithm and joins multi-token base64 key', () => {
+    const zone = `
+        $ORIGIN example.com.
+        @ 3600 IN DNSKEY 256 3 8 (
+            AwEAAcMnWBKLuvG/LwnPVykcmpvnntwxfshHlHRhlY0F
+            3oz8AfbtBOIhKjQF6ttRPkmS )
+    `;
+    const { records } = ZoneParser.parse(dedent(zone));
+    const dnskey = records[0].packetType;
+    assert.equal(dnskey.flags, 256);
+    assert.equal(dnskey.protocol, 3);
+    assert.equal(dnskey.algorithm, 8);
+    assert.equal(dnskey.key, 'AwEAAcMnWBKLuvG/LwnPVykcmpvnntwxfshHlHRhlY0F3oz8AfbtBOIhKjQF6ttRPkmS');
+});
+test('zone#DS parses keyTag/algorithm/digestType and lowercases hex digest', () => {
+    const zone = `
+        $ORIGIN example.com.
+        sub 3600 IN DS 31589 8 2 (
+            AABBCCDDEEFF00112233445566778899
+            AABBCCDDEEFF00112233445566778899 )
+    `;
+    const { records } = ZoneParser.parse(dedent(zone));
+    const ds = records[0].packetType;
+    assert.equal(ds.keyTag, 31589);
+    assert.equal(ds.algorithm, 8);
+    assert.equal(ds.digestType, 2);
+    assert.equal(ds.digest, 'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899');
+});
+test('zone#SSHFP parses algorithm/fpType/fingerprint', () => {
+    const { records } = ZoneParser.parse('host 60 IN SSHFP 1 1 BF6B6825D2977C511A475BBEFB88AAD54A92AC73', { origin: 'example.com.' });
+    const sshfp = records[0].packetType;
+    assert.equal(sshfp.algorithm, 1);
+    assert.equal(sshfp.fpType, 1);
+    assert.equal(sshfp.fingerprint, 'bf6b6825d2977c511a475bbefb88aad54a92ac73');
+});
+test('zone#TLSA parses usage/selector/matching/cert', () => {
+    const zone = `
+        $ORIGIN example.com.
+        _443._tcp.www 60 IN TLSA 3 1 1 (
+            d2abde240d7cd3ee6b4b28c54df034b9
+            7983a1d16e8a410e4561cb106618e971 )
+    `;
+    const { records } = ZoneParser.parse(dedent(zone));
+    const tlsa = records[0].packetType;
+    assert.equal(tlsa.usage, 3);
+    assert.equal(tlsa.selector, 1);
+    assert.equal(tlsa.matchingType, 1);
+    assert.equal(tlsa.certificate, 'd2abde240d7cd3ee6b4b28c54df034b97983a1d16e8a410e4561cb106618e971');
+});
+test('zone#NAPTR parses with quoted character-strings', () => {
+    const { records } = ZoneParser.parse('@ 60 IN NAPTR 100 50 "s" "z3950+I2L+I2C" "" _z3950._tcp.example.com.', { origin: 'example.com.' });
+    const naptr = records[0].packetType;
+    assert.equal(naptr.order, 100);
+    assert.equal(naptr.preference, 50);
+    assert.equal(naptr.flags, 's');
+    assert.equal(naptr.services, 'z3950+I2L+I2C');
+    assert.equal(naptr.regexp, '');
+    assert.equal(naptr.replacement, '_z3950._tcp.example.com');
+});
+test('zone#NSEC parses next domain + type bit map mnemonics', () => {
+    const { records } = ZoneParser.parse('@ 3600 IN NSEC alpha.example.com. A NS SOA MX RRSIG NSEC DNSKEY', { origin: 'example.com.' });
+    const nsec = records[0].packetType;
+    assert.equal(nsec.nextDomain, 'alpha.example.com');
+    assert.deepEqual(nsec.rdtypes, [
+        PacketTypes.A,
+        PacketTypes.NS,
+        PacketTypes.SOA,
+        PacketTypes.MX,
+        PacketTypes.RRSIG,
+        PacketTypes.NSEC,
+        PacketTypes.DNSKEY,
+    ]);
+});
+test('zone#NSEC accepts generic TYPEnnn mnemonic', () => {
+    const { records } = ZoneParser.parse('@ 60 IN NSEC next. TYPE65535 A', { origin: 'example.com.' });
+    const nsec = records[0].packetType;
+    assert.deepEqual(nsec.rdtypes, [65535, PacketTypes.A]);
+});
+test('zone#NSEC3 parses with empty salt (-) and base32hex next-hash', () => {
+    const zone = `
+        $ORIGIN example.com.
+        29gm6 60 IN NSEC3 1 0 10 - 09GM6 A RRSIG
+    `;
+    const { records } = ZoneParser.parse(dedent(zone));
+    const nsec3 = records[0].packetType;
+    assert.equal(nsec3.hashAlgorithm, 1);
+    assert.equal(nsec3.flags, 0);
+    assert.equal(nsec3.iterations, 10);
+    assert.equal(nsec3.salt, '');
+    assert.equal(nsec3.nextHashedOwner, '026163');
+    assert.deepEqual(nsec3.rdtypes, [PacketTypes.A, PacketTypes.RRSIG]);
+});
+test('zone#NSEC3 lowercases hex salt', () => {
+    const { records } = ZoneParser.parse('@ 60 IN NSEC3 1 0 5 AABB 09GM6 NS', { origin: 'example.com.' });
+    const nsec3 = records[0].packetType;
+    assert.equal(nsec3.salt, 'aabb');
+});
+test('zone#RRSIG parses presentation form and roundtrips through encode/decode', () => {
+    const zone = `
+        $ORIGIN example.com.
+        @ 3600 IN RRSIG A 8 2 3600 (
+            20260501000000 20260401000000 12345 example.com.
+            ABCD== )
+    `;
+    const { records } = ZoneParser.parse(dedent(zone));
+    const rrsig = records[0].packetType;
+    assert.equal(rrsig.sigType, PacketTypes.A);
+    assert.equal(rrsig.algorithm, 8);
+    assert.equal(rrsig.labels, 2);
+    assert.equal(rrsig.originalTtl, 3600);
+    assert.equal(rrsig.expiration, '20260501000000');
+    assert.equal(rrsig.inception, '20260401000000');
+    assert.equal(rrsig.keyTag, 12345);
+    assert.equal(rrsig.signer, 'example.com');
+    assert.equal(rrsig.signature, 'ABCD==');
+    const buf = rrsig.encode(records[0]);
+    const reader = new BufferReader(buf);
+    const rdlength = reader.read(16);
+    const decoded = RRSIG.decode(reader, rdlength);
+    assert.equal(decoded.sigType, PacketTypes.A);
+    assert.equal(decoded.algorithm, 8);
+    assert.equal(decoded.labels, 2);
+    assert.equal(decoded.originalTtl, 3600);
+    assert.equal(decoded.expiration, '20260501000000');
+    assert.equal(decoded.inception, '20260401000000');
+    assert.equal(decoded.keyTag, 12345);
+    assert.equal(decoded.signer, 'example.com');
+});
+test('zone#RRSIG accepts unix-timestamp inception/expiration', () => {
+    const { records } = ZoneParser.parse('@ 60 IN RRSIG A 8 2 3600 1738368000 1735689600 1 . AA==', { origin: 'example.com.' });
+    const rrsig = records[0].packetType;
+    const buf = rrsig.encode(records[0]);
+    const reader = new BufferReader(buf);
+    const rdlength = reader.read(16);
+    const decoded = RRSIG.decode(reader, rdlength);
+    assert.equal(decoded.expiration, '20250201000000');
+    assert.equal(decoded.inception, '20250101000000');
+});
+test('zone#SVCB ServiceMode with alpn/port/ipv4hint/ipv6hint', () => {
+    const { records } = ZoneParser.parse('@ 60 IN SVCB 1 svc.example.net. alpn=h2,h3 port=8443 ipv4hint=192.0.2.1,192.0.2.2 ipv6hint=2001:db8::1', { origin: 'example.com.' });
+    const svcb = records[0].packetType;
+    assert.equal(svcb.priority, 1);
+    assert.equal(svcb.target, 'svc.example.net');
+    assert.deepEqual(svcb.params.alpn, ['h2', 'h3']);
+    assert.equal(svcb.params.port, 8443);
+    assert.deepEqual(svcb.params.ipv4hint, ['192.0.2.1', '192.0.2.2']);
+    assert.deepEqual(svcb.params.ipv6hint, ['2001:db8::1']);
+});
+test('zone#SVCB AliasMode (priority 0, params absent)', () => {
+    const { records } = ZoneParser.parse('@ 60 IN SVCB 0 alias.example.net.', { origin: 'example.com.' });
+    const svcb = records[0].packetType;
+    assert.equal(svcb.priority, 0);
+    assert.equal(svcb.target, 'alias.example.net');
+});
+test('zone#SVCB target "." resolves to empty (owner name)', () => {
+    const { records } = ZoneParser.parse('@ 60 IN SVCB 1 . alpn=h2', { origin: 'example.com.' });
+    const svcb = records[0].packetType;
+    assert.equal(svcb.target, '');
+});
+test('zone#SVCB no-default-alpn is a flag (no value)', () => {
+    const { records } = ZoneParser.parse('@ 60 IN SVCB 1 . alpn=h2 no-default-alpn', { origin: 'example.com.' });
+    const svcb = records[0].packetType;
+    assert.equal(svcb.params.noDefaultAlpn, true);
+});
+test('zone#SVCB dohpath= followed by quoted token', () => {
+    const { records } = ZoneParser.parse('@ 60 IN SVCB 1 . alpn=h2 dohpath="/dns-query{?dns}"', { origin: 'example.com.' });
+    const svcb = records[0].packetType;
+    assert.equal(svcb.params.dohpath, '/dns-query{?dns}');
+});
+test('zone#SVCB mandatory accepts mnemonic list', () => {
+    const { records } = ZoneParser.parse('@ 60 IN SVCB 1 . mandatory=alpn,port alpn=h2 port=443', { origin: 'example.com.' });
+    const svcb = records[0].packetType;
+    assert.deepEqual(svcb.params.mandatory, [1, 3]);
+});
+test('zone#SVCB unknown keyN= roundtrips through unknown[]', () => {
+    const { records } = ZoneParser.parse('@ 60 IN SVCB 1 . key99=hello', { origin: 'example.com.' });
+    const svcb = records[0].packetType;
+    assert.ok(svcb.params.unknown);
+    assert.equal(svcb.params.unknown.length, 1);
+    assert.equal(svcb.params.unknown[0].key, 99);
+    assert.equal(svcb.params.unknown[0].value.toString('utf8'), 'hello');
+});
+test('zone#HTTPS uses HTTPS subclass with same wire format', () => {
+    const { records } = ZoneParser.parse('@ 60 IN HTTPS 1 . alpn=h2,h3', { origin: 'example.com.' });
+    assert.ok(records[0].packetType instanceof HTTPS);
+    const https = records[0].packetType;
+    assert.equal(https.priority, 1);
+    assert.deepEqual(https.params.alpn, ['h2', 'h3']);
+});
+test('zone#errors on missing RRSIG fields', () => {
+    assert.throws(() => ZoneParser.parse('@ 60 IN RRSIG A 8 2 3600 20260501000000 20260401000000 12345', { origin: 'example.com.' }));
+});
+test('zone#errors on unknown SvcParamKey mnemonic', () => {
+    assert.throws(() => ZoneParser.parse('@ 60 IN SVCB 1 . totallymadeup=foo', { origin: 'example.com.' }));
 });
 //# sourceMappingURL=zoneParser.js.map

@@ -77,3 +77,8 @@ example.
   randomization (`Random0x20`, opt-in via `use0x20: true` on clients) and
   bailiwick filtering (`Bailiwick.contains`, `Bailiwick.filter`) against
   off-path spoofing and cache-poisoning attacks.
+- **[DNSSEC validation](dnssec.md)** — stateless RFC 4034/4035 verifier:
+  `Dnssec.verifyRrsig`, `Dnssec.verifyDs`, `Dnssec.computeKeyTag`,
+  `Dnssec.computeDsDigest`. Algorithms 8 (RSA/SHA-256), 10 (RSA/SHA-512),
+  13 (ECDSA P-256), 14 (ECDSA P-384), 15 (Ed25519). DS digest types
+  1/2/4. Chain-of-trust walking is the caller's responsibility.

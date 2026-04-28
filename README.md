@@ -23,7 +23,8 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - EDNS(0) options: ECS (RFC 7871), Cookies (RFC 7873 + RFC 9018 server-cookie algorithm), Padding (RFC 7830), NSID (RFC 5001), TCP Keepalive (RFC 7828), Extended DNS Errors (RFC 8914)
 - TSIG transaction signing (RFC 8945) — HMAC-based request/response authentication with hmac-md5/sha1/sha224/sha256/sha384/sha512
 - PROXY protocol v1 and v2 support (UDP per-datagram, TCP per-connection) for transparent load-balancer deployments
-- RFC 1035 master file ("zone file") parser — `$ORIGIN`, `$TTL`, `@`, multi-line records via parens, quoted strings; RDATA for A, AAAA, NS, CNAME, PTR, MX, TXT, SOA, SRV, CAA
+- RFC 1035 master file ("zone file") parser — `$ORIGIN`, `$TTL`, `@`, multi-line records via parens, quoted strings; RDATA for A, AAAA, NS, CNAME, DNAME, PTR, MX, TXT, SOA, SRV, CAA, DNSKEY, DS, SSHFP, TLSA, NAPTR, NSEC, NSEC3, RRSIG, SVCB, HTTPS (RFC 3597 generic `TYPEnnn` mnemonic, base32hex for NSEC3, RFC 9460 SVCB presentation form)
+- DNSSEC validation (RFC 4034 / 4035) — stateless `Dnssec.verifyRrsig`, `Dnssec.computeKeyTag`, `Dnssec.computeDsDigest`, `Dnssec.verifyDs`. Algorithms 8 (RSA/SHA-256), 10 (RSA/SHA-512), 13 (ECDSA P-256), 14 (ECDSA P-384), 15 (Ed25519). DS digest types 1/2/4. Out of scope for now: wildcard label-count reconstruction, NSEC/NSEC3 negative proofs, chain-of-trust traversal — those belong in the recursive resolver layer.
 - AXFR zone transfer (RFC 5936) — `Zone` class for in-memory zones, `AxfrClient` for fetching, `send(Packet[])` server hook for serving
 - IXFR incremental zone transfer (RFC 1995) — `Zone.toIxfrPackets` with optional `ZoneChangeSet` history, `IxfrClient` returning a no-change / incremental / AXFR-fallback discriminated union
 - NOTIFY zone-change notification (RFC 1996) — `NotifyClient` on the primary side, opcode-dispatch on the secondary side
@@ -101,6 +102,10 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   case randomization (`Random0x20`, `use0x20: true`) and bailiwick
   filtering (`Bailiwick.contains`, `Bailiwick.filter`) against off-path
   spoofing and cache poisoning.
+- **[DNSSEC validation](docs/dnssec.md)** — `Dnssec.verifyRrsig`,
+  `Dnssec.verifyDs`, `Dnssec.computeKeyTag`, `Dnssec.computeDsDigest`. RFC
+  4034/4035 algorithms 8/10/13/14/15, DS digest types 1/2/4. Stateless —
+  no resolver, no cache; chain-of-trust walking is the caller's job.
 
 ### DNS Client (default UDP)
 
@@ -363,9 +368,11 @@ console.log(origin);             // 'example.com.'
 console.log(records.length);     // 5
 ```
 
-RDATA parsers ship for the 10 most common record types: A, AAAA, NS, CNAME,
-PTR, MX, TXT, SOA, SRV, CAA. Unsupported types throw a descriptive error
-with the offending line number rather than silently dropping data.
+RDATA parsers ship for 21 record types: A, AAAA, NS, CNAME, DNAME, PTR, MX,
+TXT, SOA, SRV, CAA, DNSKEY, DS, SSHFP, TLSA, NAPTR, NSEC, NSEC3, RRSIG, SVCB,
+HTTPS. Generic `TYPEnnn` mnemonics from RFC 3597 are accepted in NSEC/NSEC3
+type bit maps. Unsupported types throw a descriptive error with the offending
+line number rather than silently dropping data.
 
 ### AXFR zone transfer (RFC 5936)
 
@@ -508,6 +515,54 @@ class MyStripper implements ServerPreRequest<RemoteInfo> {
 }
 ```
 
+### DNSSEC validation (RFC 4034 / 4035)
+
+`Dnssec` is a stateless verification layer — feed it an RRset, the matching
+RRSIG, and a candidate DNSKEY, and it returns a boolean. There is no
+resolver, no cache, no chain traversal; that lives one layer up.
+
+Supported signing algorithms: 8 (RSA/SHA-256), 10 (RSA/SHA-512), 13 (ECDSA
+P-256), 14 (ECDSA P-384), 15 (Ed25519). DS digest types: 1 (SHA-1),
+2 (SHA-256), 4 (SHA-384). Public-key parsing goes via Node's JWK import,
+so there's no PEM detour.
+
+```ts
+import {Dnssec} from 'dns2ts';
+
+// Validate an RRset against an RRSIG using one DNSKEY
+const ok = Dnssec.verifyRrsig(
+  'example.com',           // owner name (canonical form is computed for you)
+  rrset,                   // PacketResource[] — the RRset that was signed
+  rrsig,                   // RRSIG record with signer, expiration, signature
+  dnskey,                  // candidate DNSKEY
+  {
+    // optional: override "now" for the inception/expiration window check
+    // now: 1735689600,
+    // optional: skip the time window check entirely
+    // skipValidityWindow: true,
+  }
+);
+
+// Verify a DNSKEY against its DS at the parent zone
+const matches = Dnssec.verifyDs('example.com', dnskey, ds);
+
+// Compute the RFC 4034 Appendix B key tag for a DNSKEY
+const keyTag = Dnssec.computeKeyTag(dnskey);
+
+// Compute the DS digest yourself (for emitting a DS record)
+const digest = Dnssec.computeDsDigest('example.com', dnskey, 2 /* SHA-256 */);
+```
+
+Canonical RDATA encoding is implemented for types whose wire form is already
+canonical (A, AAAA, DS, DNSKEY, TXT, SPF, CAA, TLSA, SSHFP, NSEC3) plus the
+common single-name types with embedded-name lowercasing (NS, CNAME, DNAME,
+PTR, MX). Multi-field-name types (SOA, SRV, NAPTR, RRSIG-of-RRSIG, NSEC) raise
+a clear "not implemented" — extend per type as your zone needs.
+
+See [`docs/dnssec.md`](docs/dnssec.md) for a deeper guide and the current
+limitations (no wildcard label-count reconstruction, no NSEC/NSEC3 negative
+proofs, no chain-of-trust walk).
+
 ### Build & Development
 
 ```bash
@@ -522,7 +577,16 @@ npm run lint      # ESLint check
 + [RFC-1034 - Domain Names - Concepts and Facilities](https://tools.ietf.org/html/rfc1034)
 + [RFC-1035 - Domain Names - Implementation and Specification](https://tools.ietf.org/html/rfc1035)
 + [RFC-2782 - A DNS RR for specifying the location of services (DNS SRV)](https://tools.ietf.org/html/rfc2782)
++ [RFC-3110 - RSA/SHA-1 SIGs and RSA KEYs in the Domain Name System (DNS)](https://datatracker.ietf.org/doc/html/rfc3110) (RSA public-key wire format reused by DNSKEY)
++ [RFC-3597 - Handling of Unknown DNS Resource Record (RR) Types](https://datatracker.ietf.org/doc/html/rfc3597) (generic `TYPEnnn` mnemonic)
 + [RFC-4034 - Resource Records for the DNS Security Extensions (DNSSEC)](https://tools.ietf.org/html/rfc4034)
++ [RFC-4035 - Protocol Modifications for the DNS Security Extensions](https://datatracker.ietf.org/doc/html/rfc4035) (validation requirements)
++ [RFC-4509 - Use of SHA-256 in DNSSEC Delegation Signer (DS) Resource Records](https://datatracker.ietf.org/doc/html/rfc4509)
++ [RFC-4648 - The Base16, Base32, and Base64 Data Encodings](https://datatracker.ietf.org/doc/html/rfc4648) (base32hex for NSEC3)
++ [RFC-5155 - DNS Security (DNSSEC) Hashed Authenticated Denial of Existence](https://datatracker.ietf.org/doc/html/rfc5155) (NSEC3 wire format + presentation)
++ [RFC-6605 - Elliptic Curve Digital Signature Algorithm (DSA) for DNSSEC](https://datatracker.ietf.org/doc/html/rfc6605) (ECDSA P-256 / P-384)
++ [RFC-6840 - Clarifications and Implementation Notes for DNS Security (DNSSEC)bis](https://datatracker.ietf.org/doc/html/rfc6840) (no-compression rule for DNSSEC RRs)
++ [RFC-8080 - Edwards-Curve DSA for DNSSEC](https://datatracker.ietf.org/doc/html/rfc8080) (Ed25519 / Ed448)
 + [RFC-5001 - DNS Name Server Identifier (NSID) Option](https://datatracker.ietf.org/doc/html/rfc5001)
 + [RFC-6672 - DNAME Redirection in the DNS](https://datatracker.ietf.org/doc/html/rfc6672)
 + [RFC-6891 - Extension Mechanisms for DNS (EDNS(0))](https://tools.ietf.org/html/rfc6891)
