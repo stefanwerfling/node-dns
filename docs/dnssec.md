@@ -55,10 +55,12 @@ production validator on top of dns2ts still has to:
   the authoritative server returned (closest-encloser candidate,
   wildcard, opt-out flag, …); we leave that to the resolver layer
   rather than picking a calling convention here.
-- **Sign your own zones**. The library only verifies. If you operate
-  the authoritative side, you'll need an external signer (BIND
-  `dnssec-signzone`, Knot's `keymgr`, OpenDNSSEC, ldns-signzone) for
-  now.
+
+Signing **is** covered (Phase 3A): `signRrset` produces RRSIGs that
+round-trip through `verifyRrsig` by construction, and
+`publicKeyToDnskey` builds the publishable DNSKEY from a Node
+`KeyObject`. See [Signing your own zones](#signing-your-own-zones)
+below.
 
 Wildcard owner-name reconstruction *is* covered — when `rrsig.labels`
 is less than the owner's actual label count, the verifier infers
@@ -129,6 +131,91 @@ roll, for example):
 ```ts
 const digestHex = Dnssec.computeDsDigest('example.com', dnskey, 2 /* SHA-256 */);
 ```
+
+## Signing your own zones
+
+`Dnssec.signRrset` is the inverse of `verifyRrsig`. Same
+`buildSigningInput` is used on both sides, so the contract is: if you
+produce an RRSIG with `signRrset`, this library will verify it through
+`verifyRrsig`. (External validators that follow RFC 4034/4035 will
+also accept it — the wire format is standard.)
+
+```ts
+import * as crypto from 'crypto';
+import {Dnssec, DnssecAlgorithm} from 'dns2ts';
+
+// Generate a key pair (works for KSK or ZSK — same path)
+const {publicKey, privateKey} = crypto.generateKeyPairSync('ed25519');
+
+// Convert the public key into a DNSKEY ready to publish
+const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ED25519);
+
+// Sign an RRset
+const rrsig = Dnssec.signRrset(
+  'example.com',                  // owner
+  rrset,                          // PacketResource[]
+  dnskey,                         // provides algorithm + key tag
+  privateKey,                     // matching Node KeyObject
+  {
+    inception:  '20240101000000', // RFC 4034 §3.2 UTC, or unix seconds
+    expiration: '20300101000000',
+    // optional overrides:
+    //   originalTtl: 3600,        // defaults to rrset[0].ttl
+    //   signer:      'example.com',  // defaults to owner
+    //   labels:      2,           // defaults to label count of owner
+  }
+);
+```
+
+Important details:
+
+- **Algorithm dispatch matches the verifier**. RSA produces a raw
+  signature; ECDSA produces raw `r||s` (DNS form, not DER) via Node's
+  `dsaEncoding: 'ieee-p1363'`; Ed25519 produces the 64-byte EdDSA
+  signature directly.
+- **Date input is flexible**. `inception` / `expiration` accept the
+  RFC 4034 §3.2 `YYYYMMDDHHMMSS` UTC string or unix-decimal seconds
+  (string or number). Both are normalized to `YYYYMMDDHHMMSS` on the
+  returned RRSIG.
+- **Wildcards**. To sign at a wildcard owner, pass
+  `labels: <non-wildcard label count>`. The verifier under any expanded
+  query name (e.g. `host.example.com`) will reconstruct `*.example.com`
+  before hashing and accept the signature.
+- **Defaults are sensible for the common case**. If you sign a record
+  at its owner with no special handling, you don't need to pass
+  `signer`, `originalTtl`, or `labels` — the function fills them in
+  from `owner` and the first record.
+
+Generating a fresh KSK and emitting it as a publishable DNSKEY plus a
+DS record at the parent zone:
+
+```ts
+const {publicKey, privateKey} = crypto.generateKeyPairSync('ed25519');
+const ksk = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ED25519);
+
+// DNSKEY published at the apex
+const dnskeyRR = new PacketResource(
+  'example.com',
+  ksk,
+  PacketClass.IN,
+  3600,
+);
+
+// DS record to publish at the parent (.com)
+const dsHex = Dnssec.computeDsDigest('example.com', ksk, 2 /* SHA-256 */);
+const ds = new DS(
+  Dnssec.computeKeyTag(ksk),
+  ksk.algorithm,
+  2,
+  dsHex,
+);
+```
+
+`signRrset` accepts any RR type the canonical-RDATA encoder
+understands — A, AAAA, NS, CNAME, MX, SOA, SRV, NAPTR, NSEC,
+DS, DNSKEY, TXT, CAA, TLSA, SSHFP, NSEC3, DNAME, PTR, RRSIG. Each
+record's class and embedded names are canonicalized the same way the
+verifier expects.
 
 ## Negative-answer building blocks
 

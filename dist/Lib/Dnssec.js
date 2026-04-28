@@ -3,6 +3,7 @@ import * as crypto from 'crypto';
 import { BufferWriter } from './BufferWriter.js';
 import { PacketName } from '../Packet/PacketName.js';
 import { PacketTypes } from '../Packet/PacketTypes.js';
+import { DNSKEY } from '../Packet/Types/DNSKEY.js';
 import { NAPTR } from '../Packet/Types/NAPTR.js';
 import { NSEC } from '../Packet/Types/NSEC.js';
 import { RRSIG } from '../Packet/Types/RRSIG.js';
@@ -90,6 +91,24 @@ export class Dnssec {
         const input = Dnssec.buildSigningInput(owner, rrset, rrsig);
         const signature = Buffer.from(rrsig.signature, 'base64');
         return Dnssec._verifyAlgorithm(rrsig.algorithm, input, signature, dnskey);
+    }
+    static signRrset(owner, rrset, dnskey, privateKey, options) {
+        if (rrset.length === 0) {
+            throw new Error('Dnssec.signRrset: rrset is empty');
+        }
+        const inception = Dnssec._normalizeSigDate(options.inception);
+        const expiration = Dnssec._normalizeSigDate(options.expiration);
+        const labels = options.labels
+            ?? owner.split('.').filter((l) => l.length > 0).length;
+        const rrsig = new RRSIG(rrset[0].packetType.type, dnskey.algorithm, labels, options.originalTtl ?? rrset[0].ttl, expiration, inception, Dnssec.computeKeyTag(dnskey), options.signer ?? owner, '');
+        const input = Dnssec.buildSigningInput(owner, rrset, rrsig);
+        const signature = Dnssec._signWithAlgorithm(dnskey.algorithm, input, privateKey);
+        rrsig.signature = signature.toString('base64');
+        return rrsig;
+    }
+    static publicKeyToDnskey(publicKey, algorithm, flags = 257, protocol = 3) {
+        const keyBase64 = Dnssec._encodeDnskeyKeyField(publicKey, algorithm);
+        return new DNSKEY(flags, protocol, algorithm, keyBase64);
     }
     static buildSigningInput(owner, rrset, rrsig) {
         const sigHeader = Dnssec._rrsigSignedHeader(rrsig);
@@ -286,6 +305,100 @@ export class Dnssec {
         const minute = parseInt(value.slice(10, 12), 10);
         const second = parseInt(value.slice(12, 14), 10);
         return Math.floor(Date.UTC(year, month - 1, day, hour, minute, second) / 1000);
+    }
+    static _formatSigDate(timestamp) {
+        const date = new Date(timestamp * 1000);
+        const year = date.getUTCFullYear().toString().padStart(4, '0');
+        const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
+        const day = date.getUTCDate().toString().padStart(2, '0');
+        const hour = date.getUTCHours().toString().padStart(2, '0');
+        const minute = date.getUTCMinutes().toString().padStart(2, '0');
+        const second = date.getUTCSeconds().toString().padStart(2, '0');
+        return `${year}${month}${day}${hour}${minute}${second}`;
+    }
+    static _normalizeSigDate(value) {
+        if (typeof value === 'string' && /^\d{14}$/.test(value)) {
+            return value;
+        }
+        const seconds = typeof value === 'number' ? value : parseInt(value, 10);
+        if (!Number.isFinite(seconds)) {
+            throw new Error(`Dnssec.signRrset: invalid date "${String(value)}"`);
+        }
+        return Dnssec._formatSigDate(seconds);
+    }
+    static _signWithAlgorithm(algorithm, input, privateKey) {
+        switch (algorithm) {
+            case DnssecAlgorithm.RSASHA256:
+                return crypto.sign('sha256', input, privateKey);
+            case DnssecAlgorithm.RSASHA512:
+                return crypto.sign('sha512', input, privateKey);
+            case DnssecAlgorithm.ECDSAP256SHA256:
+                return crypto.sign('sha256', input, { key: privateKey, dsaEncoding: 'ieee-p1363' });
+            case DnssecAlgorithm.ECDSAP384SHA384:
+                return crypto.sign('sha384', input, { key: privateKey, dsaEncoding: 'ieee-p1363' });
+            case DnssecAlgorithm.ED25519:
+                return crypto.sign(null, input, privateKey);
+            default:
+                throw new Error(`Dnssec: unsupported signing algorithm ${algorithm}`);
+        }
+    }
+    static _encodeDnskeyKeyField(publicKey, algorithm) {
+        switch (algorithm) {
+            case DnssecAlgorithm.RSASHA256:
+            case DnssecAlgorithm.RSASHA512:
+                return Dnssec._encodeRsaKeyField(publicKey);
+            case DnssecAlgorithm.ECDSAP256SHA256:
+                return Dnssec._encodeEcdsaKeyField(publicKey, 32);
+            case DnssecAlgorithm.ECDSAP384SHA384:
+                return Dnssec._encodeEcdsaKeyField(publicKey, 48);
+            case DnssecAlgorithm.ED25519:
+                return Dnssec._encodeEd25519KeyField(publicKey);
+            default:
+                throw new Error(`Dnssec.publicKeyToDnskey: unsupported algorithm ${algorithm}`);
+        }
+    }
+    static _encodeRsaKeyField(publicKey) {
+        const jwk = publicKey.export({ format: 'jwk' });
+        if (!jwk.n || !jwk.e) {
+            throw new Error('Dnssec.publicKeyToDnskey: not an RSA public key');
+        }
+        const exponent = Buffer.from(jwk.e, 'base64url');
+        const modulus = Buffer.from(jwk.n, 'base64url');
+        let prefix;
+        if (exponent.length <= 255) {
+            prefix = Buffer.from([exponent.length]);
+        }
+        else {
+            prefix = Buffer.alloc(3);
+            prefix.writeUInt8(0, 0);
+            prefix.writeUInt16BE(exponent.length, 1);
+        }
+        return Buffer.concat([prefix, exponent, modulus]).toString('base64');
+    }
+    static _encodeEcdsaKeyField(publicKey, curveBytes) {
+        const jwk = publicKey.export({ format: 'jwk' });
+        if (!jwk.x || !jwk.y) {
+            throw new Error('Dnssec.publicKeyToDnskey: not an EC public key');
+        }
+        const x = Buffer.from(jwk.x, 'base64url');
+        const y = Buffer.from(jwk.y, 'base64url');
+        if (x.length > curveBytes || y.length > curveBytes) {
+            throw new Error(`Dnssec.publicKeyToDnskey: EC point coordinate exceeds curve size ${curveBytes}`);
+        }
+        const padX = Buffer.concat([Buffer.alloc(curveBytes - x.length), x]);
+        const padY = Buffer.concat([Buffer.alloc(curveBytes - y.length), y]);
+        return Buffer.concat([padX, padY]).toString('base64');
+    }
+    static _encodeEd25519KeyField(publicKey) {
+        const jwk = publicKey.export({ format: 'jwk' });
+        if (!jwk.x) {
+            throw new Error('Dnssec.publicKeyToDnskey: not an Ed25519 public key');
+        }
+        const raw = Buffer.from(jwk.x, 'base64url');
+        if (raw.length !== 32) {
+            throw new Error(`Dnssec.publicKeyToDnskey: Ed25519 key must be 32 bytes, got ${raw.length}`);
+        }
+        return raw.toString('base64');
     }
     static _verifyAlgorithm(algorithm, input, signature, dnskey) {
         switch (algorithm) {

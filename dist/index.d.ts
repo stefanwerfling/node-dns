@@ -6,7 +6,7 @@ export type { ZoneParseOptions, ZoneParseResult, ZoneToken, ZoneTokenLine } from
 export { Random0x20 } from './Lib/Random0x20.js';
 export { Bailiwick } from './Lib/Bailiwick.js';
 export { Dnssec, DnssecAlgorithm, DnssecDigest } from './Lib/Dnssec.js';
-export type { DnssecVerifyOptions } from './Lib/Dnssec.js';
+export type { DnssecVerifyOptions, DnssecSignOptions } from './Lib/Dnssec.js';
 export { IP } from './Packet/IP.js';
 export { Packet } from './Packet/Packet.js';
 export { Zone } from './Packet/Zone.js';

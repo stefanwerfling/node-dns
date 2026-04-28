@@ -708,3 +708,209 @@ test('Dnssec#nsec3 NXDOMAIN proof end-to-end', () => {
 
     assert.ok(covered, 'one NSEC3 in the chain should cover the queried name');
 });
+
+// ---------------------------------------------------------------------------
+// Phase 3A: signing
+// ---------------------------------------------------------------------------
+
+const SIGN_INCEPTION = '20240101000000';
+const SIGN_EXPIRATION = '20300101000000';
+
+test('Dnssec#publicKeyToDnskey + signRrset round-trips RSA/SHA-256', () => {
+    const {publicKey, privateKey} = crypto.generateKeyPairSync('rsa', {modulusLength: 2048});
+    const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.RSASHA256);
+    const rrset = [buildA('192.0.2.1')];
+
+    const rrsig = Dnssec.signRrset(OWNER, rrset, dnskey, privateKey, {
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+
+    assert.equal(rrsig.algorithm, DnssecAlgorithm.RSASHA256);
+    assert.equal(rrsig.keyTag, Dnssec.computeKeyTag(dnskey));
+    assert.ok(Dnssec.verifyRrsig(OWNER, rrset, rrsig, dnskey, {now: NOW}));
+});
+
+test('Dnssec#publicKeyToDnskey + signRrset round-trips RSA/SHA-512', () => {
+    const {publicKey, privateKey} = crypto.generateKeyPairSync('rsa', {modulusLength: 2048});
+    const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.RSASHA512);
+    const rrset = [buildA('192.0.2.1')];
+
+    const rrsig = Dnssec.signRrset(OWNER, rrset, dnskey, privateKey, {
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+
+    assert.ok(Dnssec.verifyRrsig(OWNER, rrset, rrsig, dnskey, {now: NOW}));
+});
+
+test('Dnssec#publicKeyToDnskey + signRrset round-trips ECDSA P-256', () => {
+    const {publicKey, privateKey} = crypto.generateKeyPairSync('ec', {namedCurve: 'P-256'});
+    const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ECDSAP256SHA256);
+    const rrset = [buildA('192.0.2.1')];
+
+    const rrsig = Dnssec.signRrset(OWNER, rrset, dnskey, privateKey, {
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+
+    assert.ok(Dnssec.verifyRrsig(OWNER, rrset, rrsig, dnskey, {now: NOW}));
+});
+
+test('Dnssec#publicKeyToDnskey + signRrset round-trips ECDSA P-384', () => {
+    const {publicKey, privateKey} = crypto.generateKeyPairSync('ec', {namedCurve: 'P-384'});
+    const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ECDSAP384SHA384);
+    const rrset = [buildA('192.0.2.1')];
+
+    const rrsig = Dnssec.signRrset(OWNER, rrset, dnskey, privateKey, {
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+
+    assert.ok(Dnssec.verifyRrsig(OWNER, rrset, rrsig, dnskey, {now: NOW}));
+});
+
+test('Dnssec#publicKeyToDnskey + signRrset round-trips Ed25519', () => {
+    const {publicKey, privateKey} = crypto.generateKeyPairSync('ed25519');
+    const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ED25519);
+    const rrset = [buildA('192.0.2.1')];
+
+    const rrsig = Dnssec.signRrset(OWNER, rrset, dnskey, privateKey, {
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+
+    assert.ok(Dnssec.verifyRrsig(OWNER, rrset, rrsig, dnskey, {now: NOW}));
+});
+
+test('Dnssec#signRrset rejects empty RRset', () => {
+    const {publicKey, privateKey} = crypto.generateKeyPairSync('ed25519');
+    const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ED25519);
+
+    assert.throws(() => Dnssec.signRrset(OWNER, [], dnskey, privateKey, {
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    }));
+});
+
+test('Dnssec#signRrset normalizes unix-decimal date input to YYYYMMDDHHMMSS', () => {
+    const {publicKey, privateKey} = crypto.generateKeyPairSync('ed25519');
+    const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ED25519);
+    const rrset = [buildA('192.0.2.1')];
+
+    // 1735689600 = 2025-01-01T00:00:00Z
+    const rrsig = Dnssec.signRrset(OWNER, rrset, dnskey, privateKey, {
+        inception: 1735689600,
+        expiration: '1893456000',  // string-of-decimal, 2030-01-01T00:00:00Z
+    });
+
+    assert.equal(rrsig.inception, '20250101000000');
+    assert.equal(rrsig.expiration, '20300101000000');
+});
+
+test('Dnssec#signRrset defaults: signer=owner, originalTtl=rrset[0].ttl, labels=label count', () => {
+    const {publicKey, privateKey} = crypto.generateKeyPairSync('ed25519');
+    const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ED25519);
+    const rrset = [buildA('192.0.2.1')];
+
+    const rrsig = Dnssec.signRrset(OWNER, rrset, dnskey, privateKey, {
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+
+    assert.equal(rrsig.signer, OWNER);
+    assert.equal(rrsig.originalTtl, ORIGINAL_TTL);
+    assert.equal(rrsig.labels, 2);  // example.com → 2 labels
+});
+
+test('Dnssec#signRrset wildcard: labels override produces RRSIG that verifies under expansion', () => {
+    const {publicKey, privateKey} = crypto.generateKeyPairSync('ed25519');
+    const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ED25519);
+
+    // Sign at the wildcard owner with labels=2 (* doesn't count). The
+    // verifier under the expanded owner should reconstruct *.example.com
+    // and accept.
+    const wildcardOwner = '*.example.com';
+    const wildcardRrset = [
+        new PacketResource(wildcardOwner, new A('192.0.2.1'), PacketClass.IN, ORIGINAL_TTL)
+    ];
+
+    const rrsig = Dnssec.signRrset(wildcardOwner, wildcardRrset, dnskey, privateKey, {
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+        labels: 2,
+    });
+
+    // Client receives the answer expanded to host.example.com
+    const expandedRrset = [
+        new PacketResource('host.example.com', new A('192.0.2.1'), PacketClass.IN, ORIGINAL_TTL)
+    ];
+
+    assert.ok(Dnssec.verifyRrsig('host.example.com', expandedRrset, rrsig, dnskey, {now: NOW}));
+});
+
+test('Dnssec#signRrset signed with one key fails verify against a different DNSKEY', () => {
+    const sigKey = crypto.generateKeyPairSync('ed25519');
+    const otherKey = crypto.generateKeyPairSync('ed25519');
+
+    const sigDnskey = Dnssec.publicKeyToDnskey(sigKey.publicKey, DnssecAlgorithm.ED25519);
+    const otherDnskey = Dnssec.publicKeyToDnskey(otherKey.publicKey, DnssecAlgorithm.ED25519);
+
+    const rrset = [buildA('192.0.2.1')];
+
+    const rrsig = Dnssec.signRrset(OWNER, rrset, sigDnskey, sigKey.privateKey, {
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+
+    // keyTag mismatch is the first thing the verifier checks; the test
+    // makes the rejection deterministic regardless of which check fires.
+    assert.equal(Dnssec.verifyRrsig(OWNER, rrset, rrsig, otherDnskey, {now: NOW}), false);
+});
+
+test('Dnssec#publicKeyToDnskey throws on unsupported algorithm', () => {
+    const {publicKey} = crypto.generateKeyPairSync('ed25519');
+    assert.throws(() => Dnssec.publicKeyToDnskey(publicKey, 99));
+});
+
+test('Dnssec#publicKeyToDnskey throws when key type does not match algorithm', () => {
+    const rsa = crypto.generateKeyPairSync('rsa', {modulusLength: 2048}).publicKey;
+    assert.throws(() => Dnssec.publicKeyToDnskey(rsa, DnssecAlgorithm.ED25519));
+});
+
+test('Dnssec#sign + verify multi-record RRset round-trip', () => {
+    const {publicKey, privateKey} = crypto.generateKeyPairSync('ed25519');
+    const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ED25519);
+
+    // Multiple A records — signRrset and verifyRrsig must agree on the
+    // canonical-RDATA sort order.
+    const rrset = [
+        buildA('192.0.2.7'),
+        buildA('192.0.2.1'),
+        buildA('192.0.2.3'),
+    ];
+
+    const rrsig = Dnssec.signRrset(OWNER, rrset, dnskey, privateKey, {
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+
+    // Shuffle on the receive side — verifier sorts canonically too
+    const shuffled = [rrset[2], rrset[0], rrset[1]];
+    assert.ok(Dnssec.verifyRrsig(OWNER, shuffled, rrsig, dnskey, {now: NOW}));
+});
+
+test('Dnssec#sign + verify SOA round-trip uses canonical RDATA on both sides', () => {
+    const {publicKey, privateKey} = crypto.generateKeyPairSync('ed25519');
+    const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ED25519);
+
+    const soa = new SOA('NS1.Example.com', 'admin.Example.com', 1, 7200, 3600, 1209600, 3600);
+    const rrset = [new PacketResource(OWNER, soa, PacketClass.IN, ORIGINAL_TTL)];
+
+    const rrsig = Dnssec.signRrset(OWNER, rrset, dnskey, privateKey, {
+        inception: SIGN_INCEPTION,
+        expiration: SIGN_EXPIRATION,
+    });
+
+    assert.ok(Dnssec.verifyRrsig(OWNER, rrset, rrsig, dnskey, {now: NOW}));
+});

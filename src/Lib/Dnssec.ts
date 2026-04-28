@@ -61,6 +61,41 @@ export type DnssecVerifyOptions = {
 };
 
 /**
+ * Options for `Dnssec.signRrset`.
+ *
+ * Inception / expiration accept either an RFC 4034 §3.2
+ * `YYYYMMDDHHMMSS` UTC string or a unix-decimal seconds string / number.
+ * Whatever the caller passes is normalized to the YYYYMMDDHHMMSS form on
+ * the returned RRSIG.
+ */
+export type DnssecSignOptions = {
+    /** Signature inception. */
+    inception: string | number;
+
+    /** Signature expiration. */
+    expiration: string | number;
+
+    /**
+     * `originalTtl` to put on the RRSIG. Defaults to the TTL of the
+     * first record in the RRset.
+     */
+    originalTtl?: number;
+
+    /**
+     * Signer name to put on the RRSIG. Defaults to the `owner` argument.
+     */
+    signer?: string;
+
+    /**
+     * Number of labels in the original (pre-wildcard-expansion) owner
+     * name (RFC 4034 §3.1.3). Defaults to the non-empty label count of
+     * `owner`. Override when signing a wildcard RR set so the verifier
+     * knows it's a wildcard.
+     */
+    labels?: number;
+};
+
+/**
  * RFC 4034 / RFC 4035 verification primitives for DNSSEC. This layer is
  * deliberately stateless — there is no resolver, no cache, no chain
  * traversal. Callers feed in an RRset together with its RRSIG and a
@@ -214,6 +249,73 @@ export class Dnssec {
         const signature = Buffer.from(rrsig.signature, 'base64');
 
         return Dnssec._verifyAlgorithm(rrsig.algorithm, input, signature, dnskey);
+    }
+
+    /**
+     * Sign an RRset and return a complete RRSIG. The signing input is
+     * built with the same canonical-form construction the verifier uses
+     * (`buildSigningInput`), so a `signRrset` output round-trips through
+     * `verifyRrsig` by construction.
+     *
+     * `dnskey` provides the algorithm and the key tag; `privateKey` is
+     * the matching Node `KeyObject`. Defaults: `signer` = `owner`,
+     * `originalTtl` = first record's TTL, `labels` = non-empty label
+     * count of `owner`.
+     */
+    public static signRrset(
+        owner: string,
+        rrset: PacketResource[],
+        dnskey: DNSKEY,
+        privateKey: crypto.KeyObject,
+        options: DnssecSignOptions
+    ): RRSIG {
+        if (rrset.length === 0) {
+            throw new Error('Dnssec.signRrset: rrset is empty');
+        }
+
+        const inception = Dnssec._normalizeSigDate(options.inception);
+        const expiration = Dnssec._normalizeSigDate(options.expiration);
+
+        const labels = options.labels
+            ?? owner.split('.').filter((l) => l.length > 0).length;
+
+        const rrsig = new RRSIG(
+            rrset[0].packetType.type,
+            dnskey.algorithm,
+            labels,
+            options.originalTtl ?? rrset[0].ttl,
+            expiration,
+            inception,
+            Dnssec.computeKeyTag(dnskey),
+            options.signer ?? owner,
+            ''
+        );
+
+        const input = Dnssec.buildSigningInput(owner, rrset, rrsig);
+        const signature = Dnssec._signWithAlgorithm(dnskey.algorithm, input, privateKey);
+        rrsig.signature = signature.toString('base64');
+
+        return rrsig;
+    }
+
+    /**
+     * Build a `DNSKEY` instance from a Node public-key `KeyObject`.
+     * Inverse of the algorithm-specific `_rsaPublicKey` /
+     * `_ecdsaPublicKey` / `_ed25519PublicKey` parsers.
+     *
+     * Convenient when generating a fresh key pair to publish: hand the
+     * `publicKey` returned by `crypto.generateKeyPairSync` to this
+     * method, hand the `privateKey` to `signRrset`, and the same DNSKEY
+     * goes into both the published RRset and the signing path.
+     */
+    public static publicKeyToDnskey(
+        publicKey: crypto.KeyObject,
+        algorithm: number,
+        flags: number = 257,
+        protocol: number = 3
+    ): DNSKEY {
+        const keyBase64 = Dnssec._encodeDnskeyKeyField(publicKey, algorithm);
+        return new DNSKEY(flags, protocol, algorithm, keyBase64);
     }
 
     /**
@@ -628,6 +730,185 @@ export class Dnssec {
         const second = parseInt(value.slice(12, 14), 10);
 
         return Math.floor(Date.UTC(year, month - 1, day, hour, minute, second) / 1000);
+    }
+
+    /**
+     * Inverse of `_parseSigDate`: produce the YYYYMMDDHHMMSS UTC form
+     * from a unix-decimal seconds value, for use as the RRSIG
+     * inception/expiration string.
+     * @protected
+     */
+    protected static _formatSigDate(timestamp: number): string {
+        const date = new Date(timestamp * 1000);
+        const year = date.getUTCFullYear().toString().padStart(4, '0');
+        const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
+        const day = date.getUTCDate().toString().padStart(2, '0');
+        const hour = date.getUTCHours().toString().padStart(2, '0');
+        const minute = date.getUTCMinutes().toString().padStart(2, '0');
+        const second = date.getUTCSeconds().toString().padStart(2, '0');
+
+        return `${year}${month}${day}${hour}${minute}${second}`;
+    }
+
+    /**
+     * Normalize a `signRrset` inception / expiration option to the
+     * RRSIG presentation form. Strings already in YYYYMMDDHHMMSS form
+     * pass through unchanged; numbers and decimal-second strings are
+     * formatted via `_formatSigDate`.
+     * @protected
+     */
+    protected static _normalizeSigDate(value: string | number): string {
+        if (typeof value === 'string' && /^\d{14}$/.test(value)) {
+            return value;
+        }
+
+        const seconds = typeof value === 'number' ? value : parseInt(value, 10);
+
+        if (!Number.isFinite(seconds)) {
+            throw new Error(`Dnssec.signRrset: invalid date "${String(value)}"`);
+        }
+
+        return Dnssec._formatSigDate(seconds);
+    }
+
+    /**
+     * Dispatch to the algorithm-specific Node `crypto.sign` invocation.
+     * Mirror image of `_verifyAlgorithm` — same algorithm coverage,
+     * same DNS-format conventions (raw r||s for ECDSA via
+     * `dsaEncoding: 'ieee-p1363'`, raw signature for RSA, raw 64-byte
+     * for Ed25519).
+     * @protected
+     */
+    protected static _signWithAlgorithm(
+        algorithm: number,
+        input: Buffer,
+        privateKey: crypto.KeyObject
+    ): Buffer {
+        switch (algorithm) {
+            case DnssecAlgorithm.RSASHA256:
+                return crypto.sign('sha256', input, privateKey);
+
+            case DnssecAlgorithm.RSASHA512:
+                return crypto.sign('sha512', input, privateKey);
+
+            case DnssecAlgorithm.ECDSAP256SHA256:
+                return crypto.sign('sha256', input, {key: privateKey, dsaEncoding: 'ieee-p1363'});
+
+            case DnssecAlgorithm.ECDSAP384SHA384:
+                return crypto.sign('sha384', input, {key: privateKey, dsaEncoding: 'ieee-p1363'});
+
+            case DnssecAlgorithm.ED25519:
+                return crypto.sign(null, input, privateKey);
+
+            default:
+                throw new Error(`Dnssec: unsupported signing algorithm ${algorithm}`);
+        }
+    }
+
+    /**
+     * Build the wire-format DNSKEY public-key field (base64) from a
+     * Node `KeyObject`, dispatching on algorithm. Inverse of the
+     * per-algorithm `_*PublicKey` parsers.
+     * @protected
+     */
+    protected static _encodeDnskeyKeyField(publicKey: crypto.KeyObject, algorithm: number): string {
+        switch (algorithm) {
+            case DnssecAlgorithm.RSASHA256:
+            case DnssecAlgorithm.RSASHA512:
+                return Dnssec._encodeRsaKeyField(publicKey);
+
+            case DnssecAlgorithm.ECDSAP256SHA256:
+                return Dnssec._encodeEcdsaKeyField(publicKey, 32);
+
+            case DnssecAlgorithm.ECDSAP384SHA384:
+                return Dnssec._encodeEcdsaKeyField(publicKey, 48);
+
+            case DnssecAlgorithm.ED25519:
+                return Dnssec._encodeEd25519KeyField(publicKey);
+
+            default:
+                throw new Error(`Dnssec.publicKeyToDnskey: unsupported algorithm ${algorithm}`);
+        }
+    }
+
+    /**
+     * RFC 3110 RSA public-key wire format: `[explen | exponent | modulus]`.
+     * `explen` is a single byte for exponents up to 255 octets, otherwise
+     * 0x00 followed by a uint16 length.
+     * @protected
+     */
+    protected static _encodeRsaKeyField(publicKey: crypto.KeyObject): string {
+        const jwk = publicKey.export({format: 'jwk'}) as {n?: string; e?: string;};
+
+        if (!jwk.n || !jwk.e) {
+            throw new Error('Dnssec.publicKeyToDnskey: not an RSA public key');
+        }
+
+        const exponent = Buffer.from(jwk.e, 'base64url');
+        const modulus = Buffer.from(jwk.n, 'base64url');
+
+        let prefix: Buffer;
+
+        if (exponent.length <= 255) {
+            prefix = Buffer.from([exponent.length]);
+        } else {
+            prefix = Buffer.alloc(3);
+            prefix.writeUInt8(0, 0);
+            prefix.writeUInt16BE(exponent.length, 1);
+        }
+
+        return Buffer.concat([prefix, exponent, modulus]).toString('base64');
+    }
+
+    /**
+     * ECDSA DNSKEY key field: raw uncompressed point `X || Y`, no
+     * leading 0x04. JWK left-pads x/y to the curve coordinate size, but
+     * we re-pad defensively in case Node ever returns minimum-length
+     * representations.
+     * @protected
+     */
+    protected static _encodeEcdsaKeyField(publicKey: crypto.KeyObject, curveBytes: number): string {
+        const jwk = publicKey.export({format: 'jwk'}) as {x?: string; y?: string;};
+
+        if (!jwk.x || !jwk.y) {
+            throw new Error('Dnssec.publicKeyToDnskey: not an EC public key');
+        }
+
+        const x = Buffer.from(jwk.x, 'base64url');
+        const y = Buffer.from(jwk.y, 'base64url');
+
+        if (x.length > curveBytes || y.length > curveBytes) {
+            throw new Error(
+                `Dnssec.publicKeyToDnskey: EC point coordinate exceeds curve size ${curveBytes}`
+            );
+        }
+
+        const padX = Buffer.concat([Buffer.alloc(curveBytes - x.length), x]);
+        const padY = Buffer.concat([Buffer.alloc(curveBytes - y.length), y]);
+
+        return Buffer.concat([padX, padY]).toString('base64');
+    }
+
+    /**
+     * Ed25519 DNSKEY key field: 32-byte raw public key.
+     * @protected
+     */
+    protected static _encodeEd25519KeyField(publicKey: crypto.KeyObject): string {
+        const jwk = publicKey.export({format: 'jwk'}) as {x?: string;};
+
+        if (!jwk.x) {
+            throw new Error('Dnssec.publicKeyToDnskey: not an Ed25519 public key');
+        }
+
+        const raw = Buffer.from(jwk.x, 'base64url');
+
+        if (raw.length !== 32) {
+            throw new Error(
+                `Dnssec.publicKeyToDnskey: Ed25519 key must be 32 bytes, got ${raw.length}`
+            );
+        }
+
+        return raw.toString('base64');
     }
 
     /**

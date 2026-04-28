@@ -20,12 +20,21 @@ export type DnssecVerifyOptions = {
     now?: number;
     skipValidityWindow?: boolean;
 };
+export type DnssecSignOptions = {
+    inception: string | number;
+    expiration: string | number;
+    originalTtl?: number;
+    signer?: string;
+    labels?: number;
+};
 export declare class Dnssec {
     protected static readonly _RAW_CANONICAL_TYPES: ReadonlySet<number>;
     static computeKeyTag(dnskey: DNSKEY): number;
     static computeDsDigest(owner: string, dnskey: DNSKEY, digestType: number): string;
     static verifyDs(owner: string, dnskey: DNSKEY, ds: DS): boolean;
     static verifyRrsig(owner: string, rrset: PacketResource[], rrsig: RRSIG, dnskey: DNSKEY, options?: DnssecVerifyOptions): boolean;
+    static signRrset(owner: string, rrset: PacketResource[], dnskey: DNSKEY, privateKey: crypto.KeyObject, options: DnssecSignOptions): RRSIG;
+    static publicKeyToDnskey(publicKey: crypto.KeyObject, algorithm: number, flags?: number, protocol?: number): DNSKEY;
     static buildSigningInput(owner: string, rrset: PacketResource[], rrsig: RRSIG): Buffer;
     static canonicalNameCompare(a: string, b: string): number;
     static nsecCovers(ownerName: string, nextDomain: string, queryName: string): boolean;
@@ -39,6 +48,13 @@ export declare class Dnssec {
     protected static _dnskeyRdataBytes(dnskey: DNSKEY): Buffer;
     protected static _hashNameForDigest(digestType: number): string;
     protected static _parseSigDate(value: string): number;
+    protected static _formatSigDate(timestamp: number): string;
+    protected static _normalizeSigDate(value: string | number): string;
+    protected static _signWithAlgorithm(algorithm: number, input: Buffer, privateKey: crypto.KeyObject): Buffer;
+    protected static _encodeDnskeyKeyField(publicKey: crypto.KeyObject, algorithm: number): string;
+    protected static _encodeRsaKeyField(publicKey: crypto.KeyObject): string;
+    protected static _encodeEcdsaKeyField(publicKey: crypto.KeyObject, curveBytes: number): string;
+    protected static _encodeEd25519KeyField(publicKey: crypto.KeyObject): string;
     protected static _verifyAlgorithm(algorithm: number, input: Buffer, signature: Buffer, dnskey: DNSKEY): boolean;
     protected static _rsaPublicKey(dnskey: DNSKEY): crypto.KeyObject;
     protected static _ecdsaPublicKey(dnskey: DNSKEY, curveBytes: number, jwkCurve: 'P-256' | 'P-384'): crypto.KeyObject;

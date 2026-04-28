@@ -24,7 +24,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - TSIG transaction signing (RFC 8945) — HMAC-based request/response authentication with hmac-md5/sha1/sha224/sha256/sha384/sha512
 - PROXY protocol v1 and v2 support (UDP per-datagram, TCP per-connection) for transparent load-balancer deployments
 - RFC 1035 master file ("zone file") parser — `$ORIGIN`, `$TTL`, `@`, multi-line records via parens, quoted strings; RDATA for A, AAAA, NS, CNAME, DNAME, PTR, MX, TXT, SOA, SRV, CAA, DNSKEY, DS, SSHFP, TLSA, NAPTR, NSEC, NSEC3, RRSIG, SVCB, HTTPS (RFC 3597 generic `TYPEnnn` mnemonic, base32hex for NSEC3, RFC 9460 SVCB presentation form)
-- DNSSEC validation (RFC 4034 / 4035) — stateless `Dnssec.verifyRrsig`, `Dnssec.computeKeyTag`, `Dnssec.computeDsDigest`, `Dnssec.verifyDs`. Algorithms 8 (RSA/SHA-256), 10 (RSA/SHA-512), 13 (ECDSA P-256), 14 (ECDSA P-384), 15 (Ed25519). DS digest types 1/2/4. Canonical RDATA covers every supported RR type with embedded-name lowercasing (RFC 4034 §6.2) and automatic wildcard label-count reconstruction (§3.1.3). Negative-answer building blocks shipped: `canonicalNameCompare` (§6.1), `nsecCovers` (with zone-wrap-around), `nsec3Hash` (RFC 5155 §5 SHA-1 with iterations), `nsec3CoversHash`, `base32hexEncode`. Composing them into a full NXDOMAIN/NODATA proof and the chain-of-trust traversal belong in the recursive resolver layer.
+- DNSSEC validation **and signing** (RFC 4034 / 4035) — stateless `Dnssec.verifyRrsig`, `Dnssec.signRrset`, `Dnssec.publicKeyToDnskey`, `Dnssec.computeKeyTag`, `Dnssec.computeDsDigest`, `Dnssec.verifyDs`. Algorithms 8 (RSA/SHA-256), 10 (RSA/SHA-512), 13 (ECDSA P-256), 14 (ECDSA P-384), 15 (Ed25519). DS digest types 1/2/4. Canonical RDATA covers every supported RR type with embedded-name lowercasing (RFC 4034 §6.2) and automatic wildcard label-count reconstruction (§3.1.3). Negative-answer building blocks shipped: `canonicalNameCompare` (§6.1), `nsecCovers` (with zone-wrap-around), `nsec3Hash` (RFC 5155 §5 SHA-1 with iterations), `nsec3CoversHash`, `base32hexEncode`. Composing them into a full NXDOMAIN/NODATA proof and the chain-of-trust traversal belong in the recursive resolver layer.
 - AXFR zone transfer (RFC 5936) — `Zone` class for in-memory zones, `AxfrClient` for fetching, `send(Packet[])` server hook for serving
 - IXFR incremental zone transfer (RFC 1995) — `Zone.toIxfrPackets` with optional `ZoneChangeSet` history, `IxfrClient` returning a no-change / incremental / AXFR-fallback discriminated union
 - NOTIFY zone-change notification (RFC 1996) — `NotifyClient` on the primary side, opcode-dispatch on the secondary side
@@ -561,6 +561,48 @@ uncompressed per RFC 4034 §6.2. RFC 4034 §3.1.3 wildcard label-count
 reconstruction is automatic: when `rrsig.labels` is less than the owner's
 actual label count, the validator infers `*.<trailing labels>` as the
 signed owner before hashing.
+
+### Signing your own zones
+
+`signRrset` is the inverse of `verifyRrsig` — same canonical-form
+construction on both sides, so a signature you produce here verifies
+through the verifier in this library by construction. Algorithms
+8/10/13/14/15 are supported.
+
+```ts
+import * as crypto from 'crypto';
+import {Dnssec, DnssecAlgorithm} from 'dns2ts';
+
+// 1. Generate a key pair (KSK or ZSK — same code path)
+const {publicKey, privateKey} = crypto.generateKeyPairSync('ed25519');
+
+// 2. Wrap the public key in a DNSKEY ready to publish
+const dnskey = Dnssec.publicKeyToDnskey(publicKey, DnssecAlgorithm.ED25519);
+
+// 3. Sign an RRset
+const rrsig = Dnssec.signRrset(
+  'example.com',                  // owner
+  rrset,                          // PacketResource[]
+  dnskey,                         // for algorithm + key tag
+  privateKey,                     // matching private key
+  {
+    inception: '20240101000000',
+    expiration: '20300101000000',
+    // optional overrides:
+    //   originalTtl: 3600,
+    //   signer: 'example.com',
+    //   labels: 2,        // override for wildcard owners
+  }
+);
+```
+
+`inception` / `expiration` accept either the RFC 4034 §3.2
+`YYYYMMDDHHMMSS` UTC form or unix-decimal seconds (string or number);
+both are normalized to YYYYMMDDHHMMSS on the returned RRSIG.
+`publicKeyToDnskey` produces RFC-3110-format RSA, raw-point ECDSA, or
+32-byte raw Ed25519 wire formats from a Node `KeyObject`. Wildcard
+signing: pass `labels: 2` (or whatever the wildcard count is) so the
+verifier reconstructs `*.<trailing>` for any expansion.
 
 For negative answers, NSEC and NSEC3 building blocks are shipped:
 
