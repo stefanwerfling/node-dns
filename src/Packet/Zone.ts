@@ -66,27 +66,102 @@ export class Zone {
     }
 
     /**
+     * Hard upper bound on the encoded size of one AXFR response message.
+     * RFC 1035 §4.2.2 frames TCP DNS messages with a 16-bit length prefix,
+     * so a single message cannot exceed 65535 octets on the wire.
+     */
+    public static readonly AXFR_MAX_MESSAGE_SIZE: number = 65535;
+
+    /**
      * Build the AXFR response messages for the given query.
      *
-     * Implements the simplest valid AXFR shape (RFC 5936 §2.2): a single
-     * response message whose answer section starts with the zone's SOA,
-     * lists every other record, and ends with the same SOA again. Multi-
-     * message splitting (for zones whose serialized form would exceed a
-     * single 64 KiB message) is not yet implemented; very large zones must
-     * be split by the caller for now.
+     * Per RFC 5936 §2.2: the answer section of the response sequence starts
+     * with the zone's SOA, lists every other record, and ends with the same
+     * SOA again. When the full response fits in one message it is returned
+     * as a single-element array (the AxfrClient and most resolvers handle
+     * either shape transparently). For larger zones the records are split
+     * across multiple messages, each individually under
+     * `options.maxMessageSize` (default 65535).
+     *
+     * Splitting is greedy: records are appended to the current message and
+     * the encoded length is rechecked after each push; once the budget is
+     * hit, the offending record is rolled back and a fresh message starts.
+     * Each message carries the same QID, the original question, and `aa=1`.
+     * Throws if a single record cannot fit in any message of the requested
+     * size — that signals a malformed zone, not a splittable case.
      *
      * @param {Packet} query the parsed AXFR query (QTYPE=AXFR)
+     * @param {{maxMessageSize?: number}} options optional max bytes per
+     *        message; defaults to 65535. Lower values force splitting and
+     *        are useful for tests.
      * @return {Packet[]}
      */
-    public toAxfrPackets(query: Packet): Packet[] {
+    public toAxfrPackets(
+        query: Packet,
+        options: {maxMessageSize?: number;} = {}
+    ): Packet[] {
+        const maxSize = options.maxMessageSize ?? Zone.AXFR_MAX_MESSAGE_SIZE;
         const soa = this.soa();
-        const response = Packet.createResponseFromRequest(query);
+        const middle = this.records.filter((r) => r !== soa);
+        const allAnswers: PacketResource[] = [soa, ...middle, soa];
 
-        response.questions = query.questions.slice();
-        response.header.aa = 1;
-        response.answers = [soa, ...this.records.filter((r) => r !== soa), soa];
+        // Fast path: when the whole response fits in one message we keep
+        // emitting the original single-packet shape — this is the common
+        // case and avoids any per-record encoding overhead.
+        const single = Zone._buildAxfrResponse(query);
+        single.answers = allAnswers;
 
-        return [response];
+        if (single.toBuffer().length <= maxSize) {
+            return [single];
+        }
+
+        const packets: Packet[] = [];
+        let i = 0;
+
+        while (i < allAnswers.length) {
+            const pkt = Zone._buildAxfrResponse(query);
+            let added = 0;
+
+            while (i < allAnswers.length) {
+                pkt.answers.push(allAnswers[i]);
+
+                if (pkt.toBuffer().length > maxSize) {
+                    if (added === 0) {
+                        throw new Error(
+                            `AXFR record at index ${i} does not fit in a ${maxSize}-byte message`
+                        );
+                    }
+
+                    pkt.answers.pop();
+                    break;
+                }
+
+                i++;
+                added++;
+            }
+
+            packets.push(pkt);
+        }
+
+        return packets;
+    }
+
+    /**
+     * Build a fresh response Packet for one frame of an AXFR sequence.
+     * Uses `new Packet()` rather than `Packet.createResponseFromRequest`
+     * because the latter shares the header reference with the query, which
+     * is a footgun when several response packets need distinct fields.
+     * @protected
+     */
+    protected static _buildAxfrResponse(query: Packet): Packet {
+        const pkt = new Packet();
+        pkt.header.id = query.header.id;
+        pkt.header.opcode = query.header.opcode;
+        pkt.header.rd = query.header.rd;
+        pkt.header.qr = 1;
+        pkt.header.aa = 1;
+        pkt.questions = query.questions.slice();
+        return pkt;
     }
 
     /**

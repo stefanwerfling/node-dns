@@ -10,7 +10,11 @@ export declare class Zone {
     static fromZoneFile(text: string, options?: ZoneParseOptions): Zone;
     soa(): PacketResource;
     recordsOfType(type: PacketTypes): IterableIterator<PacketResource>;
-    toAxfrPackets(query: Packet): Packet[];
+    static readonly AXFR_MAX_MESSAGE_SIZE: number;
+    toAxfrPackets(query: Packet, options?: {
+        maxMessageSize?: number;
+    }): Packet[];
+    protected static _buildAxfrResponse(query: Packet): Packet;
     soaRdata(): SOA;
     toIxfrPackets(query: Packet, options?: {
         history?: ZoneChangeSet[];

@@ -51,20 +51,36 @@ connection before closing it. This is the multi-message
 `send(Packet | Packet[])` semantics introduced for AXFR — see the
 [server guide](dns-servers.md).
 
-### Single-message AXFR
+### Single-message vs. multi-message AXFR
 
-`toAxfrPackets` currently returns **one** message per RFC 5936 §2.2: the
-simplest valid AXFR shape, where one response message starts with the SOA,
-contains every record, and ends with the SOA again. This is fine for
-small-to-medium zones.
+`toAxfrPackets` returns **one** message when the SOA-bracketed answer set
+fits in a single 64 KiB DNS message (RFC 1035 §4.2.2's TCP length-prefix
+ceiling is 65535 bytes). This is the common case for small-to-medium
+zones and matches the shape RFC 5936 §2.2 describes for the simplest
+valid AXFR exchange.
 
-If your serialized zone exceeds ~64 KiB (the maximum DNS message size),
-the single-message form will not encode. Two options:
+Larger zones are automatically split across messages: records are pushed
+greedily into the current frame, the encoded length is rechecked after
+each push, and once the budget is hit the offending record is rolled back
+into a fresh frame. The first frame starts with the zone's SOA, the last
+frame ends with the same SOA, and every frame carries the original QID,
+the original question, and `aa = 1`. Pass the resulting array straight
+to `send([…])` — the TCP/TLS server writes every frame as a
+length-prefixed message before closing the connection.
 
-1. Split the zone into chunks yourself and call `send([…])` with several
-   handcrafted packets, where the first packet starts with the SOA and the
-   last ends with the SOA.
-2. Wait for upstream to add multi-message splitting (open issue).
+```ts
+// Default: 65535-byte budget per message.
+send(zone.toAxfrPackets(request));
+
+// Custom budget — useful for testing the split path or for transports
+// that impose tighter limits.
+send(zone.toAxfrPackets(request, {maxMessageSize: 16384}));
+```
+
+`Zone.AXFR_MAX_MESSAGE_SIZE` exposes the 65535 ceiling as a constant.
+`toAxfrPackets` throws if a single record cannot fit in any message of
+the requested size — that signals a malformed zone (e.g. a TXT record
+larger than 65535 bytes), not a splittable case.
 
 ### Authenticating AXFR
 

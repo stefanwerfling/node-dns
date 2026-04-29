@@ -76,6 +76,68 @@ test('axfr#end-to-end via DnsServer + AxfrClient', async () => {
     assert.deepEqual(types, expected);
     await server.close();
 });
+test('zone#toAxfrPackets splits when the response exceeds maxMessageSize', () => {
+    const zone = Zone.fromZoneFile(SAMPLE_ZONE);
+    const query = new Packet();
+    query.header.id = 0xCAFE;
+    query.questions.push(new PacketQuestion('example.com', PacketTypes.AXFR, PacketClass.IN));
+    const packets = zone.toAxfrPackets(query, { maxMessageSize: 200 });
+    assert.ok(packets.length >= 2, `expected ≥2 packets, got ${packets.length}`);
+    for (const p of packets) {
+        assert.ok(p.toBuffer().length <= 200);
+        assert.equal(p.header.qr, 1);
+        assert.equal(p.header.aa, 1);
+        assert.equal(p.header.id, 0xCAFE);
+        assert.equal(p.questions.length, 1);
+        assert.equal(p.questions[0].type, PacketTypes.AXFR);
+    }
+    const first = packets[0];
+    const last = packets[packets.length - 1];
+    assert.equal(first.answers[0].packetType.type, PacketTypes.SOA);
+    assert.equal(last.answers[last.answers.length - 1].packetType.type, PacketTypes.SOA);
+    const allAnswers = packets.flatMap((p) => p.answers);
+    const soaCount = allAnswers.filter((r) => r.packetType.type === PacketTypes.SOA).length;
+    assert.equal(soaCount, 2);
+    assert.equal(allAnswers.length, zone.records.length + 1);
+});
+test('zone#toAxfrPackets does not share header objects across frames', () => {
+    const zone = Zone.fromZoneFile(SAMPLE_ZONE);
+    const query = new Packet();
+    query.header.id = 0x1234;
+    query.questions.push(new PacketQuestion('example.com', PacketTypes.AXFR, PacketClass.IN));
+    const packets = zone.toAxfrPackets(query, { maxMessageSize: 200 });
+    assert.ok(packets.length >= 2);
+    packets[0].header.rcode = 5;
+    for (let i = 1; i < packets.length; i++) {
+        assert.notEqual(packets[i].header, packets[0].header);
+        assert.equal(packets[i].header.rcode, 0);
+    }
+});
+test('zone#toAxfrPackets end-to-end through AxfrClient with forced splitting', async () => {
+    const zone = Zone.fromZoneFile(SAMPLE_ZONE);
+    const server = new DnsServer({
+        tcp: true,
+        handle: (request, send) => {
+            send(zone.toAxfrPackets(request, { maxMessageSize: 200 }));
+        },
+    });
+    const addresses = await server.listen();
+    const port = addresses.tcp.port;
+    const transfer = AxfrClient.request({ dns: '127.0.0.1', port: port });
+    const result = await transfer('example.com');
+    assert.equal(result.records.length, zone.records.length);
+    assert.equal(result.soa.packetType.serial, 2024010101);
+    const types = result.records.map((r) => r.packetType.type).sort();
+    const expected = zone.records.map((r) => r.packetType.type).sort();
+    assert.deepEqual(types, expected);
+    await server.close();
+});
+test('zone#toAxfrPackets throws when one record cannot fit at all', () => {
+    const zone = Zone.fromZoneFile(SAMPLE_ZONE);
+    const query = new Packet();
+    query.questions.push(new PacketQuestion('example.com', PacketTypes.AXFR, PacketClass.IN));
+    assert.throws(() => zone.toAxfrPackets(query, { maxMessageSize: 50 }), /does not fit/u);
+});
 test('axfr#client errors on premature close', async () => {
     const server = new DnsServer({
         tcp: true,

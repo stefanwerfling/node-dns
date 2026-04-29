@@ -26,13 +26,47 @@ export class Zone {
             }
         }
     }
-    toAxfrPackets(query) {
+    static AXFR_MAX_MESSAGE_SIZE = 65535;
+    toAxfrPackets(query, options = {}) {
+        const maxSize = options.maxMessageSize ?? Zone.AXFR_MAX_MESSAGE_SIZE;
         const soa = this.soa();
-        const response = Packet.createResponseFromRequest(query);
-        response.questions = query.questions.slice();
-        response.header.aa = 1;
-        response.answers = [soa, ...this.records.filter((r) => r !== soa), soa];
-        return [response];
+        const middle = this.records.filter((r) => r !== soa);
+        const allAnswers = [soa, ...middle, soa];
+        const single = Zone._buildAxfrResponse(query);
+        single.answers = allAnswers;
+        if (single.toBuffer().length <= maxSize) {
+            return [single];
+        }
+        const packets = [];
+        let i = 0;
+        while (i < allAnswers.length) {
+            const pkt = Zone._buildAxfrResponse(query);
+            let added = 0;
+            while (i < allAnswers.length) {
+                pkt.answers.push(allAnswers[i]);
+                if (pkt.toBuffer().length > maxSize) {
+                    if (added === 0) {
+                        throw new Error(`AXFR record at index ${i} does not fit in a ${maxSize}-byte message`);
+                    }
+                    pkt.answers.pop();
+                    break;
+                }
+                i++;
+                added++;
+            }
+            packets.push(pkt);
+        }
+        return packets;
+    }
+    static _buildAxfrResponse(query) {
+        const pkt = new Packet();
+        pkt.header.id = query.header.id;
+        pkt.header.opcode = query.header.opcode;
+        pkt.header.rd = query.header.rd;
+        pkt.header.qr = 1;
+        pkt.header.aa = 1;
+        pkt.questions = query.questions.slice();
+        return pkt;
     }
     soaRdata() {
         return this.soa().packetType;
