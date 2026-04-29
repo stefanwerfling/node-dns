@@ -58,6 +58,14 @@ Returns:
 - **`$ORIGIN`** — sets the suffix appended to relative names. Must end with
   a dot. dns2ts auto-appends one if missing.
 - **`$TTL`** — default TTL for records that omit one.
+- **`$INCLUDE`** — splice in another zone file. Per RFC 1035 §5.1, the
+  included file may carry an explicit origin override
+  (`$INCLUDE child.zone child.example.`); its own `$ORIGIN` / `$TTL`
+  directives do not leak back into the parent. By default the filename is
+  read with `fs.readFileSync` relative to the `basePath` option; pass
+  `includeResolver: (filename, basePath) => string` to load from a
+  different source (test fixtures, archives, in-memory blobs). Cycles are
+  detected and rejected.
 - **`@`** — shortcut for the current origin.
 - **Owner-name inheritance** — per RFC 1035 §5.1, a line that begins with
   whitespace inherits the owner name of the previous record:
@@ -118,7 +126,6 @@ Error: line 14: unsupported record type AFSDB
 
 ### Not yet supported
 
-- **`$INCLUDE`** — would require filesystem access; not yet implemented.
 - **Generic encoding `\#`** (RFC 3597) — would let arbitrary RR types be
   parsed by length+hex; not yet implemented. The mnemonic form
   `TYPEnnn` for *unknown* type codes is supported only inside NSEC/NSEC3
@@ -133,7 +140,10 @@ Error: line 14: unsupported record type AFSDB
 | `unterminated quoted string starting near line N` | Quote opened, file ended before closing                  |
 | `line N: name required (no previous record …)` | Leading-whitespace line with no prior record to inherit |
 | `line N: unsupported record type X`            | Type not in the supported list                          |
-| `line N: unsupported directive $X`             | Anything other than `$ORIGIN` and `$TTL`                |
+| `line N: unsupported directive $X`             | Anything other than `$ORIGIN`, `$TTL`, `$INCLUDE`       |
+| `line N: $INCLUDE requires a file name`        | `$INCLUDE` directive without a filename token           |
+| `line N: $INCLUDE failed to load X: …`         | Resolver / `fs.readFileSync` raised while loading X     |
+| `line N: $INCLUDE cycle detected for X`        | A file (transitively) `$INCLUDE`s itself                |
 
 ## Higher-level API — `Zone`
 

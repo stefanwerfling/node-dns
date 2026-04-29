@@ -1,4 +1,6 @@
 import { Buffer } from 'buffer';
+import * as fs from 'fs';
+import * as path from 'path';
 import {PacketClass} from '../Packet/PacketClass.js';
 import {PacketResource} from '../Packet/PacketResource.js';
 import {PacketTypes} from '../Packet/PacketTypes.js';
@@ -58,6 +60,13 @@ export type ZoneParseResult = {
 };
 
 /**
+ * Resolves an `$INCLUDE` directive's filename token to the file's text content.
+ * Receives the literal token from the zone file and the current `basePath`
+ * (directory of the file currently being parsed, if known).
+ */
+export type ZoneIncludeResolver = (filename: string, basePath: string|undefined) => string;
+
+/**
  * Options for `ZoneParser.parse`.
  */
 export type ZoneParseOptions = {
@@ -72,6 +81,21 @@ export type ZoneParseOptions = {
      * directive sets a new default. Defaults to 3600.
      */
     defaultTtl?: number;
+
+    /**
+     * Base directory used when resolving relative `$INCLUDE` paths. Required
+     * for filesystem-backed includes; optional when a custom `includeResolver`
+     * is supplied (in which case the resolver decides how to interpret it).
+     */
+    basePath?: string;
+
+    /**
+     * Override how `$INCLUDE` filenames are resolved to file content. The
+     * default reads from the filesystem via `fs.readFileSync`, treating the
+     * path as relative to `basePath`. Provide a custom resolver to load
+     * includes from a different source (test fixtures, archives, etc.).
+     */
+    includeResolver?: ZoneIncludeResolver;
 };
 
 /**
@@ -80,20 +104,34 @@ export type ZoneParseOptions = {
  * Supports:
  *   - `;` comments, `( … )` multi-line records, `"…"` quoted strings
  *     with `\\` and `\"` escapes
- *   - `$ORIGIN`, `$TTL` directives
+ *   - `$ORIGIN`, `$TTL`, `$INCLUDE` directives
  *   - `@` shortcut for the current origin
  *   - TTL/class inheritance from the previous record
  *   - RDATA for A, AAAA, NS, CNAME, DNAME, PTR, MX, TXT, SOA, SRV, CAA,
  *     DNSKEY, DS, SSHFP, TLSA, NAPTR, NSEC, NSEC3, RRSIG, SVCB, HTTPS
  *
- * Not yet supported (intentional): `$INCLUDE` (filesystem I/O),
- * generic-encoding `\#`.
+ * Not yet supported (intentional): generic-encoding `\#`.
  *
  * @docs https://datatracker.ietf.org/doc/html/rfc1035#section-5
  */
 export class ZoneParser {
 
     public static parse(input: string, options: ZoneParseOptions = {}): ZoneParseResult {
+        return ZoneParser._parseInternal(input, options, new Set());
+    }
+
+    /**
+     * Implementation of `parse` that threads cycle-detection state through
+     * recursive `$INCLUDE` calls. Each include creates a fresh nested state:
+     * its `$ORIGIN`/`$TTL` directives do not leak back into the parent file
+     * (RFC 1035 §5.1: "the new origin … reverts" once the include is read).
+     * @protected
+     */
+    protected static _parseInternal(
+        input: string,
+        options: ZoneParseOptions,
+        visitedFiles: Set<string>
+    ): ZoneParseResult {
         const lines = ZoneParser._tokenize(input);
         let origin = ZoneParser._absolute(options.origin ?? '.');
         let defaultTtl = options.defaultTtl ?? 3600;
@@ -128,6 +166,40 @@ export class ZoneParser {
                 continue;
             }
 
+            if (first === '$INCLUDE') {
+                if (line.tokens.length < 2) {
+                    throw new Error(`line ${line.lineNumber}: $INCLUDE requires a file name`);
+                }
+
+                const includeFilename = line.tokens[1].value;
+                const overrideToken = line.tokens.length >= 3 ? line.tokens[2].value : null;
+                const includeOrigin = overrideToken === null
+                    ? origin
+                    : ZoneParser._absolute(overrideToken === '@' ? origin : overrideToken);
+                const cycleKey = ZoneParser._resolveIncludePath(includeFilename, options.basePath);
+
+                if (visitedFiles.has(cycleKey)) {
+                    throw new Error(`line ${line.lineNumber}: $INCLUDE cycle detected for ${includeFilename}`);
+                }
+
+                const content = ZoneParser._loadInclude(includeFilename, options, cycleKey, line.lineNumber);
+                const childVisited = new Set(visitedFiles);
+                childVisited.add(cycleKey);
+                const childOptions: ZoneParseOptions = {
+                    origin: includeOrigin,
+                    defaultTtl: defaultTtl,
+                    basePath: path.dirname(cycleKey),
+                    includeResolver: options.includeResolver,
+                };
+                const sub = ZoneParser._parseInternal(content, childOptions, childVisited);
+
+                for (const r of sub.records) {
+                    records.push(r);
+                }
+
+                continue;
+            }
+
             if (first.startsWith('$')) {
                 throw new Error(`line ${line.lineNumber}: unsupported directive ${first}`);
             }
@@ -147,6 +219,43 @@ export class ZoneParser {
         }
 
         return {origin: origin, records: records};
+    }
+
+    /**
+     * Resolve an `$INCLUDE` filename to an absolute path. Used both for
+     * filesystem reads and as the cycle-detection key.
+     * @protected
+     */
+    protected static _resolveIncludePath(filename: string, basePath: string|undefined): string {
+        if (path.isAbsolute(filename)) {
+            return path.normalize(filename);
+        }
+
+        return path.resolve(basePath ?? process.cwd(), filename);
+    }
+
+    /**
+     * Load the contents of an included file, either via the caller-supplied
+     * resolver or via the default `fs.readFileSync` (UTF-8). Errors are
+     * rewrapped so the line number stays in the message.
+     * @protected
+     */
+    protected static _loadInclude(
+        filename: string,
+        options: ZoneParseOptions,
+        resolvedPath: string,
+        lineNumber: number
+    ): string {
+        try {
+            if (options.includeResolver) {
+                return options.includeResolver(filename, options.basePath);
+            }
+
+            return fs.readFileSync(resolvedPath, 'utf8');
+        } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            throw new Error(`line ${lineNumber}: $INCLUDE failed to load ${filename}: ${reason}`);
+        }
     }
 
     /**

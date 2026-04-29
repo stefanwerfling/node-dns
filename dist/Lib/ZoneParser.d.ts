@@ -16,12 +16,18 @@ export type ZoneParseResult = {
     origin: string;
     records: PacketResource[];
 };
+export type ZoneIncludeResolver = (filename: string, basePath: string | undefined) => string;
 export type ZoneParseOptions = {
     origin?: string;
     defaultTtl?: number;
+    basePath?: string;
+    includeResolver?: ZoneIncludeResolver;
 };
 export declare class ZoneParser {
     static parse(input: string, options?: ZoneParseOptions): ZoneParseResult;
+    protected static _parseInternal(input: string, options: ZoneParseOptions, visitedFiles: Set<string>): ZoneParseResult;
+    protected static _resolveIncludePath(filename: string, basePath: string | undefined): string;
+    protected static _loadInclude(filename: string, options: ZoneParseOptions, resolvedPath: string, lineNumber: number): string;
     protected static _tokenize(input: string): ZoneTokenLine[];
     protected static _parseRecord(line: ZoneTokenLine, ctx: {
         origin: string;

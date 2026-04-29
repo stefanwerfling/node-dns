@@ -1,4 +1,6 @@
 import { Buffer } from 'buffer';
+import * as fs from 'fs';
+import * as path from 'path';
 import { PacketClass } from '../Packet/PacketClass.js';
 import { PacketResource } from '../Packet/PacketResource.js';
 import { PacketTypes } from '../Packet/PacketTypes.js';
@@ -27,6 +29,9 @@ import { TLSA } from '../Packet/Types/TLSA.js';
 import { TXT } from '../Packet/Types/TXT.js';
 export class ZoneParser {
     static parse(input, options = {}) {
+        return ZoneParser._parseInternal(input, options, new Set());
+    }
+    static _parseInternal(input, options, visitedFiles) {
         const lines = ZoneParser._tokenize(input);
         let origin = ZoneParser._absolute(options.origin ?? '.');
         let defaultTtl = options.defaultTtl ?? 3600;
@@ -53,6 +58,34 @@ export class ZoneParser {
                 defaultTtl = ZoneParser._parseTtl(line.tokens[1].value);
                 continue;
             }
+            if (first === '$INCLUDE') {
+                if (line.tokens.length < 2) {
+                    throw new Error(`line ${line.lineNumber}: $INCLUDE requires a file name`);
+                }
+                const includeFilename = line.tokens[1].value;
+                const overrideToken = line.tokens.length >= 3 ? line.tokens[2].value : null;
+                const includeOrigin = overrideToken === null
+                    ? origin
+                    : ZoneParser._absolute(overrideToken === '@' ? origin : overrideToken);
+                const cycleKey = ZoneParser._resolveIncludePath(includeFilename, options.basePath);
+                if (visitedFiles.has(cycleKey)) {
+                    throw new Error(`line ${line.lineNumber}: $INCLUDE cycle detected for ${includeFilename}`);
+                }
+                const content = ZoneParser._loadInclude(includeFilename, options, cycleKey, line.lineNumber);
+                const childVisited = new Set(visitedFiles);
+                childVisited.add(cycleKey);
+                const childOptions = {
+                    origin: includeOrigin,
+                    defaultTtl: defaultTtl,
+                    basePath: path.dirname(cycleKey),
+                    includeResolver: options.includeResolver,
+                };
+                const sub = ZoneParser._parseInternal(content, childOptions, childVisited);
+                for (const r of sub.records) {
+                    records.push(r);
+                }
+                continue;
+            }
             if (first.startsWith('$')) {
                 throw new Error(`line ${line.lineNumber}: unsupported directive ${first}`);
             }
@@ -69,6 +102,24 @@ export class ZoneParser {
             records.push(record);
         }
         return { origin: origin, records: records };
+    }
+    static _resolveIncludePath(filename, basePath) {
+        if (path.isAbsolute(filename)) {
+            return path.normalize(filename);
+        }
+        return path.resolve(basePath ?? process.cwd(), filename);
+    }
+    static _loadInclude(filename, options, resolvedPath, lineNumber) {
+        try {
+            if (options.includeResolver) {
+                return options.includeResolver(filename, options.basePath);
+            }
+            return fs.readFileSync(resolvedPath, 'utf8');
+        }
+        catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            throw new Error(`line ${lineNumber}: $INCLUDE failed to load ${filename}: ${reason}`);
+        }
     }
     static _tokenize(input) {
         const result = [];

@@ -23,7 +23,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - EDNS(0) options: ECS (RFC 7871), Cookies (RFC 7873 + RFC 9018 server-cookie algorithm), Padding (RFC 7830), NSID (RFC 5001), TCP Keepalive (RFC 7828), Extended DNS Errors (RFC 8914)
 - TSIG transaction signing (RFC 8945) — HMAC-based request/response authentication with hmac-md5/sha1/sha224/sha256/sha384/sha512
 - PROXY protocol v1 and v2 support (UDP per-datagram, TCP per-connection) for transparent load-balancer deployments
-- RFC 1035 master file ("zone file") parser — `$ORIGIN`, `$TTL`, `@`, multi-line records via parens, quoted strings; RDATA for A, AAAA, NS, CNAME, DNAME, PTR, MX, TXT, SOA, SRV, CAA, DNSKEY, DS, SSHFP, TLSA, NAPTR, NSEC, NSEC3, RRSIG, SVCB, HTTPS (RFC 3597 generic `TYPEnnn` mnemonic, base32hex for NSEC3, RFC 9460 SVCB presentation form)
+- RFC 1035 master file ("zone file") parser — `$ORIGIN`, `$TTL`, `$INCLUDE` (with optional origin override and pluggable resolver), `@`, multi-line records via parens, quoted strings; RDATA for A, AAAA, NS, CNAME, DNAME, PTR, MX, TXT, SOA, SRV, CAA, DNSKEY, DS, SSHFP, TLSA, NAPTR, NSEC, NSEC3, RRSIG, SVCB, HTTPS (RFC 3597 generic `TYPEnnn` mnemonic, base32hex for NSEC3, RFC 9460 SVCB presentation form)
 - DNSSEC validation **and signing** (RFC 4034 / 4035) — stateless `Dnssec.verifyRrsig`, `Dnssec.signRrset`, `Dnssec.publicKeyToDnskey`, `Dnssec.computeKeyTag`, `Dnssec.computeDsDigest`, `Dnssec.verifyDs`. Algorithms 8 (RSA/SHA-256), 10 (RSA/SHA-512), 13 (ECDSA P-256), 14 (ECDSA P-384), 15 (Ed25519). DS digest types 1/2/4. Canonical RDATA covers every supported RR type with embedded-name lowercasing (RFC 4034 §6.2) and automatic wildcard label-count reconstruction (§3.1.3). Negative-answer building blocks shipped: `canonicalNameCompare` (§6.1), `nsecCovers` (with zone-wrap-around), `nsec3Hash` (RFC 5155 §5 SHA-1 with iterations), `nsec3CoversHash`, `base32hexEncode`. Composing them into a full NXDOMAIN/NODATA proof and the chain-of-trust traversal belong in the recursive resolver layer.
 - AXFR zone transfer (RFC 5936) — `Zone` class for in-memory zones, `AxfrClient` for fetching, `send(Packet[])` server hook for serving
 - IXFR incremental zone transfer (RFC 1995) — `Zone.toIxfrPackets` with optional `ZoneChangeSet` history, `IxfrClient` returning a no-change / incremental / AXFR-fallback discriminated union
@@ -341,9 +341,11 @@ the embedded timestamp and compares in constant time.
 
 `ZoneParser.parse(text, options?)` turns a BIND-style zone file into an array
 of `PacketResource` objects. Comments, parens-spanned records, quoted strings,
-`$ORIGIN`/`$TTL` directives and `@` are all supported; owner-name inheritance
-follows RFC 1035 §5.1 (a line that begins with whitespace inherits the owner
-name from the previous record).
+`$ORIGIN`/`$TTL`/`$INCLUDE` directives and `@` are all supported; owner-name
+inheritance follows RFC 1035 §5.1 (a line that begins with whitespace inherits
+the owner name from the previous record). `$INCLUDE` reads files from disk by
+default — pass `basePath` and/or a custom `includeResolver` to control how
+included filenames are resolved (e.g. for tests or in-memory bundles).
 
 ```ts
 import {ZoneParser} from 'dns2ts';

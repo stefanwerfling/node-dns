@@ -437,4 +437,115 @@ test('zone#errors on missing RRSIG fields', () => {
 test('zone#errors on unknown SvcParamKey mnemonic', () => {
     assert.throws(() => ZoneParser.parse('@ 60 IN SVCB 1 . totallymadeup=foo', { origin: 'example.com.' }));
 });
+test('zone#$INCLUDE merges records from resolved file', () => {
+    const main = dedent(`
+        $ORIGIN example.com.
+        @       3600 IN SOA ns1 admin 1 7200 3600 1209600 3600
+        $INCLUDE hosts.zone
+        mail    3600 IN A   192.0.2.10
+    `);
+    const included = dedent(`
+        www     3600 IN A   192.0.2.1
+        ftp     3600 IN A   192.0.2.2
+    `);
+    const { records, origin } = ZoneParser.parse(main, {
+        includeResolver: (name) => {
+            assert.equal(name, 'hosts.zone');
+            return included;
+        },
+    });
+    assert.equal(origin, 'example.com.');
+    assert.equal(records.length, 4);
+    assert.equal(records[0].name, 'example.com');
+    assert.equal(records[1].name, 'www.example.com');
+    assert.equal(records[2].name, 'ftp.example.com');
+    assert.equal(records[3].name, 'mail.example.com');
+});
+test('zone#$INCLUDE with explicit origin override does not affect parent origin', () => {
+    const main = dedent(`
+        $ORIGIN parent.example.
+        @       60 IN A   192.0.2.1
+        $INCLUDE child.zone child.example.
+        after   60 IN A   192.0.2.2
+    `);
+    const included = 'leaf 60 IN A 192.0.2.99';
+    const { records, origin } = ZoneParser.parse(main, {
+        includeResolver: () => included,
+    });
+    assert.equal(origin, 'parent.example.');
+    assert.equal(records.length, 3);
+    assert.equal(records[0].name, 'parent.example');
+    assert.equal(records[1].name, 'leaf.child.example');
+    assert.equal(records[2].name, 'after.parent.example');
+});
+test('zone#$INCLUDE inner $ORIGIN/$TTL do not leak back to parent', () => {
+    const main = dedent(`
+        $ORIGIN outer.example.
+        $TTL 100
+        @       IN A 192.0.2.1
+        $INCLUDE child.zone
+        after   IN A 192.0.2.2
+    `);
+    const included = dedent(`
+        $ORIGIN inner.example.
+        $TTL 9999
+        leaf  IN A 192.0.2.99
+    `);
+    const { records, origin } = ZoneParser.parse(main, {
+        includeResolver: () => included,
+    });
+    assert.equal(origin, 'outer.example.');
+    assert.equal(records.length, 3);
+    assert.equal(records[0].name, 'outer.example');
+    assert.equal(records[0].ttl, 100);
+    assert.equal(records[1].name, 'leaf.inner.example');
+    assert.equal(records[1].ttl, 9999);
+    assert.equal(records[2].name, 'after.outer.example');
+    assert.equal(records[2].ttl, 100);
+});
+test('zone#$INCLUDE supports nested includes and resets origin per level', () => {
+    const main = dedent(`
+        $ORIGIN top.example.
+        @ 60 IN A 192.0.2.1
+        $INCLUDE level1.zone
+    `);
+    const level1 = dedent(`
+        $INCLUDE level2.zone level2.example.
+        l1 60 IN A 192.0.2.2
+    `);
+    const level2 = 'l2 60 IN A 192.0.2.3';
+    const sources = {
+        'level1.zone': level1,
+        'level2.zone': level2,
+    };
+    const { records } = ZoneParser.parse(main, {
+        includeResolver: (name) => sources[name],
+    });
+    assert.equal(records.length, 3);
+    assert.equal(records[0].name, 'top.example');
+    assert.equal(records[1].name, 'l2.level2.example');
+    assert.equal(records[2].name, 'l1.top.example');
+});
+test('zone#$INCLUDE detects direct cycles', () => {
+    const main = '$INCLUDE self.zone';
+    const self = '$INCLUDE self.zone';
+    assert.throws(() => ZoneParser.parse(main, {
+        includeResolver: () => self,
+    }), /cycle detected/u);
+});
+test('zone#$INCLUDE wraps resolver errors with line number context', () => {
+    const main = dedent(`
+        @ 60 IN A 192.0.2.1
+        $INCLUDE missing.zone
+    `);
+    assert.throws(() => ZoneParser.parse(main, {
+        origin: 'example.com.',
+        includeResolver: () => {
+            throw new Error('not found');
+        },
+    }), /\$INCLUDE failed to load missing\.zone/u);
+});
+test('zone#$INCLUDE without filename errors', () => {
+    assert.throws(() => ZoneParser.parse('$INCLUDE\n'), /\$INCLUDE requires a file name/u);
+});
 //# sourceMappingURL=zoneParser.js.map
