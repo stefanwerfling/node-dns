@@ -14,6 +14,7 @@ import './security.js';
 import './rrl.js';
 import './dnssec.js';
 import './dnsCache.js';
+import './rootHints.js';
 import './serverDoh.js';
 import './serverIntegration.js';
 import './serverTls.js';
