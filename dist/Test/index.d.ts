@@ -15,6 +15,7 @@ import './rrl.js';
 import './dnssec.js';
 import './dnsCache.js';
 import './rootHints.js';
+import './recursiveResolver.js';
 import './serverDoh.js';
 import './serverIntegration.js';
 import './serverTls.js';

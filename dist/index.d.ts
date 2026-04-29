@@ -101,4 +101,6 @@ export { DnsCache } from './Resolver/DnsCache.js';
 export type { DnsCacheEntry, DnsCacheOptions, DnsCacheRcode } from './Resolver/DnsCache.js';
 export { RootHints } from './Resolver/RootHints.js';
 export type { RootServer, RootHintRecords } from './Resolver/RootHints.js';
+export { RCODE, RecursiveResolver } from './Resolver/RecursiveResolver.js';
+export type { RecursiveResolverOptions, RecursiveResolverTransport, ResolveOptions } from './Resolver/RecursiveResolver.js';
 export { DNSOptions, DNS } from './DNS.js';

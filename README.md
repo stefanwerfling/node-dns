@@ -31,6 +31,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - DNS UPDATE (RFC 2136) — `UpdateBuilder` fluent API, `Update.applyToZone` reference engine, `UpdateClient` over UDP/TCP/TLS
 - 0x20 query-name case randomization (RFC 5452) and bailiwick filtering — opt-in spoofing and cache-poisoning defenses
 - Response Rate Limiting (RFC 5358 reflection mitigation) — token-bucket `Rrl` keyed by client prefix and qtype, with configurable slip (TC=1) ratio. Wired into `UDPServer` via `udp.rrl: Rrl`
+- **Recursive resolver** (RFC 1034 §5) — `RecursiveResolver` walks the IANA root chain, caches every observed RRset (TTL-aware positive + negative per RFC 2308), follows CNAME/DNAME, handles glueless out-of-bailiwick delegations, and applies RFC 5452 §6 bailiwick filtering plus §9.2 0x20 case randomization on every step. Bundled `RootHints` for the 13 IANA roots; `DnsCache` exposes a strict-LRU TTL cache with RFC 8767 §6 ceiling (default 1 day). Injectable transport for tests and forwarding setups
 
 <hr>
 
@@ -111,6 +112,11 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   `Dnssec.verifyDs`, `Dnssec.computeKeyTag`, `Dnssec.computeDsDigest`. RFC
   4034/4035 algorithms 8/10/13/14/15, DS digest types 1/2/4. Stateless —
   no resolver, no cache; chain-of-trust walking is the caller's job.
+- **[Recursive resolver](docs/recursive-resolver.md)** — iterative
+  `RecursiveResolver` with `DnsCache` (TTL + RFC 2308 negative caching) and
+  bundled `RootHints`. NS chasing, glueless delegation, CNAME chains,
+  bailiwick filtering, 0x20 case randomization, configurable budgets.
+  Injectable transport for testing and forwarding setups.
 
 ### DNS Client (default UDP)
 

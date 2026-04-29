@@ -84,3 +84,10 @@ example.
   1/2/4. Canonical RDATA for every supported type, automatic wildcard
   label-count reconstruction. Chain-of-trust walking and NSEC/NSEC3
   negative proofs are still the caller's responsibility.
+- **[Recursive resolver](recursive-resolver.md)** — iterative
+  `RecursiveResolver` with TTL-aware `DnsCache` (positive + RFC 2308
+  negative caching) and bundled `RootHints` for the 13 IANA roots. NS
+  chasing, glueless out-of-bailiwick delegation, CNAME/DNAME chains,
+  bailiwick filtering, 0x20 case randomization, configurable per-call
+  budgets. Injectable transport for tests and forwarding setups; UDP-only
+  in v1, no DNSSEC validation yet.

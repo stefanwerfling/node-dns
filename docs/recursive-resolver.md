@@ -1,0 +1,246 @@
+# Recursive resolver
+
+Iterative recursive resolver: starts at the root, follows NS referrals
+downward, follows CNAME chains, caches every observed RRset, and
+returns a recursive-style response to the caller. Uses Node's built-in
+`dgram` for the default UDP transport — no extra dependencies.
+
+The implementation lives in `src/Resolver/`:
+
+- `DnsCache` — TTL-aware RRset cache (positive + negative per RFC 2308)
+- `RootHints` — bundled IANA root servers + cache priming
+- `RecursiveResolver` — the iterative engine
+
+## Quick start
+
+```ts
+import {RecursiveResolver, PacketTypes} from 'dns2ts';
+
+const resolver = new RecursiveResolver();
+
+const response = await resolver.resolve('www.example.com', PacketTypes.A);
+
+console.log(response.header.rcode);     // 0 = NOERROR
+console.log(response.answers);          // [PacketResource …]
+```
+
+The first call walks root → `.com` → `example.com` and caches every
+RRset it sees. Subsequent calls for the same name are cache hits. Calls
+for *related* names (e.g. `mail.example.com`) reuse the delegation chain
+and skip back to the lowest cached delegation point — typically just one
+upstream query for the leaf record.
+
+## Cache (`DnsCache`)
+
+`DnsCache` is keyed by `(name, type, class)`. Lookups are
+case-insensitive and trailing-dot-tolerant (DNS names are
+case-insensitive at the protocol level, RFC 1035 §2.3.3).
+
+```ts
+import {DnsCache, PacketClass, PacketTypes} from 'dns2ts';
+
+const cache = new DnsCache({
+  maxEntries: 50_000,        // LRU cap (default 10 000)
+  maxTtlSeconds: 86_400,     // RFC 8767 ceiling (default 1 day)
+  minTtlSeconds: 5,          // floor for TTL=0 responses (default 0)
+});
+
+cache.get('www.example.com', PacketTypes.A, PacketClass.IN);
+// → DnsCacheEntry | null
+```
+
+Entries carry an `rcode` field that distinguishes positive
+(`'NOERROR'`) from negative (`'NXDOMAIN'`, `'NODATA'`) cache hits — the
+resolver synthesizes the right response shape on hit.
+
+## Root hints (`RootHints`)
+
+The 13 IANA roots are bundled as `RootHints.DEFAULT`. The list rarely
+changes (most recently `b.root-servers.net` IPv4 in 2023); for
+deployments that want to track upstream directly, parse a `named.root`
+file.
+
+```ts
+import {RootHints} from 'dns2ts';
+
+// Use the bundled list (default)
+new RecursiveResolver();
+
+// Parse the canonical hints file at startup
+import {readFileSync} from 'fs';
+const text = readFileSync('/etc/dns/named.root', 'utf8');
+new RecursiveResolver({rootHints: RootHints.fromNamedRoot(text)});
+
+// Custom split-horizon roots (RFC 8806 local roots)
+new RecursiveResolver({rootHints: [
+  {name: 'a.local-root.', ipv4: '10.0.0.1'},
+  {name: 'b.local-root.', ipv4: '10.0.0.2'},
+]});
+```
+
+`RootHints.toRecords` returns ready-to-cache NS + A/AAAA records.
+`RootHints.seedCache(cache, servers?)` is what the resolver constructor
+calls; you can call it again after key roll to refresh.
+
+## Configuration
+
+```ts
+new RecursiveResolver({
+  cache: myCache,             // share a cache across resolvers
+  rootHints: customList,
+  transport: myTransport,     // see "Custom transports" below
+  use0x20: true,              // RFC 5452 §9.2 case randomization (default true)
+
+  // Per-resolution defaults — overridable via resolve(... , {...})
+  timeoutMs: 10_000,          // wallclock budget for one resolve()
+  queryTimeoutMs: 2_000,      // per-upstream-query timeout
+  maxQueries: 50,             // upstream queries before giving up
+  maxCnameDepth: 16,          // CNAME hops before giving up
+
+  port: 53,                   // upstream UDP port
+});
+```
+
+`resolve(qname, qtype, options?)` accepts the same budget keys to
+override per-call:
+
+```ts
+await resolver.resolve('www.example.com', PacketTypes.A, {
+  timeoutMs: 2000,             // tight budget for a stub-style query
+});
+```
+
+## Response shape
+
+The returned `Packet` looks like a recursive-server reply:
+
+| Header field | Value |
+| ------------ | ----- |
+| `qr`         | `1`   |
+| `ra`         | `1`   |
+| `aa`         | `0`   |
+| `rcode`      | `NOERROR` (0), `NXDOMAIN` (3), or `SERVFAIL` (2) |
+| `questions`  | one entry, mirroring the original `(qname, qtype, qclass)` |
+| `answers`    | followed CNAME chain + final RRset |
+| `authorities`| SOA on negative answers (RFC 2308) |
+
+The `RCODE` constant exports the standard codes:
+
+```ts
+import {RCODE} from 'dns2ts';
+
+if (response.header.rcode === RCODE.NXDOMAIN) {
+  /* ... */
+}
+```
+
+## Spoofing defenses
+
+The resolver applies all the off-path mitigations the building blocks
+in `Lib/` provide:
+
+- Random 16-bit transaction ID per query, verified on the response.
+- **Bailiwick filtering** (`Lib/Bailiwick`, RFC 5452 §6) — every
+  response is filtered against the responding server's zone before
+  records reach the cache, so a TLD server can't poison records for a
+  sibling zone. The filter is keyed on the *server's* zone, so the
+  root (zone `.`) can validly ship glue for any name; lower-tier
+  servers are restricted to their own bailiwick.
+- **0x20 case randomization** (`Lib/Random0x20`, RFC 5452 §9.2) — QNAME
+  case is scrambled before sending and the response's question section
+  is checked case-sensitively. Mismatch → reject.
+- Per-`(server, qname, qtype)` loop guard prevents query cycles.
+- `maxQueries` + `timeoutMs` cap the worst-case work for misbehaved
+  zones.
+
+What the resolver does **not** do (yet):
+
+- **DNSSEC validation.** RRSIG/DNSKEY records ride along but aren't
+  validated against a trust anchor. The primitives are already in
+  `Lib/Dnssec`; wiring them into the response path is a follow-up.
+- **TCP fallback on TC=1.** Truncated UDP responses are dropped and the
+  next nameserver is tried. Most query/response traffic fits in 512
+  bytes UDP; this becomes important once large-AXFR-style answers
+  enter the recursive path.
+- **EDNS-buffer negotiation.** No OPT record is sent on outgoing
+  queries.
+- **Stale-while-revalidate / prefetch.** Entries simply expire and are
+  re-resolved.
+
+## Custom transports
+
+The transport is `(serverIp, port, query) => Promise<Packet>`. Useful
+for:
+
+- **Tests** — drive deterministic referral chains without real DNS
+  servers.
+- **Forwarding mode** — wrap an upstream resolver instead of querying
+  the auths directly.
+- **Metrics / tracing** — wrap the default transport to record
+  per-server latency.
+
+```ts
+import {RecursiveResolver, Packet} from 'dns2ts';
+
+const resolver = new RecursiveResolver({
+  transport: async (ip, port, query) => {
+    const start = Date.now();
+    const response = await defaultUdp(ip, port, query);
+    metrics.recordLatency(ip, Date.now() - start);
+    return response;
+  },
+});
+```
+
+## Negative caching (RFC 2308)
+
+NXDOMAIN and NODATA answers are cached with TTL =
+`min(SOA.MINIMUM, SOA.TTL)` — exactly what RFC 2308 §5 specifies. A
+second query for the same name within the negative TTL is served from
+cache, no upstream traffic.
+
+```ts
+await resolver.resolve('absent.example.com', PacketTypes.A);
+// cache now carries an NXDOMAIN entry; the SOA in the authority
+// section's MINIMUM controls how long it lives.
+
+await resolver.resolve('absent.example.com', PacketTypes.A);
+// served from cache, no upstream query.
+```
+
+## Testing your code
+
+For unit tests, share a cache or pass a mock transport:
+
+```ts
+import {DnsCache, RecursiveResolver, PacketClass, PacketResource,
+        PacketTypes, A} from 'dns2ts';
+
+const cache = new DnsCache();
+cache.set('www.example.com', PacketTypes.A, PacketClass.IN, [
+  new PacketResource('www.example.com',
+                     new A('192.0.2.1'),
+                     PacketClass.IN, 60),
+], 60);
+
+const resolver = new RecursiveResolver({cache: cache});
+// Now `await resolver.resolve('www.example.com', PacketTypes.A)`
+// returns the pre-seeded record without any network access.
+```
+
+The resolver's own test suite uses an injectable transport
+(`MockTransport` in `Test/recursiveResolver.ts`) to exercise referral
+chains, NXDOMAIN, NODATA, CNAME chains, glueless delegation, bailiwick
+filtering, 0x20 verification, and budget enforcement — all without
+opening a socket. Worth a look as a template for application-level
+tests.
+
+## Related
+
+- [Security hardening](security-hardening.md) — Bailiwick + 0x20 are
+  primitives the resolver builds on.
+- [DNSSEC](dnssec.md) — the validator primitives the v2 resolver will
+  plug into the response path.
+- [DNS clients](dns-clients.md) — `UDPClient`/`TCPClient` are the
+  forwarding-style alternative when you want to send to an upstream
+  recursor instead of running iterative resolution yourself.
