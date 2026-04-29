@@ -75,5 +75,6 @@ export { NotifyClient } from './Client/NotifyClient.js';
 export { UpdateClient } from './Client/UpdateClient.js';
 export { DohClient } from './Client/DohClient.js';
 export { GoogleClient } from './Client/GoogleClient.js';
+export { DnsCache } from './Resolver/DnsCache.js';
 export { DNS } from './DNS.js';
 //# sourceMappingURL=index.js.map

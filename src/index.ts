@@ -135,5 +135,9 @@ export {DohClient} from './Client/DohClient.js';
 export {GoogleClient} from './Client/GoogleClient.js';
 export type {GoogleDnsResponse, GoogleClientRequest} from './Client/GoogleClient.js';
 
+// Resolver
+export {DnsCache} from './Resolver/DnsCache.js';
+export type {DnsCacheEntry, DnsCacheOptions, DnsCacheRcode} from './Resolver/DnsCache.js';
+
 // DNS
 export {DNSOptions, DNS} from './DNS.js';
