@@ -170,11 +170,50 @@ A `valid: false` result always carries a reason; log it but never expose it
 to untrusted callers in detail (it leaks information about your validation
 state).
 
+## End-to-end on the server side
+
+Server handlers receive the raw post-`preRequest` wire bytes as the 4th arg
+of the `request` event (and `ServerRequestHandler`). Pass them to
+`Tsig.verify` directly — never re-encode the parsed packet for verification.
+The `send` callback also accepts `Buffer`, so a `Tsig.sign(reply, ...).buffer`
+goes back over the wire byte-for-byte.
+
+```ts
+import {DnsServer, Tsig, TsigError, Update, UpdateRcode, PacketOpcode} from 'dns2ts';
+
+const server = new DnsServer({
+  udp: true,
+  handle: (request, send, _client, raw) => {
+    if (request.header.opcode !== PacketOpcode.UPDATE) {
+      // … normal query path …
+      return;
+    }
+
+    const verified = Tsig.verify(request, raw, key);
+
+    if (!verified.valid) {
+      const reply = Update.buildResponse(request, UpdateRcode.NOTAUTH);
+      send(Tsig.sign(reply, key, {error: TsigError.BADSIG}).buffer);
+      return;
+    }
+
+    const rcode = Update.applyToZone(zone, Update.parse(request));
+    const reply = Update.buildResponse(request, rcode);
+    send(Tsig.sign(reply, key, {requestMac: verified.tsig!.mac}).buffer);
+  },
+});
+```
+
+On the client side, `UpdateClient.request(...)` accepts a raw `Buffer`
+(`Tsig.sign(...).buffer`) so the bytes that were signed are exactly the
+bytes that go on the wire.
+
 ## When to use TSIG
 
 - Securing AXFR (zone transfer) — the canonical use; always pair TSIG with
   IP allow-listing for layered defense.
-- Authenticating dynamic updates (RFC 2136), once that's wired up.
+- Authenticating dynamic updates (RFC 2136) — see the end-to-end snippet
+  above for the full handler shape.
 - Internal recursor → authoritative server hops where you control both
   ends and want fast HMAC auth without TLS overhead.
 

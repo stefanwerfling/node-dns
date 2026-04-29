@@ -57,7 +57,7 @@ export class UDPServer {
                     return;
                 }
             }
-            this._socket.emit('request', message, this._response.bind(this, rinfo), emitRinfo);
+            this._socket.emit('request', message, this._response.bind(this, rinfo), emitRinfo, tdata);
         }
         catch (e) {
             this._socket.emit('requestError', e instanceof Error ? e : new Error(String(e)));

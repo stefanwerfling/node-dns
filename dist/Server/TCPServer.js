@@ -65,7 +65,7 @@ export class TCPServer {
                 }
             }
             const message = Packet.parse(data);
-            this._tcpServer.emit('request', message, this._response.bind(this, client), emitClient);
+            this._tcpServer.emit('request', message, this._response.bind(this, client), emitClient, data);
         }
         catch (e) {
             this._tcpServer.emit('requestError', e instanceof Error ? e : new Error(String(e)));
@@ -80,7 +80,7 @@ export class TCPServer {
         }
         const chunks = [];
         for (const m of messages) {
-            const buffer = m.toBuffer();
+            const buffer = Buffer.isBuffer(m) ? m : m.toBuffer();
             const len = Buffer.alloc(2);
             len.writeUInt16BE(buffer.length);
             chunks.push(len, buffer);

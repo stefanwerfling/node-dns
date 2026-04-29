@@ -6,7 +6,7 @@ import { Packet } from '../Packet/Packet.js';
 import { ServerOptions } from './ServerOptions.js';
 import { ServerPreRequest } from './ServerPreRequest.js';
 export type UDPSendable = Packet | Packet[] | Buffer;
-export type UDPRequestListener = (msg: Packet, send: (msg: UDPSendable) => Promise<Buffer | void>, rinfo: dgram.RemoteInfo) => void;
+export type UDPRequestListener = (msg: Packet, send: (msg: UDPSendable) => Promise<Buffer | void>, rinfo: dgram.RemoteInfo, rawRequest: Buffer) => void;
 export declare class UDPServer {
     protected _socket: dgram.Socket;
     protected _preRequest?: ServerPreRequest<dgram.RemoteInfo>;

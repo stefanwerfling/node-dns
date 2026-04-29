@@ -182,7 +182,8 @@ export class DohServer extends EventEmitter {
             // Parse DNS query and Raise event.
             const message = Packet.parse(queryData);
 
-            this.emit('request', message, this._response.bind(this, res), emitClient);
+            // The 4th arg is the raw post-preRequest buffer for TSIG verification.
+            this.emit('request', message, this._response.bind(this, res), emitClient, queryData);
         } catch (e) {
             this.emit('requestError', e);
             res.destroy();

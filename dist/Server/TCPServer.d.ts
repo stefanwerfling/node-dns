@@ -1,11 +1,12 @@
+import { Buffer } from 'buffer';
 import tcp from 'net';
 import { Packet } from '../Packet/Packet.js';
 import { ServerOptions } from './ServerOptions.js';
 import { ServerPreConnection } from './ServerPreConnection.js';
 import { ServerPreRequest } from './ServerPreRequest.js';
-export type TCPSendable = Packet | Packet[];
+export type TCPSendable = Packet | Buffer | Array<Packet | Buffer>;
 export type TCPServerEvents = {
-    request: (msgRequest: Packet, send: (response: TCPSendable) => void, client: tcp.Socket) => void;
+    request: (msgRequest: Packet, send: (response: TCPSendable) => void, client: tcp.Socket, rawRequest: Buffer) => void;
     requestError: (error: Error) => void;
     listening: () => void;
     close: () => void;

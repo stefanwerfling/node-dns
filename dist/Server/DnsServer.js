@@ -17,7 +17,7 @@ export class DnsServer extends EventEmitter {
         if (options.doh) {
             this._doh = new DohServer(options);
             this._doh.on('error', (error) => this.emit('error', error, 'doh'));
-            this._doh.on('request', (request, send, client) => this.emit('request', request, send, client));
+            this._doh.on('request', (request, send, client, raw) => this.emit('request', request, send, client, raw));
             this._doh.on('requestError', (error) => this.emit('requestError', error));
             closePromises.push(new Promise((resolve) => { this._doh.on('close', resolve); }));
             listenPromises.push(new Promise((resolve) => { this._doh.on('listening', resolve); }));
@@ -25,14 +25,14 @@ export class DnsServer extends EventEmitter {
         if (options.tcp) {
             this._tcp = new TCPServer(options);
             this._tcp.on('requestError', (error) => this.emit('error', error, 'tcp'));
-            this._tcp.on('request', (request, send, client) => this.emit('request', request, send, client));
+            this._tcp.on('request', (request, send, client, raw) => this.emit('request', request, send, client, raw));
             closePromises.push(new Promise((resolve) => { this._tcp.once('close', resolve); }));
             listenPromises.push(new Promise((resolve) => { this._tcp.once('listening', resolve); }));
         }
         if (options.tls) {
             this._tls = new TLSServer(options);
             this._tls.on('requestError', (error) => this.emit('error', error, 'tls'));
-            this._tls.on('request', (request, send, client) => this.emit('request', request, send, client));
+            this._tls.on('request', (request, send, client, raw) => this.emit('request', request, send, client, raw));
             closePromises.push(new Promise((resolve) => { this._tls.once('close', resolve); }));
             listenPromises.push(new Promise((resolve) => { this._tls.once('listening', resolve); }));
         }
@@ -40,7 +40,7 @@ export class DnsServer extends EventEmitter {
             const udpOptions = typeof options.udp === 'object' ? options : null;
             this._udp = new UDPServer(udpOptions);
             this._udp.on('requestError', (error) => this.emit('requestError', error));
-            this._udp.on('request', (request, send, rinfo) => this.emit('request', request, send, rinfo));
+            this._udp.on('request', (request, send, rinfo, raw) => this.emit('request', request, send, rinfo, raw));
             this._udp.on('rateLimited', (msg, rinfo, decision) => this.emit('rateLimited', msg, rinfo, decision));
             closePromises.push(new Promise((resolve) => { this._udp.once('close', resolve); }));
             listenPromises.push(new Promise((resolve) => { this._udp.once('listening', resolve); }));

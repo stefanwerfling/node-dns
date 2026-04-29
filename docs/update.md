@@ -50,8 +50,10 @@ const response = await send(builder);
 console.log(response.header.rcode);     // 0 = NOERROR, see UpdateRcode
 ```
 
-The client function accepts either a builder (the common path) or a
-fully-formed `Packet` (when you've TSIG-signed it externally).
+The client function accepts a builder (the common path), a fully-formed
+`Packet`, or a raw `Buffer` — the Buffer overload preserves the exact
+wire bytes, which matters for TSIG-signed messages because the MAC is
+bound to specific bytes (re-encoding may pick different name compression).
 
 ### Prerequisite forms
 
@@ -180,10 +182,14 @@ The two production-grade options:
   `ClientOptionsProtocol.tls` and run the server with
   `tls.options.requestCert: true` plus a CA pin.
 
-A typical handler layers both:
+A typical handler layers both. The 4th arg of the `request` event (and
+`ServerRequestHandler`) carries the post-`preRequest` raw wire bytes —
+exactly what `Packet.parse` saw — so TSIG verification can operate on
+them directly without re-encoding. The `send` callback also accepts a
+`Buffer`, so a `Tsig.sign(...).buffer` reply ships byte-for-byte:
 
 ```ts
-handle: async (request, send, client) => {
+handle: async (request, send, client, raw) => {
   if (request.header.opcode !== PacketOpcode.UPDATE) { /* … */ return; }
 
   // 1. IP allow-list (cheap first-line filter)
@@ -194,25 +200,28 @@ handle: async (request, send, client) => {
   }
 
   // 2. TSIG (the actual security boundary)
-  const tsigCheck = Tsig.verify(request, requestBytes, key);
+  const tsigCheck = Tsig.verify(request, raw, key);
   if (!tsigCheck.valid) {
-    send(Update.buildResponse(request, UpdateRcode.REFUSED));
+    send(Tsig.sign(Update.buildResponse(request, UpdateRcode.NOTAUTH), key,
+                   {error: TsigError.BADSIG}).buffer);
     return;
   }
 
-  // 3. Apply
+  // 3. Apply, then sign the reply (chained from the request MAC)
   const rcode = Update.applyToZone(zone, Update.parse(request));
-  const response = Update.buildResponse(request, rcode);
-  const {buffer} = Tsig.sign(response, key, {requestMac: tsigCheck.tsig!.mac});
-  send(Packet.parse(buffer));
+  const reply = Update.buildResponse(request, rcode);
+  send(Tsig.sign(reply, key, {requestMac: tsigCheck.tsig!.mac}).buffer);
 };
 ```
 
-`requestBytes` is the original wire form; if you use the bundled servers
-the parsed `Packet` is what the handler sees, so for TSIG verification
-you'd want to keep the raw bytes too. (Wire-up of an "always pass raw
-bytes to the handler" path is a future improvement; for now, capture
-them in a `preRequest` hook.)
+On the client side, ship the signed bytes via the `Buffer` overload of
+`UpdateClient.request(...)`:
+
+```ts
+const send = UpdateClient.request({dns: '127.0.0.1', port: 53});
+const signed = Tsig.sign(builder.toPacket(), key);
+const response = await send(signed.buffer);
+```
 
 ## A complete worked example
 
@@ -261,10 +270,6 @@ console.log(UpdateRcode[response.header.rcode]);   // "NOERROR"
 
 ## What's not implemented
 
-- **TSIG-signed UPDATE end-to-end glue**. `Tsig.sign` and `Tsig.verify`
-  exist, and the wire format is right, but the bundled servers don't
-  hand the handler the raw request bytes by default. Until they do, you
-  need a small `preRequest` capture for TSIG verification on UPDATE.
 - **Persistence**. `Update.applyToZone` mutates an in-memory `Zone`. For
   a real authoritative server, you'll want to atomically persist to disk
   or a database after each successful UPDATE.

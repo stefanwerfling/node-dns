@@ -109,7 +109,7 @@ export class DohServer extends EventEmitter {
                 }
             }
             const message = Packet.parse(queryData);
-            this.emit('request', message, this._response.bind(this, res), emitClient);
+            this.emit('request', message, this._response.bind(this, res), emitClient, queryData);
         }
         catch (e) {
             this.emit('requestError', e);

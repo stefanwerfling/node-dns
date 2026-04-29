@@ -459,6 +459,16 @@ and compares MACs in constant time. Pass `skipTimeCheck: true` when replaying
 recorded traffic. `Tsig.sign` accepts `requestMac` to chain responses
 (RFC 8945 §5.3.2.3).
 
+On the server side, the `request` event (and `ServerRequestHandler`) hands the
+handler a 4th argument: the post-`preRequest` raw wire bytes. Pass them to
+`Tsig.verify` directly — re-encoding the parsed packet may produce different
+name compression, breaking MAC verification. The `send` callback accepts a
+`Buffer`, so a `Tsig.sign(reply, key, {requestMac: ...}).buffer` ships
+byte-for-byte. `UpdateClient.request(...)` accepts a raw `Buffer` for the
+same reason on the client side. See
+[docs/tsig.md](docs/tsig.md#end-to-end-on-the-server-side) for the full
+end-to-end UPDATE handler.
+
 ### PROXY protocol support
 
 When the server sits behind a load balancer or proxy (HAProxy, AWS NLB, Envoy,

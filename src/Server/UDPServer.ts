@@ -15,9 +15,20 @@ import {ServerPreRequest} from './ServerPreRequest.js';
 export type UDPSendable = Packet | Packet[] | Buffer;
 
 /**
- * UDP Request Listener
+ * UDP Request Listener.
+ *
+ * `rawRequest` carries the bytes after the optional `preRequest` hook (so it
+ * matches what `Packet.parse` saw). Required by RFC 8945 TSIG verification,
+ * which slices the original wire bytes via `PacketResource.byteStart` rather
+ * than re-encoding the parsed packet — re-encoding can produce different
+ * bytes due to DNS name-compression freedom.
  */
-export type UDPRequestListener = (msg: Packet, send: (msg: UDPSendable) => Promise<Buffer | void>, rinfo: dgram.RemoteInfo) => void;
+export type UDPRequestListener = (
+    msg: Packet,
+    send: (msg: UDPSendable) => Promise<Buffer | void>,
+    rinfo: dgram.RemoteInfo,
+    rawRequest: Buffer
+) => void;
 
 /**
  * UDP Server
@@ -162,7 +173,8 @@ export class UDPServer {
 
             // Response always goes back to the transport peer (e.g. the proxy),
             // while the emitted rinfo reflects the (optionally overridden) client.
-            this._socket.emit('request', message, this._response.bind(this, rinfo), emitRinfo);
+            // The 4th arg is the raw post-preRequest buffer for TSIG verification.
+            this._socket.emit('request', message, this._response.bind(this, rinfo), emitRinfo, tdata);
         } catch (e) {
             this._socket.emit('requestError', e instanceof Error ? e : new Error(String(e)));
         }

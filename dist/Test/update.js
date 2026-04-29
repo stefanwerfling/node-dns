@@ -1,13 +1,17 @@
 import assert from 'assert';
+import dgram from 'dgram';
 import { UpdateClient } from '../Client/UpdateClient.js';
 import { Packet } from '../Packet/Packet.js';
 import { PacketClass } from '../Packet/PacketClass.js';
 import { PacketOpcode } from '../Packet/PacketOpcode.js';
 import { PacketResource } from '../Packet/PacketResource.js';
 import { PacketTypes } from '../Packet/PacketTypes.js';
+import { Tsig } from '../Packet/Tsig.js';
+import { TsigAlgorithm, TsigKey } from '../Packet/TsigKey.js';
 import { Update, UpdateBuilder, UpdateRcode } from '../Packet/Update.js';
 import { A } from '../Packet/Types/A.js';
 import { AAAA } from '../Packet/Types/AAAA.js';
+import { TSIG, TsigError } from '../Packet/Types/TSIG.js';
 import { Zone } from '../Packet/Zone.js';
 import { DnsServer } from '../Server/DnsServer.js';
 import { test } from './test.js';
@@ -183,6 +187,101 @@ test('update#end-to-end UDP via DnsServer + UpdateClient', async () => {
         .add(new PacketResource('extra.example.com', new A('1.1.1.1'), PacketClass.IN, 60)));
     assert.equal(fail.header.rcode, UpdateRcode.YXDOMAIN);
     assert.ok(!zone.records.some((r) => r.name === 'extra.example.com'));
+    await server.close();
+});
+const sendRawUdp = (port, payload) => {
+    return new Promise((resolve, reject) => {
+        const socket = dgram.createSocket('udp4');
+        socket.once('message', (msg) => {
+            socket.close();
+            resolve(msg);
+        });
+        socket.once('error', (err) => {
+            socket.close();
+            reject(err);
+        });
+        socket.send(payload, port, '127.0.0.1', (err) => {
+            if (err) {
+                socket.close();
+                reject(err);
+            }
+        });
+    });
+};
+test('update#TSIG-signed UPDATE end-to-end (server verifies + signs reply)', async () => {
+    const zone = Zone.fromZoneFile(ZONE);
+    const key = new TsigKey('update-key.', TsigAlgorithm.HMAC_SHA256, Buffer.from('shared-secret'));
+    const fudgeNow = 1_700_000_000;
+    const server = new DnsServer({
+        udp: true,
+        handle: (request, send, _client, raw) => {
+            const verified = Tsig.verify(request, raw, key, { now: fudgeNow });
+            const reply = Update.buildResponse(request, verified.valid
+                ? Update.applyToZone(zone, Update.parse(request))
+                : UpdateRcode.NOTAUTH);
+            const signed = verified.valid
+                ? Tsig.sign(reply, key, { timeSigned: fudgeNow, requestMac: verified.tsig.mac })
+                : Tsig.sign(reply, key, { timeSigned: fudgeNow, error: TsigError.BADSIG });
+            send(signed.buffer);
+        },
+    });
+    const addresses = await server.listen();
+    const port = addresses.udp.port;
+    const requestPacket = new UpdateBuilder('example.com')
+        .add(new PacketResource('signed.example.com', new A('192.0.2.77'), PacketClass.IN, 300))
+        .toPacket();
+    requestPacket.header.id = 0xABCD;
+    const signedRequest = Tsig.sign(requestPacket, key, { timeSigned: fudgeNow });
+    const responseRaw = await sendRawUdp(port, signedRequest.buffer);
+    const responsePacket = Packet.parse(responseRaw);
+    assert.equal(responsePacket.header.opcode, PacketOpcode.UPDATE);
+    assert.equal(responsePacket.header.rcode, UpdateRcode.NOERROR);
+    assert.ok(zone.records.some((r) => r.name === 'signed.example.com'));
+    const verifiedResp = Tsig.verify(responsePacket, responseRaw, key, {
+        requestMac: signedRequest.mac,
+        now: fudgeNow
+    });
+    assert.equal(verifiedResp.valid, true, verifiedResp.reason);
+    await server.close();
+});
+test('update#TSIG-signed UPDATE rejects wrong-secret with BADSIG', async () => {
+    const zone = Zone.fromZoneFile(ZONE);
+    const serverKey = new TsigKey('update-key.', TsigAlgorithm.HMAC_SHA256, Buffer.from('correct-secret'));
+    const clientKey = new TsigKey('update-key.', TsigAlgorithm.HMAC_SHA256, Buffer.from('wrong-secret'));
+    const fudgeNow = 1_700_000_000;
+    const server = new DnsServer({
+        udp: true,
+        handle: (request, send, _client, raw) => {
+            const verified = Tsig.verify(request, raw, serverKey, { now: fudgeNow });
+            if (verified.valid) {
+                const reply = Update.buildResponse(request, Update.applyToZone(zone, Update.parse(request)));
+                send(Tsig.sign(reply, serverKey, {
+                    timeSigned: fudgeNow,
+                    requestMac: verified.tsig.mac
+                }).buffer);
+                return;
+            }
+            const reply = Update.buildResponse(request, UpdateRcode.NOTAUTH);
+            send(Tsig.sign(reply, serverKey, {
+                timeSigned: fudgeNow,
+                error: TsigError.BADSIG
+            }).buffer);
+        },
+    });
+    const addresses = await server.listen();
+    const port = addresses.udp.port;
+    const requestPacket = new UpdateBuilder('example.com')
+        .add(new PacketResource('rejected.example.com', new A('192.0.2.99'), PacketClass.IN, 300))
+        .toPacket();
+    requestPacket.header.id = 0xDEAD;
+    const signedRequest = Tsig.sign(requestPacket, clientKey, { timeSigned: fudgeNow });
+    const send = UpdateClient.request({ dns: '127.0.0.1', port: port });
+    const responsePacket = await send(signedRequest.buffer);
+    assert.equal(responsePacket.header.rcode, UpdateRcode.NOTAUTH);
+    assert.ok(!zone.records.some((r) => r.name === 'rejected.example.com'));
+    const lastAdd = responsePacket.additionals[responsePacket.additionals.length - 1];
+    assert.ok(lastAdd && lastAdd.packetType instanceof TSIG);
+    assert.equal(lastAdd.packetType.error, TsigError.BADSIG);
     await server.close();
 });
 //# sourceMappingURL=update.js.map

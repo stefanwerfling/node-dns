@@ -1,3 +1,4 @@
+import {Buffer} from 'buffer';
 import dgram from 'dgram';
 import http from 'http';
 import https from 'https';
@@ -14,11 +15,17 @@ import {ServerPreRequest} from './ServerPreRequest.js';
  * the typical one-shot response, or `Packet[]` for multi-message exchanges
  * such as AXFR (RFC 5936). UDP only honours the first packet; TCP/TLS write
  * all frames before closing the connection.
+ *
+ * `rawRequest` carries the post-preRequest wire bytes, the same bytes
+ * `Packet.parse` saw. Required for TSIG verification (RFC 8945) — the MAC is
+ * bound to specific bytes, and re-encoding the parsed packet may produce a
+ * different name-compression layout that no longer matches.
  */
 export type ServerRequestHandler = (
     request: Packet,
-    send: (response: Packet | Packet[]) => void,
-    client: unknown
+    send: (response: Packet | Buffer | Array<Packet | Buffer>) => void,
+    client: unknown,
+    rawRequest: Buffer
 ) => void;
 
 /**

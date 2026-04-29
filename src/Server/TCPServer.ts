@@ -11,14 +11,28 @@ import {ServerPreRequest} from './ServerPreRequest.js';
  * Packet covers the common one-shot response case; an array is used for
  * AXFR (RFC 5936) and any other multi-message exchange — all elements are
  * written as length-prefixed frames before the connection is closed.
+ *
+ * A pre-encoded `Buffer` (or array of Buffers) bypasses the re-encode and
+ * is the only safe way to deliver a TSIG-signed reply (RFC 8945) — the MAC
+ * is bound to the exact wire bytes produced by `Tsig.sign`.
  */
-export type TCPSendable = Packet | Packet[];
+export type TCPSendable = Packet | Buffer | Array<Packet | Buffer>;
 
 /**
- * TCP Server Events
+ * TCP Server Events.
+ *
+ * `request` carries the raw post-preRequest buffer as the 4th arg so handlers
+ * can verify TSIG signatures against the original wire bytes (RFC 8945 — see
+ * `Tsig.verify`). Re-encoding the parsed packet is not safe here because DNS
+ * name compression has multiple valid representations.
  */
 export type TCPServerEvents = {
-    request: (msgRequest: Packet, send: (response: TCPSendable) => void, client: tcp.Socket) => void;
+    request: (
+        msgRequest: Packet,
+        send: (response: TCPSendable) => void,
+        client: tcp.Socket,
+        rawRequest: Buffer
+    ) => void;
     requestError: (error: Error) => void;
     listening: () => void;
     close: () => void;
@@ -171,7 +185,8 @@ export class TCPServer {
 
             // Response writes go to the real socket (transport peer), while the
             // emitted client reference may be overridden by the pre-request processor.
-            this._tcpServer.emit('request', message, this._response.bind(this, client), emitClient);
+            // The 4th arg is the raw post-preRequest buffer for TSIG verification.
+            this._tcpServer.emit('request', message, this._response.bind(this, client), emitClient, data);
         } catch (e) {
             this._tcpServer.emit('requestError', e instanceof Error ? e : new Error(String(e)));
             client.destroy();
@@ -197,7 +212,7 @@ export class TCPServer {
         const chunks: Buffer[] = [];
 
         for (const m of messages) {
-            const buffer = m.toBuffer();
+            const buffer = Buffer.isBuffer(m) ? m : m.toBuffer();
             const len = Buffer.alloc(2);
             len.writeUInt16BE(buffer.length);
             chunks.push(len, buffer);

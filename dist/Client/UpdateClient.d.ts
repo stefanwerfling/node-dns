@@ -9,7 +9,7 @@ export type UpdateClientOptions = {
     protocol?: ClientOptionsProtocol.udp | ClientOptionsProtocol.tcp | ClientOptionsProtocol.tls;
 };
 export declare class UpdateClient extends AClient {
-    static request(option: UpdateClientOptions): (msg: UpdateBuilder | Packet) => Promise<Packet>;
+    static request(option: UpdateClientOptions): (msg: UpdateBuilder | Packet | Buffer) => Promise<Packet>;
     protected static _sendUdp(host: string, port: number, query: Buffer): Promise<Packet>;
     protected static _sendStream(host: string, port: number, query: Buffer, useTls: boolean): Promise<Packet>;
 }

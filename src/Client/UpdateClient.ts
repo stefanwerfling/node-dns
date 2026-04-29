@@ -31,13 +31,23 @@ export type UpdateClientOptions = {
  */
 export class UpdateClient extends AClient {
 
-    public static request(option: UpdateClientOptions): (msg: UpdateBuilder|Packet) => Promise<Packet> {
+    public static request(option: UpdateClientOptions): (msg: UpdateBuilder|Packet|Buffer) => Promise<Packet> {
         const protocol = option.protocol ?? ClientOptionsProtocol.udp;
         const [host] = option.dns.split(':');
         const port = option.port ?? (protocol === ClientOptionsProtocol.tls ? 853 : 53);
 
-        return (msg: UpdateBuilder|Packet): Promise<Packet> => {
-            const buffer = msg instanceof UpdateBuilder ? msg.toBuffer() : msg.toBuffer();
+        return (msg: UpdateBuilder|Packet|Buffer): Promise<Packet> => {
+            // Buffer pass-through preserves the exact wire bytes — required when
+            // the message is TSIG-signed (RFC 8945 §5.4): re-encoding an
+            // already-signed Packet may produce different compression and
+            // invalidate the MAC.
+            let buffer: Buffer;
+
+            if (Buffer.isBuffer(msg)) {
+                buffer = msg;
+            } else {
+                buffer = msg.toBuffer();
+            }
 
             if (protocol === ClientOptionsProtocol.udp) {
                 return UpdateClient._sendUdp(host, port, buffer);

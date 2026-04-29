@@ -4,7 +4,6 @@ import tcp from 'net';
 import tls from 'tls';
 import { SocketReader } from '../Lib/SocketReader.js';
 import { Packet } from '../Packet/Packet.js';
-import { UpdateBuilder } from '../Packet/Update.js';
 import { AClient } from './AClient.js';
 import { ClientOptionsProtocol } from './ClientOptions.js';
 export class UpdateClient extends AClient {
@@ -13,7 +12,13 @@ export class UpdateClient extends AClient {
         const [host] = option.dns.split(':');
         const port = option.port ?? (protocol === ClientOptionsProtocol.tls ? 853 : 53);
         return (msg) => {
-            const buffer = msg instanceof UpdateBuilder ? msg.toBuffer() : msg.toBuffer();
+            let buffer;
+            if (Buffer.isBuffer(msg)) {
+                buffer = msg;
+            }
+            else {
+                buffer = msg.toBuffer();
+            }
             if (protocol === ClientOptionsProtocol.udp) {
                 return UpdateClient._sendUdp(host, port, buffer);
             }
