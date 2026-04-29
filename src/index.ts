@@ -142,10 +142,17 @@ export {RootHints} from './Resolver/RootHints.js';
 export type {RootServer, RootHintRecords} from './Resolver/RootHints.js';
 export {RCODE, RecursiveResolver} from './Resolver/RecursiveResolver.js';
 export type {
+    DnssecMode,
+    DnssecResolverOptions,
     RecursiveResolverOptions,
     RecursiveResolverTransport,
     ResolveOptions
 } from './Resolver/RecursiveResolver.js';
+export {TrustAnchors} from './Resolver/TrustAnchor.js';
+export type {TrustAnchor} from './Resolver/TrustAnchor.js';
+export {DnssecChain} from './Resolver/DnssecChain.js';
+export type {DnssecValidity, DnssecValidationResult} from './Resolver/DnssecChain.js';
+export {NegativeProof} from './Resolver/NegativeProof.js';
 
 // DNS
 export {DNSOptions, DNS} from './DNS.js';

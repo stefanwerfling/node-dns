@@ -78,5 +78,8 @@ export { GoogleClient } from './Client/GoogleClient.js';
 export { DnsCache } from './Resolver/DnsCache.js';
 export { RootHints } from './Resolver/RootHints.js';
 export { RCODE, RecursiveResolver } from './Resolver/RecursiveResolver.js';
+export { TrustAnchors } from './Resolver/TrustAnchor.js';
+export { DnssecChain } from './Resolver/DnssecChain.js';
+export { NegativeProof } from './Resolver/NegativeProof.js';
 export { DNS } from './DNS.js';
 //# sourceMappingURL=index.js.map

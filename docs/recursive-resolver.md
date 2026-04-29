@@ -155,9 +155,6 @@ in `Lib/` provide:
 
 What the resolver does **not** do (yet):
 
-- **DNSSEC validation.** RRSIG/DNSKEY records ride along but aren't
-  validated against a trust anchor. The primitives are already in
-  `Lib/Dnssec`; wiring them into the response path is a follow-up.
 - **TCP fallback on TC=1.** Truncated UDP responses are dropped and the
   next nameserver is tried. Most query/response traffic fits in 512
   bytes UDP; this becomes important once large-AXFR-style answers
@@ -166,6 +163,78 @@ What the resolver does **not** do (yet):
   queries.
 - **Stale-while-revalidate / prefetch.** Entries simply expire and are
   re-resolved.
+
+## DNSSEC validation (opt-in)
+
+Enable DNSSEC validation by passing `dnssec: true` (uses bundled IANA
+trust anchors and `permissive` mode), or an object for finer control:
+
+```ts
+import {RecursiveResolver, TrustAnchors} from 'dns2ts';
+
+const resolver = new RecursiveResolver({
+  dnssec: {
+    trustAnchors: TrustAnchors.DEFAULT,    // bundled IANA root KSK-2017
+    mode: 'permissive',                    // 'strict' fails closed on insecure
+  },
+});
+
+const r = await resolver.resolve('www.example.com', PacketTypes.A);
+
+// AD bit lives at bit 1 of the legacy 3-bit Z field (RFC 4035 §3.2):
+//   header.z == 0b010 → AD set
+//   header.z == 0b000 → AD clear
+const ad = (r.header.z & 0b010) >> 1;
+```
+
+**How it works:**
+
+1. After a successful authoritative answer, `_dnssecFinalize` is called
+   with the **raw** response (RRSIG records intact — the built response
+   has them filtered out).
+2. `_authenticateZone` walks the chain top-down from a configured
+   trust anchor (default: IANA root KSK-2017) down to the answer's
+   signing zone:
+   - Fetch DNSKEY of each zone, validate against parent's DS via
+     `DnssecChain.validateDnskeyRrset`
+   - Fetch DS of next-deeper zone *from the parent* (RFC 4035 §5.2 —
+     `_queryDsAtParent` bypasses normal NS-chasing)
+   - Validate DS RRset against current zone's DNSKEYs
+3. Validate every RRset in the answer against the authenticated
+   DNSKEYs via `DnssecChain.validateRrset`.
+4. For NXDOMAIN/NODATA: validate the NSEC or NSEC3 proof via
+   `NegativeProof.verifyNxdomainNsec`/`verifyNxdomainNsec3` etc.
+5. Result:
+   - `secure` → set AD bit
+   - `bogus` → return SERVFAIL (RFC 4035 §5.5)
+   - `insecure` → pass through with AD=0 (or SERVFAIL in strict mode)
+   - `indeterminate` (no anchor covers zone) → pass through with AD=0
+
+**Custom trust anchors:**
+
+```ts
+import {TrustAnchors, DS} from 'dns2ts';
+
+// e.g., a private island root running its own DNSSEC
+const anchor = TrustAnchors.of('local-root.', new DS(/* keyTag */ 12345,
+                                                       /* algo */ 8,
+                                                       /* digestType */ 2,
+                                                       'aabbcc...'));
+
+new RecursiveResolver({dnssec: {trustAnchors: [anchor]}});
+```
+
+**Strict mode** (no insecure passthrough):
+
+```ts
+new RecursiveResolver({dnssec: {mode: 'strict'}});
+// Insecure delegations (no DS at parent) → SERVFAIL
+```
+
+**The exposed primitives** (`TrustAnchors`, `DnssecChain`,
+`NegativeProof`) are also useful standalone — e.g. validating a
+recorded response in a test, or composing proofs without running an
+iterative resolver.
 
 ## Custom transports
 

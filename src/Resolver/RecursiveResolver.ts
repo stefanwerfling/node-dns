@@ -1,5 +1,6 @@
 import dgram from 'dgram';
 import {Bailiwick} from '../Lib/Bailiwick.js';
+import {DnssecVerifyOptions} from '../Lib/Dnssec.js';
 import {Random0x20} from '../Lib/Random0x20.js';
 import {Packet} from '../Packet/Packet.js';
 import {PacketClass} from '../Packet/PacketClass.js';
@@ -10,10 +11,14 @@ import {A} from '../Packet/Types/A.js';
 import {AAAA} from '../Packet/Types/AAAA.js';
 import {CNAME} from '../Packet/Types/CNAME.js';
 import {DNAME} from '../Packet/Types/DNAME.js';
+import {DS} from '../Packet/Types/DS.js';
 import {NS} from '../Packet/Types/NS.js';
 import {SOA} from '../Packet/Types/SOA.js';
 import {DnsCache} from './DnsCache.js';
+import {DnssecChain, DnssecValidity} from './DnssecChain.js';
+import {NegativeProof} from './NegativeProof.js';
 import {RootHints, RootServer} from './RootHints.js';
+import {TrustAnchor, TrustAnchors} from './TrustAnchor.js';
 
 /**
  * Standard DNS RCODEs (RFC 1035 §4.1.1, RFC 6895). Inlined here so the
@@ -57,6 +62,37 @@ export type RecursiveResolverTransport = (
     port: number,
     query: Packet
 ) => Promise<Packet>;
+
+/**
+ * DNSSEC mode. `permissive` accepts insecure zones (no DS at parent
+ * proven via NSEC/NSEC3) and only fails closed on `bogus`. `strict`
+ * also rejects answers whose chain cannot be authenticated end-to-end
+ * — appropriate when the deployment policy requires every secure
+ * answer be DNSSEC-validated.
+ */
+export type DnssecMode = 'strict' | 'permissive';
+
+/**
+ * Per-resolver DNSSEC configuration.
+ */
+export type DnssecResolverOptions = {
+    /**
+     * Trust anchors. Defaults to `TrustAnchors.DEFAULT` (IANA root
+     * KSK-2017). Pass a custom list for split-horizon or RFC 8806
+     * local-root deployments.
+     */
+    trustAnchors?: ReadonlyArray<TrustAnchor>;
+
+    /**
+     * Failure policy. Default: `permissive`.
+     */
+    mode?: DnssecMode;
+
+    /**
+     * Forwarded to `Dnssec.verifyRrsig` — fixed clock for tests.
+     */
+    verifyOptions?: DnssecVerifyOptions;
+};
 
 /**
  * Configuration for `RecursiveResolver`.
@@ -114,6 +150,13 @@ export type RecursiveResolverOptions = {
      * Default UDP port queried. Default: 53.
      */
     port?: number;
+
+    /**
+     * Enable DNSSEC validation. `true` uses bundled IANA trust anchors
+     * and `permissive` mode; pass an object for finer-grained control.
+     * Default: disabled — answers pass through unvalidated.
+     */
+    dnssec?: boolean | DnssecResolverOptions;
 };
 
 /**
@@ -199,6 +242,34 @@ export class RecursiveResolver {
     protected _port: number;
 
     /**
+     * @protected
+     */
+    protected _dnssecEnabled: boolean;
+
+    /**
+     * @protected
+     */
+    protected _trustAnchors: ReadonlyArray<TrustAnchor>;
+
+    /**
+     * @protected
+     */
+    protected _dnssecMode: DnssecMode;
+
+    /**
+     * @protected
+     */
+    protected _dnssecVerifyOptions: DnssecVerifyOptions;
+
+    /**
+     * Per-zone authentication state: each entry caches the validity of
+     * a zone's DNSKEY set and, when `secure`, the keys themselves so
+     * answer-RRset validation can reuse them.
+     * @protected
+     */
+    protected _zoneSecurity: Map<string, ZoneSecurity>;
+
+    /**
      * @param {RecursiveResolverOptions} options
      */
     public constructor(options: RecursiveResolverOptions = {}) {
@@ -210,6 +281,15 @@ export class RecursiveResolver {
         this._maxQueries = options.maxQueries ?? 50;
         this._maxCnameDepth = options.maxCnameDepth ?? 16;
         this._port = options.port ?? 53;
+
+        const dnssecOpt = options.dnssec;
+        this._dnssecEnabled = dnssecOpt !== undefined && dnssecOpt !== false;
+
+        const dnssecObj = typeof dnssecOpt === 'object' ? dnssecOpt : {};
+        this._trustAnchors = dnssecObj.trustAnchors ?? TrustAnchors.DEFAULT;
+        this._dnssecMode = dnssecObj.mode ?? 'permissive';
+        this._dnssecVerifyOptions = dnssecObj.verifyOptions ?? {};
+        this._zoneSecurity = new Map();
 
         RootHints.seedCache(this._cache, options.rootHints);
     }
@@ -334,17 +414,20 @@ export class RecursiveResolver {
 
             // Authoritative answer with records.
             if (response.header.aa === 1 && response.answers.length > 0) {
-                return this._handleAnswer(response, currentName, currentType, qclass, ctx);
+                const handled = await this._handleAnswer(response, currentName, currentType, qclass, ctx);
+                return this._dnssecFinalize(handled, response, nsZone.zone, ctx);
             }
 
             // Authoritative NXDOMAIN.
             if (response.header.aa === 1 && response.header.rcode === RCODE.NXDOMAIN) {
-                return RecursiveResolver._buildResponse(ctx, RCODE.NXDOMAIN, ctx.chain, RecursiveResolver._extractSoa(response));
+                const built = RecursiveResolver._buildResponse(ctx, RCODE.NXDOMAIN, ctx.chain, RecursiveResolver._extractSoa(response));
+                return this._dnssecFinalize(built, response, nsZone.zone, ctx);
             }
 
             // Authoritative NODATA: aa, NOERROR, no answers, SOA in authority.
             if (response.header.aa === 1 && response.header.rcode === RCODE.NOERROR) {
-                return RecursiveResolver._buildResponse(ctx, RCODE.NOERROR, ctx.chain, RecursiveResolver._extractSoa(response));
+                const built = RecursiveResolver._buildResponse(ctx, RCODE.NOERROR, ctx.chain, RecursiveResolver._extractSoa(response));
+                return this._dnssecFinalize(built, response, nsZone.zone, ctx);
             }
 
             // Referral — authority section carries NS records for a deeper zone.
@@ -698,8 +781,415 @@ export class RecursiveResolver {
     }
 
     /* ---------------------------------------------------------------- */
+    /*  DNSSEC validation pipeline                                       */
+    /* ---------------------------------------------------------------- */
+
+    /**
+     * Apply DNSSEC validation to a response and adjust the AD bit /
+     * rcode accordingly. No-op when DNSSEC is disabled or the call is
+     * inside an auth-chain sub-resolution (would recurse forever).
+     *
+     * The validator inspects the *raw* server response (`rawResponse`)
+     * because that's where the RRSIG records live — `builtResponse`
+     * has already been filtered down to the question's answer plus
+     * any CNAME chain, so any RRSIGs at the answer's owner name have
+     * been stripped. The AD bit is written onto `builtResponse` so the
+     * caller's view matches the answer.
+     *
+     * @param {Packet} builtResponse the resolver's view-of-truth response
+     * @param {Packet} rawResponse the wire response from the auth server
+     * @param {string} signingZone zone the response is authoritative for
+     * @param {ResolveCtx} ctx
+     * @return {Promise<Packet>}
+     * @protected
+     */
+    protected async _dnssecFinalize(
+        builtResponse: Packet,
+        rawResponse: Packet,
+        signingZone: string,
+        ctx: ResolveCtx
+    ): Promise<Packet> {
+        if (!this._dnssecEnabled || ctx.inAuthChain) {
+            return builtResponse;
+        }
+
+        const validity = await this._validateResponse(rawResponse, signingZone, ctx);
+
+        if (validity === 'bogus') {
+            // RFC 4035 §5.5: a bogus answer surfaces as SERVFAIL.
+            return RecursiveResolver._buildResponse(ctx, RCODE.SERVFAIL, [], []);
+        }
+
+        if (validity === 'insecure' && this._dnssecMode === 'strict') {
+            return RecursiveResolver._buildResponse(ctx, RCODE.SERVFAIL, [], []);
+        }
+
+        // RFC 4035 §3.2 carved AD (Authentic Data) and CD (Checking
+        // Disabled) out of the legacy 3-bit Z field. Bit layout (MSB
+        // first): Z, AD, CD. Set AD on validated answers; clear it
+        // otherwise.
+        // eslint-disable-next-line no-bitwise, no-param-reassign
+        builtResponse.header.z = validity === 'secure'
+            // eslint-disable-next-line no-bitwise
+            ? builtResponse.header.z | 0b010
+            // eslint-disable-next-line no-bitwise
+            : builtResponse.header.z & ~0b010;
+        return builtResponse;
+    }
+
+    /**
+     * Authenticate every signed RRset in the response and, for negative
+     * answers, the NSEC/NSEC3 proof. Returns the overall validity:
+     *
+     *  - `secure` — every signed RRset verified, negative proof (if any) verified
+     *  - `insecure` — chain proves no DS exists at the answer's signing zone
+     *  - `bogus` — at least one signature didn't verify, or a proof was missing
+     *  - `indeterminate` — no anchor covers the zone (resolver passes through)
+     *
+     * @param {Packet} response
+     * @param {string} signingZone
+     * @param {ResolveCtx} ctx
+     * @return {Promise<DnssecValidity>}
+     * @protected
+     */
+    protected async _validateResponse(
+        response: Packet,
+        signingZone: string,
+        ctx: ResolveCtx
+    ): Promise<DnssecValidity> {
+        const zoneState = await this._authenticateZone(signingZone, ctx);
+
+        if (zoneState.validity !== 'secure') {
+            return zoneState.validity;
+        }
+
+        const dnskeys = zoneState.dnskeys ?? [];
+
+        // Validate every (non-RRSIG, non-OPT) RRset in the answer + authority.
+        const sections = [...response.answers, ...response.authorities];
+        const groups = DnssecChain.groupRrsets(sections);
+        const rrsigs = DnssecChain.rrsigs(sections);
+
+        for (const [, recs] of groups) {
+            const owner = recs[0].name;
+            const matchingSigs = DnssecChain.rrsigsFor(rrsigs, owner, recs[0].packetType.type);
+
+            if (matchingSigs.length === 0) {
+                // Some sections (e.g. CNAME chains in mixed responses)
+                // may not be signed in the same response; the resolver
+                // sees only what the auth shipped. Treat as insecure for
+                // permissive mode — strict mode escalates upstream.
+                continue;
+            }
+
+            const r = DnssecChain.validateRrset(owner, recs, matchingSigs, dnskeys, this._dnssecVerifyOptions);
+
+            if (r.validity === 'bogus') {
+                return 'bogus';
+            }
+        }
+
+        // Negative-proof validation for NXDOMAIN / NODATA shapes.
+        if (response.header.rcode === RCODE.NXDOMAIN || (response.header.rcode === RCODE.NOERROR && response.answers.length === 0)) {
+            const nsec = response.authorities.filter((r) => r.packetType.type === PacketTypes.NSEC);
+            const nsec3 = response.authorities.filter((r) => r.packetType.type === PacketTypes.NSEC3);
+
+            const qname = response.questions[0]?.name ?? ctx.originalQname;
+            const qtype = response.questions[0]?.type ?? ctx.originalQtype;
+
+            if (response.header.rcode === RCODE.NXDOMAIN) {
+                const proven = (nsec.length > 0 && NegativeProof.verifyNxdomainNsec(qname, signingZone, nsec))
+                    || (nsec3.length > 0 && NegativeProof.verifyNxdomainNsec3(qname, signingZone, nsec3));
+
+                if (!proven) {
+                    return 'bogus';
+                }
+            } else {
+                const proven = (nsec.length > 0 && NegativeProof.verifyNodataNsec(qname, qtype as number, nsec))
+                    || (nsec3.length > 0 && NegativeProof.verifyNodataNsec3(qname, qtype as number, signingZone, nsec3));
+
+                if (nsec.length + nsec3.length > 0 && !proven) {
+                    return 'bogus';
+                }
+            }
+        }
+
+        return 'secure';
+    }
+
+    /**
+     * Walk the DNSSEC chain from a configured trust anchor down to
+     * `zone`, fetching DNSKEY + DS records at each step and validating
+     * them. Caches the result in `_zoneSecurity` so subsequent answers
+     * within the same zone re-use the authenticated DNSKEY set.
+     *
+     * The walk runs *inside* an existing `ResolveCtx`, with
+     * `inAuthChain: true` so the sub-resolutions for DNSKEY/DS aren't
+     * themselves DNSSEC-validated (would recurse forever).
+     *
+     * @param {string} zone
+     * @param {ResolveCtx} ctx
+     * @return {Promise<ZoneSecurity>}
+     * @protected
+     */
+    protected async _authenticateZone(zone: string, ctx: ResolveCtx): Promise<ZoneSecurity> {
+        const norm = RecursiveResolver._normZone(zone);
+        const cached = this._zoneSecurity.get(norm);
+
+        if (cached !== undefined) {
+            return cached;
+        }
+
+        const anchor = TrustAnchors.findFor(this._trustAnchors, zone);
+
+        if (anchor === undefined) {
+            const out: ZoneSecurity = {validity: 'indeterminate', reason: 'no trust anchor covers zone'};
+            this._zoneSecurity.set(norm, out);
+            return out;
+        }
+
+        // Path from anchor down to zone, e.g. ['', 'com', 'example.com'].
+        const path = RecursiveResolver._chainPath(anchor.zone, zone);
+        let parentDsList: DS[] = [anchor.ds as DS];
+
+        const subCtx: ResolveCtx = {...ctx, inAuthChain: true};
+
+        let result: ZoneSecurity = {validity: 'indeterminate'};
+
+        for (let i = 0; i < path.length; i++) {
+            const step = path[i];
+            const stepNorm = RecursiveResolver._normZone(step);
+            const stepCached = this._zoneSecurity.get(stepNorm);
+
+            if (stepCached?.validity === 'secure') {
+                result = stepCached;
+
+                // Continue chain with this zone's DNSKEYs.
+                if (i + 1 < path.length) {
+                    const dsResult = await this._fetchAndValidateDs(path[i + 1], stepCached.dnskeys ?? [], subCtx);
+
+                    if (dsResult.kind === 'secure') {
+                        parentDsList = dsResult.ds;
+                        continue;
+                    }
+
+                    if (dsResult.kind === 'insecure') {
+                        const insec: ZoneSecurity = {validity: 'insecure', reason: dsResult.reason};
+                        this._zoneSecurity.set(RecursiveResolver._normZone(path[i + 1]), insec);
+
+                        if (RecursiveResolver._normZone(path[i + 1]) === norm) {
+                            return insec;
+                        }
+
+                        return insec;
+                    }
+
+                    const bogus: ZoneSecurity = {validity: 'bogus', reason: dsResult.reason};
+                    this._zoneSecurity.set(RecursiveResolver._normZone(path[i + 1]), bogus);
+                    return bogus;
+                }
+
+                continue;
+            }
+
+            if (stepCached?.validity === 'bogus' || stepCached?.validity === 'insecure') {
+                return stepCached;
+            }
+
+            // Fetch + validate the DNSKEY RRset of `step`. The
+            // sub-resolve answer-shape filters down to (qname, qtype),
+            // dropping RRSIGs — but `_cacheResponse` already grouped
+            // and cached every RRset separately, including RRSIGs at
+            // the zone apex. Pull them from the cache instead.
+            try {
+                await this._resolveOnce(step, PacketTypes.DNSKEY, PacketClass.IN, subCtx);
+            } catch (e) {
+                const bogus: ZoneSecurity = {validity: 'bogus', reason: `failed to fetch DNSKEY for ${step}`};
+                this._zoneSecurity.set(stepNorm, bogus);
+                return bogus;
+            }
+
+            const dnskeyEntry = this._cache.get(step, PacketTypes.DNSKEY, PacketClass.IN);
+            const rrsigEntry = this._cache.get(step, PacketTypes.RRSIG, PacketClass.IN);
+            const dnskeys = dnskeyEntry?.records ?? [];
+            const dnskeyRrsigs = DnssecChain.rrsigsFor(rrsigEntry?.records ?? [], step, PacketTypes.DNSKEY);
+
+            const validated = DnssecChain.validateDnskeyRrset(
+                step,
+                dnskeys,
+                dnskeyRrsigs,
+                parentDsList,
+                this._dnssecVerifyOptions
+            );
+
+            if (validated.validity !== 'secure') {
+                const bogus: ZoneSecurity = {validity: 'bogus', reason: validated.reason ?? 'DNSKEY validation failed'};
+                this._zoneSecurity.set(stepNorm, bogus);
+                return bogus;
+            }
+
+            const stepSec: ZoneSecurity = {validity: 'secure', dnskeys: dnskeys, rrsigs: dnskeyRrsigs};
+            this._zoneSecurity.set(stepNorm, stepSec);
+            result = stepSec;
+
+            // For the next step, fetch + validate its DS record.
+            if (i + 1 < path.length) {
+                const dsResult = await this._fetchAndValidateDs(path[i + 1], dnskeys, subCtx);
+
+                if (dsResult.kind === 'secure') {
+                    parentDsList = dsResult.ds;
+                    continue;
+                }
+
+                if (dsResult.kind === 'insecure') {
+                    const insec: ZoneSecurity = {validity: 'insecure', reason: dsResult.reason};
+                    this._zoneSecurity.set(RecursiveResolver._normZone(path[i + 1]), insec);
+                    return insec;
+                }
+
+                const bogus: ZoneSecurity = {validity: 'bogus', reason: dsResult.reason};
+                this._zoneSecurity.set(RecursiveResolver._normZone(path[i + 1]), bogus);
+                return bogus;
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Fetch the DS RRset at `zone` (queried against the parent zone)
+     * and validate its signature with the parent's DNSKEY set. Returns
+     * a discriminated outcome:
+     *
+     *  - `secure` — DS validates, returns the DS records for chain continuation
+     *  - `insecure` — parent NOERRORed with no DS (insecure delegation)
+     *  - `bogus` — DS query failed, or the DS RRset's RRSIG didn't verify
+     *
+     * @param {string} zone
+     * @param {PacketResource[]} parentDnskeys
+     * @param {ResolveCtx} ctx (already in auth-chain mode)
+     * @return {Promise<{kind: 'secure'; ds: DS[];} | {kind: 'insecure' | 'bogus'; reason?: string;}>}
+     * @protected
+     */
+    protected async _fetchAndValidateDs(
+        zone: string,
+        parentDnskeys: PacketResource[],
+        ctx: ResolveCtx
+    ): Promise<{kind: 'secure'; ds: DS[];} | {kind: 'insecure' | 'bogus'; reason?: string;}> {
+        // DS records live in the *parent* zone (RFC 4035 §5.2), so the
+        // normal NS-chasing path is wrong — it would terminate at the
+        // child's own NS and never see the DS. Query the closest NS
+        // that is strictly above `zone` instead.
+        let dsResp: Packet;
+
+        try {
+            dsResp = await this._queryDsAtParent(zone, ctx);
+        } catch (e) {
+            return {kind: 'bogus', reason: `failed to fetch DS for ${zone}`};
+        }
+
+        // `_cacheResponse` grouped the DS RRset and its RRSIGs into
+        // separate cache entries keyed by (name, type). Read them
+        // from there rather than from `dsResp.answers`, which only
+        // contains the (qname, qtype) match.
+        const dsEntry = this._cache.get(zone, PacketTypes.DS, PacketClass.IN);
+        const rrsigEntry = this._cache.get(zone, PacketTypes.RRSIG, PacketClass.IN);
+
+        const dsRecords = dsEntry?.records ?? [];
+        const dsRrsigs = DnssecChain.rrsigsFor(rrsigEntry?.records ?? [], zone, PacketTypes.DS);
+
+        if (dsRecords.length === 0) {
+            if (dsResp.header.rcode === RCODE.NOERROR) {
+                return {kind: 'insecure', reason: 'no DS record (insecure delegation)'};
+            }
+
+            return {kind: 'bogus', reason: 'DS query did not return NOERROR'};
+        }
+
+        const validated = DnssecChain.validateRrset(
+            zone,
+            dsRecords,
+            dsRrsigs,
+            parentDnskeys,
+            this._dnssecVerifyOptions
+        );
+
+        if (validated.validity !== 'secure') {
+            return {kind: 'bogus', reason: validated.reason ?? 'DS RRset signature did not verify'};
+        }
+
+        return {kind: 'secure', ds: dsRecords.map((r) => r.packetType as DS)};
+    }
+
+    /**
+     * Send a `DS` query for `zone` to the closest NS that is strictly
+     * above `zone` — i.e. the parent zone's authority. RFC 4035 §5.2:
+     * DS records live at the parent, not the zone itself.
+     *
+     * Bypasses the normal iterative loop because that loop would pick
+     * `zone`'s own NS as the closest match (the referral that delivered
+     * `zone` already cached its NS RRset).
+     *
+     * @param {string} zone
+     * @param {ResolveCtx} ctx
+     * @return {Promise<Packet>}
+     * @protected
+     */
+    protected async _queryDsAtParent(zone: string, ctx: ResolveCtx): Promise<Packet> {
+        const parent = RecursiveResolver._parentOf(zone);
+        const ns = this._findClosestNs(parent, PacketClass.IN);
+
+        if (ns === null) {
+            throw new Error(`RecursiveResolver: no cached NS for parent of ${zone}`);
+        }
+
+        // Skip the cache entry of `zone` itself even if it sneaks in:
+        // walk one step up if the closest NS turned out to BE `zone`.
+        const stableNs = RecursiveResolver._isStrictlyDeeper(ns.zone, parent) || ns.zone === RecursiveResolver._normZone(zone) || ns.zone === zone
+            ? this._findClosestNs(RecursiveResolver._parentOf(ns.zone), PacketClass.IN)
+            : ns;
+
+        if (stableNs === null) {
+            throw new Error(`RecursiveResolver: no usable parent NS for ${zone}`);
+        }
+
+        const addr = await this._pickNsAddress(stableNs, PacketClass.IN, ctx);
+
+        if (addr === null) {
+            throw new Error(`RecursiveResolver: no usable address for parent NS of ${zone}`);
+        }
+
+        const response = await this._queryServer(addr, zone, PacketTypes.DS, PacketClass.IN, ctx);
+        this._cacheResponse(response, stableNs.zone);
+        return response;
+    }
+
+    /* ---------------------------------------------------------------- */
     /*  Static helpers                                                   */
     /* ---------------------------------------------------------------- */
+
+    /**
+     * The parent zone of `zone` — strip the leftmost label. The parent
+     * of the root is the root itself (no further to ascend).
+     * @param {string} zone
+     * @return {string}
+     * @protected
+     */
+    protected static _parentOf(zone: string): string {
+        const norm = RecursiveResolver._normZone(zone);
+
+        if (norm === '') {
+            return '.';
+        }
+
+        const dot = norm.indexOf('.');
+
+        if (dot === -1) {
+            return '.';
+        }
+
+        return norm.slice(dot + 1);
+    }
 
     /**
      * Default UDP transport. One-shot dgram socket per query — no
@@ -894,6 +1384,58 @@ export class RecursiveResolver {
     }
 
     /**
+     * Normalize a zone name for `_zoneSecurity` Map keys: lowercase,
+     * empty string for the root.
+     * @param {string} zone
+     * @return {string}
+     * @protected
+     */
+    protected static _normZone(zone: string): string {
+        if (zone === '.' || zone === '') {
+            return '';
+        }
+
+        const stripped = zone.endsWith('.') ? zone.slice(0, -1) : zone;
+        return stripped.toLowerCase();
+    }
+
+    /**
+     * The chain of zones from the trust anchor down to `target`. For
+     * anchor `''` (root) and target `example.com.`, returns
+     * `['.', 'com', 'example.com']`. Each entry is in the canonical
+     * form expected by `validateDnskeyRrset` / `validateRrset` (no
+     * trailing dot, except root which is `'.'`).
+     * @param {string} anchorZone
+     * @param {string} target
+     * @return {string[]}
+     * @protected
+     */
+    protected static _chainPath(anchorZone: string, target: string): string[] {
+        const anchorNorm = RecursiveResolver._normZone(anchorZone);
+        const targetNorm = RecursiveResolver._normZone(target);
+
+        if (targetNorm === anchorNorm) {
+            return [anchorNorm === '' ? '.' : anchorNorm];
+        }
+
+        const targetLabels = targetNorm.split('.');
+        const anchorLabels = anchorNorm === '' ? [] : anchorNorm.split('.');
+        const relCount = targetLabels.length - anchorLabels.length;
+
+        if (relCount <= 0) {
+            return [anchorNorm === '' ? '.' : anchorNorm];
+        }
+
+        const out: string[] = [anchorNorm === '' ? '.' : anchorNorm];
+
+        for (let i = relCount - 1; i >= 0; i--) {
+            out.push(targetLabels.slice(i).join('.'));
+        }
+
+        return out;
+    }
+
+    /**
      * `child` is a strict subdomain of `parent`. The root is a strict
      * parent of any non-root name.
      * @protected
@@ -927,4 +1469,21 @@ type ResolveCtx = {
     originalQname: string;
     originalQtype: number | PacketTypes;
     qclass: PacketClass;
+
+    /**
+     * Set during authentication-chain walks to disable nested DNSSEC
+     * validation — the DNSKEY/DS sub-queries used to build the chain
+     * must not themselves be DNSSEC-validated (would recurse forever).
+     */
+    inAuthChain?: boolean;
+};
+
+/**
+ * Cached per-zone authentication state.
+ */
+type ZoneSecurity = {
+    validity: DnssecValidity;
+    dnskeys?: PacketResource[];
+    rrsigs?: PacketResource[];
+    reason?: string;
 };

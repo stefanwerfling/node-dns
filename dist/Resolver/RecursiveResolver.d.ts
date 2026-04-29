@@ -1,9 +1,13 @@
+import { DnssecVerifyOptions } from '../Lib/Dnssec.js';
 import { Packet } from '../Packet/Packet.js';
 import { PacketClass } from '../Packet/PacketClass.js';
 import { PacketResource } from '../Packet/PacketResource.js';
 import { PacketTypes } from '../Packet/PacketTypes.js';
+import { DS } from '../Packet/Types/DS.js';
 import { DnsCache } from './DnsCache.js';
+import { DnssecValidity } from './DnssecChain.js';
 import { RootServer } from './RootHints.js';
+import { TrustAnchor } from './TrustAnchor.js';
 export declare const RCODE: {
     readonly NOERROR: 0;
     readonly FORMERR: 1;
@@ -13,6 +17,12 @@ export declare const RCODE: {
     readonly REFUSED: 5;
 };
 export type RecursiveResolverTransport = (serverIp: string, port: number, query: Packet) => Promise<Packet>;
+export type DnssecMode = 'strict' | 'permissive';
+export type DnssecResolverOptions = {
+    trustAnchors?: ReadonlyArray<TrustAnchor>;
+    mode?: DnssecMode;
+    verifyOptions?: DnssecVerifyOptions;
+};
 export type RecursiveResolverOptions = {
     cache?: DnsCache;
     rootHints?: ReadonlyArray<RootServer>;
@@ -23,6 +33,7 @@ export type RecursiveResolverOptions = {
     maxQueries?: number;
     maxCnameDepth?: number;
     port?: number;
+    dnssec?: boolean | DnssecResolverOptions;
 };
 export type ResolveOptions = {
     qclass?: PacketClass;
@@ -40,6 +51,11 @@ export declare class RecursiveResolver {
     protected _maxQueries: number;
     protected _maxCnameDepth: number;
     protected _port: number;
+    protected _dnssecEnabled: boolean;
+    protected _trustAnchors: ReadonlyArray<TrustAnchor>;
+    protected _dnssecMode: DnssecMode;
+    protected _dnssecVerifyOptions: DnssecVerifyOptions;
+    protected _zoneSecurity: Map<string, ZoneSecurity>;
     constructor(options?: RecursiveResolverOptions);
     cache(): DnsCache;
     resolve(qname: string, qtype: number | PacketTypes, options?: ResolveOptions): Promise<Packet>;
@@ -58,6 +74,18 @@ export declare class RecursiveResolver {
     protected _followCnameFromCache(qname: string, qtype: number | PacketTypes, qclass: PacketClass, ctx: ResolveCtx, cnameRecords: PacketResource[]): Promise<Packet>;
     protected _referralZone(response: Packet, currentZone: string): string | null;
     protected _guardBudget(ctx: ResolveCtx): void;
+    protected _dnssecFinalize(builtResponse: Packet, rawResponse: Packet, signingZone: string, ctx: ResolveCtx): Promise<Packet>;
+    protected _validateResponse(response: Packet, signingZone: string, ctx: ResolveCtx): Promise<DnssecValidity>;
+    protected _authenticateZone(zone: string, ctx: ResolveCtx): Promise<ZoneSecurity>;
+    protected _fetchAndValidateDs(zone: string, parentDnskeys: PacketResource[], ctx: ResolveCtx): Promise<{
+        kind: 'secure';
+        ds: DS[];
+    } | {
+        kind: 'insecure' | 'bogus';
+        reason?: string;
+    }>;
+    protected _queryDsAtParent(zone: string, ctx: ResolveCtx): Promise<Packet>;
+    protected static _parentOf(zone: string): string;
     protected static _defaultUdpTransport(serverIp: string, port: number, query: Packet): Promise<Packet>;
     protected static _withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T>;
     protected static _buildResponse(ctx: ResolveCtx, rcode: number, answers: PacketResource[], authorities: PacketResource[]): Packet;
@@ -70,6 +98,8 @@ export declare class RecursiveResolver {
     protected static _extractSoa(packet: Packet): PacketResource[];
     protected static _labels(name: string): string[];
     protected static _nameEquals(a: string, b: string): boolean;
+    protected static _normZone(zone: string): string;
+    protected static _chainPath(anchorZone: string, target: string): string[];
     protected static _isStrictlyDeeper(child: string, parent: string): boolean;
 }
 type ResolveCtx = {
@@ -85,5 +115,12 @@ type ResolveCtx = {
     originalQname: string;
     originalQtype: number | PacketTypes;
     qclass: PacketClass;
+    inAuthChain?: boolean;
+};
+type ZoneSecurity = {
+    validity: DnssecValidity;
+    dnskeys?: PacketResource[];
+    rrsigs?: PacketResource[];
+    reason?: string;
 };
 export {};

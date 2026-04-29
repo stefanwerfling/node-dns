@@ -10,7 +10,10 @@ import { DNAME } from '../Packet/Types/DNAME.js';
 import { NS } from '../Packet/Types/NS.js';
 import { SOA } from '../Packet/Types/SOA.js';
 import { DnsCache } from './DnsCache.js';
+import { DnssecChain } from './DnssecChain.js';
+import { NegativeProof } from './NegativeProof.js';
 import { RootHints } from './RootHints.js';
+import { TrustAnchors } from './TrustAnchor.js';
 export const RCODE = Object.freeze({
     NOERROR: 0,
     FORMERR: 1,
@@ -28,6 +31,11 @@ export class RecursiveResolver {
     _maxQueries;
     _maxCnameDepth;
     _port;
+    _dnssecEnabled;
+    _trustAnchors;
+    _dnssecMode;
+    _dnssecVerifyOptions;
+    _zoneSecurity;
     constructor(options = {}) {
         this._cache = options.cache ?? new DnsCache();
         this._transport = options.transport ?? RecursiveResolver._defaultUdpTransport;
@@ -37,6 +45,13 @@ export class RecursiveResolver {
         this._maxQueries = options.maxQueries ?? 50;
         this._maxCnameDepth = options.maxCnameDepth ?? 16;
         this._port = options.port ?? 53;
+        const dnssecOpt = options.dnssec;
+        this._dnssecEnabled = dnssecOpt !== undefined && dnssecOpt !== false;
+        const dnssecObj = typeof dnssecOpt === 'object' ? dnssecOpt : {};
+        this._trustAnchors = dnssecObj.trustAnchors ?? TrustAnchors.DEFAULT;
+        this._dnssecMode = dnssecObj.mode ?? 'permissive';
+        this._dnssecVerifyOptions = dnssecObj.verifyOptions ?? {};
+        this._zoneSecurity = new Map();
         RootHints.seedCache(this._cache, options.rootHints);
     }
     cache() {
@@ -98,13 +113,16 @@ export class RecursiveResolver {
             lastResponse = response;
             this._cacheResponse(response, nsZone.zone);
             if (response.header.aa === 1 && response.answers.length > 0) {
-                return this._handleAnswer(response, currentName, currentType, qclass, ctx);
+                const handled = await this._handleAnswer(response, currentName, currentType, qclass, ctx);
+                return this._dnssecFinalize(handled, response, nsZone.zone, ctx);
             }
             if (response.header.aa === 1 && response.header.rcode === RCODE.NXDOMAIN) {
-                return RecursiveResolver._buildResponse(ctx, RCODE.NXDOMAIN, ctx.chain, RecursiveResolver._extractSoa(response));
+                const built = RecursiveResolver._buildResponse(ctx, RCODE.NXDOMAIN, ctx.chain, RecursiveResolver._extractSoa(response));
+                return this._dnssecFinalize(built, response, nsZone.zone, ctx);
             }
             if (response.header.aa === 1 && response.header.rcode === RCODE.NOERROR) {
-                return RecursiveResolver._buildResponse(ctx, RCODE.NOERROR, ctx.chain, RecursiveResolver._extractSoa(response));
+                const built = RecursiveResolver._buildResponse(ctx, RCODE.NOERROR, ctx.chain, RecursiveResolver._extractSoa(response));
+                return this._dnssecFinalize(built, response, nsZone.zone, ctx);
             }
             const referralZone = this._referralZone(response, nsZone.zone);
             if (referralZone === null) {
@@ -297,6 +315,203 @@ export class RecursiveResolver {
             throw new Error(`RecursiveResolver: max queries (${ctx.maxQueries})`);
         }
     }
+    async _dnssecFinalize(builtResponse, rawResponse, signingZone, ctx) {
+        if (!this._dnssecEnabled || ctx.inAuthChain) {
+            return builtResponse;
+        }
+        const validity = await this._validateResponse(rawResponse, signingZone, ctx);
+        if (validity === 'bogus') {
+            return RecursiveResolver._buildResponse(ctx, RCODE.SERVFAIL, [], []);
+        }
+        if (validity === 'insecure' && this._dnssecMode === 'strict') {
+            return RecursiveResolver._buildResponse(ctx, RCODE.SERVFAIL, [], []);
+        }
+        builtResponse.header.z = validity === 'secure'
+            ? builtResponse.header.z | 0b010
+            : builtResponse.header.z & ~0b010;
+        return builtResponse;
+    }
+    async _validateResponse(response, signingZone, ctx) {
+        const zoneState = await this._authenticateZone(signingZone, ctx);
+        if (zoneState.validity !== 'secure') {
+            return zoneState.validity;
+        }
+        const dnskeys = zoneState.dnskeys ?? [];
+        const sections = [...response.answers, ...response.authorities];
+        const groups = DnssecChain.groupRrsets(sections);
+        const rrsigs = DnssecChain.rrsigs(sections);
+        for (const [, recs] of groups) {
+            const owner = recs[0].name;
+            const matchingSigs = DnssecChain.rrsigsFor(rrsigs, owner, recs[0].packetType.type);
+            if (matchingSigs.length === 0) {
+                continue;
+            }
+            const r = DnssecChain.validateRrset(owner, recs, matchingSigs, dnskeys, this._dnssecVerifyOptions);
+            if (r.validity === 'bogus') {
+                return 'bogus';
+            }
+        }
+        if (response.header.rcode === RCODE.NXDOMAIN || (response.header.rcode === RCODE.NOERROR && response.answers.length === 0)) {
+            const nsec = response.authorities.filter((r) => r.packetType.type === PacketTypes.NSEC);
+            const nsec3 = response.authorities.filter((r) => r.packetType.type === PacketTypes.NSEC3);
+            const qname = response.questions[0]?.name ?? ctx.originalQname;
+            const qtype = response.questions[0]?.type ?? ctx.originalQtype;
+            if (response.header.rcode === RCODE.NXDOMAIN) {
+                const proven = (nsec.length > 0 && NegativeProof.verifyNxdomainNsec(qname, signingZone, nsec))
+                    || (nsec3.length > 0 && NegativeProof.verifyNxdomainNsec3(qname, signingZone, nsec3));
+                if (!proven) {
+                    return 'bogus';
+                }
+            }
+            else {
+                const proven = (nsec.length > 0 && NegativeProof.verifyNodataNsec(qname, qtype, nsec))
+                    || (nsec3.length > 0 && NegativeProof.verifyNodataNsec3(qname, qtype, signingZone, nsec3));
+                if (nsec.length + nsec3.length > 0 && !proven) {
+                    return 'bogus';
+                }
+            }
+        }
+        return 'secure';
+    }
+    async _authenticateZone(zone, ctx) {
+        const norm = RecursiveResolver._normZone(zone);
+        const cached = this._zoneSecurity.get(norm);
+        if (cached !== undefined) {
+            return cached;
+        }
+        const anchor = TrustAnchors.findFor(this._trustAnchors, zone);
+        if (anchor === undefined) {
+            const out = { validity: 'indeterminate', reason: 'no trust anchor covers zone' };
+            this._zoneSecurity.set(norm, out);
+            return out;
+        }
+        const path = RecursiveResolver._chainPath(anchor.zone, zone);
+        let parentDsList = [anchor.ds];
+        const subCtx = { ...ctx, inAuthChain: true };
+        let result = { validity: 'indeterminate' };
+        for (let i = 0; i < path.length; i++) {
+            const step = path[i];
+            const stepNorm = RecursiveResolver._normZone(step);
+            const stepCached = this._zoneSecurity.get(stepNorm);
+            if (stepCached?.validity === 'secure') {
+                result = stepCached;
+                if (i + 1 < path.length) {
+                    const dsResult = await this._fetchAndValidateDs(path[i + 1], stepCached.dnskeys ?? [], subCtx);
+                    if (dsResult.kind === 'secure') {
+                        parentDsList = dsResult.ds;
+                        continue;
+                    }
+                    if (dsResult.kind === 'insecure') {
+                        const insec = { validity: 'insecure', reason: dsResult.reason };
+                        this._zoneSecurity.set(RecursiveResolver._normZone(path[i + 1]), insec);
+                        if (RecursiveResolver._normZone(path[i + 1]) === norm) {
+                            return insec;
+                        }
+                        return insec;
+                    }
+                    const bogus = { validity: 'bogus', reason: dsResult.reason };
+                    this._zoneSecurity.set(RecursiveResolver._normZone(path[i + 1]), bogus);
+                    return bogus;
+                }
+                continue;
+            }
+            if (stepCached?.validity === 'bogus' || stepCached?.validity === 'insecure') {
+                return stepCached;
+            }
+            try {
+                await this._resolveOnce(step, PacketTypes.DNSKEY, PacketClass.IN, subCtx);
+            }
+            catch (e) {
+                const bogus = { validity: 'bogus', reason: `failed to fetch DNSKEY for ${step}` };
+                this._zoneSecurity.set(stepNorm, bogus);
+                return bogus;
+            }
+            const dnskeyEntry = this._cache.get(step, PacketTypes.DNSKEY, PacketClass.IN);
+            const rrsigEntry = this._cache.get(step, PacketTypes.RRSIG, PacketClass.IN);
+            const dnskeys = dnskeyEntry?.records ?? [];
+            const dnskeyRrsigs = DnssecChain.rrsigsFor(rrsigEntry?.records ?? [], step, PacketTypes.DNSKEY);
+            const validated = DnssecChain.validateDnskeyRrset(step, dnskeys, dnskeyRrsigs, parentDsList, this._dnssecVerifyOptions);
+            if (validated.validity !== 'secure') {
+                const bogus = { validity: 'bogus', reason: validated.reason ?? 'DNSKEY validation failed' };
+                this._zoneSecurity.set(stepNorm, bogus);
+                return bogus;
+            }
+            const stepSec = { validity: 'secure', dnskeys: dnskeys, rrsigs: dnskeyRrsigs };
+            this._zoneSecurity.set(stepNorm, stepSec);
+            result = stepSec;
+            if (i + 1 < path.length) {
+                const dsResult = await this._fetchAndValidateDs(path[i + 1], dnskeys, subCtx);
+                if (dsResult.kind === 'secure') {
+                    parentDsList = dsResult.ds;
+                    continue;
+                }
+                if (dsResult.kind === 'insecure') {
+                    const insec = { validity: 'insecure', reason: dsResult.reason };
+                    this._zoneSecurity.set(RecursiveResolver._normZone(path[i + 1]), insec);
+                    return insec;
+                }
+                const bogus = { validity: 'bogus', reason: dsResult.reason };
+                this._zoneSecurity.set(RecursiveResolver._normZone(path[i + 1]), bogus);
+                return bogus;
+            }
+        }
+        return result;
+    }
+    async _fetchAndValidateDs(zone, parentDnskeys, ctx) {
+        let dsResp;
+        try {
+            dsResp = await this._queryDsAtParent(zone, ctx);
+        }
+        catch (e) {
+            return { kind: 'bogus', reason: `failed to fetch DS for ${zone}` };
+        }
+        const dsEntry = this._cache.get(zone, PacketTypes.DS, PacketClass.IN);
+        const rrsigEntry = this._cache.get(zone, PacketTypes.RRSIG, PacketClass.IN);
+        const dsRecords = dsEntry?.records ?? [];
+        const dsRrsigs = DnssecChain.rrsigsFor(rrsigEntry?.records ?? [], zone, PacketTypes.DS);
+        if (dsRecords.length === 0) {
+            if (dsResp.header.rcode === RCODE.NOERROR) {
+                return { kind: 'insecure', reason: 'no DS record (insecure delegation)' };
+            }
+            return { kind: 'bogus', reason: 'DS query did not return NOERROR' };
+        }
+        const validated = DnssecChain.validateRrset(zone, dsRecords, dsRrsigs, parentDnskeys, this._dnssecVerifyOptions);
+        if (validated.validity !== 'secure') {
+            return { kind: 'bogus', reason: validated.reason ?? 'DS RRset signature did not verify' };
+        }
+        return { kind: 'secure', ds: dsRecords.map((r) => r.packetType) };
+    }
+    async _queryDsAtParent(zone, ctx) {
+        const parent = RecursiveResolver._parentOf(zone);
+        const ns = this._findClosestNs(parent, PacketClass.IN);
+        if (ns === null) {
+            throw new Error(`RecursiveResolver: no cached NS for parent of ${zone}`);
+        }
+        const stableNs = RecursiveResolver._isStrictlyDeeper(ns.zone, parent) || ns.zone === RecursiveResolver._normZone(zone) || ns.zone === zone
+            ? this._findClosestNs(RecursiveResolver._parentOf(ns.zone), PacketClass.IN)
+            : ns;
+        if (stableNs === null) {
+            throw new Error(`RecursiveResolver: no usable parent NS for ${zone}`);
+        }
+        const addr = await this._pickNsAddress(stableNs, PacketClass.IN, ctx);
+        if (addr === null) {
+            throw new Error(`RecursiveResolver: no usable address for parent NS of ${zone}`);
+        }
+        const response = await this._queryServer(addr, zone, PacketTypes.DS, PacketClass.IN, ctx);
+        this._cacheResponse(response, stableNs.zone);
+        return response;
+    }
+    static _parentOf(zone) {
+        const norm = RecursiveResolver._normZone(zone);
+        if (norm === '') {
+            return '.';
+        }
+        const dot = norm.indexOf('.');
+        if (dot === -1) {
+            return '.';
+        }
+        return norm.slice(dot + 1);
+    }
     static _defaultUdpTransport(serverIp, port, query) {
         return new Promise((resolve, reject) => {
             const family = serverIp.includes(':') ? 'udp6' : 'udp4';
@@ -404,6 +619,31 @@ export class RecursiveResolver {
             return stripped.toLowerCase();
         };
         return norm(a) === norm(b);
+    }
+    static _normZone(zone) {
+        if (zone === '.' || zone === '') {
+            return '';
+        }
+        const stripped = zone.endsWith('.') ? zone.slice(0, -1) : zone;
+        return stripped.toLowerCase();
+    }
+    static _chainPath(anchorZone, target) {
+        const anchorNorm = RecursiveResolver._normZone(anchorZone);
+        const targetNorm = RecursiveResolver._normZone(target);
+        if (targetNorm === anchorNorm) {
+            return [anchorNorm === '' ? '.' : anchorNorm];
+        }
+        const targetLabels = targetNorm.split('.');
+        const anchorLabels = anchorNorm === '' ? [] : anchorNorm.split('.');
+        const relCount = targetLabels.length - anchorLabels.length;
+        if (relCount <= 0) {
+            return [anchorNorm === '' ? '.' : anchorNorm];
+        }
+        const out = [anchorNorm === '' ? '.' : anchorNorm];
+        for (let i = relCount - 1; i >= 0; i--) {
+            out.push(targetLabels.slice(i).join('.'));
+        }
+        return out;
     }
     static _isStrictlyDeeper(child, parent) {
         const childLabels = RecursiveResolver._labels(child).length;
