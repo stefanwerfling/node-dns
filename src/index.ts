@@ -3,9 +3,11 @@ export {BufferReader} from './Lib/BufferReader.js';
 export {BufferWriter} from './Lib/BufferWriter.js';
 export {SocketReader} from './Lib/SocketReader.js';
 export {ZoneParser} from './Lib/ZoneParser.js';
-export type {ZoneParseOptions, ZoneParseResult, ZoneToken, ZoneTokenLine} from './Lib/ZoneParser.js';
+export type {ZoneParseOptions, ZoneParseResult, ZoneToken, ZoneTokenLine, ZoneIncludeResolver} from './Lib/ZoneParser.js';
 export {Random0x20} from './Lib/Random0x20.js';
 export {Bailiwick} from './Lib/Bailiwick.js';
+export {Rrl} from './Lib/Rrl.js';
+export type {RrlOptions, RrlDecision} from './Lib/Rrl.js';
 export {Dnssec, DnssecAlgorithm, DnssecDigest} from './Lib/Dnssec.js';
 export type {
     DnssecVerifyOptions,

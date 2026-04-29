@@ -3,6 +3,7 @@ import http from 'http';
 import https from 'https';
 import tcp from 'net';
 import tls from 'tls';
+import { Rrl } from '../Lib/Rrl.js';
 import { Packet } from '../Packet/Packet.js';
 import { DohServerUseCors } from './DohServer.js';
 import { ServerPreConnection } from './ServerPreConnection.js';
@@ -11,6 +12,7 @@ export type ServerRequestHandler = (request: Packet, send: (response: Packet | P
 export type ServerUdpOptions = {
     type?: 'udp4' | 'udp6';
     preRequest?: ServerPreRequest<dgram.RemoteInfo>;
+    rrl?: Rrl;
 };
 export type ServerTcpOptions = {
     preRequest?: ServerPreRequest<tcp.Socket>;

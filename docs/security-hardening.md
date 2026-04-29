@@ -169,17 +169,20 @@ const bw = Bailiwick.filter(response, 'com.');
 | Random source port | Spoofing without per-port enumeration       | Node's UDP socket gets one automatically |
 | **0x20**       | Off-path spoofing where ID and port are guessed | Some legacy recursors fail; opt-in       |
 | **Bailiwick**  | Cache poisoning via out-of-zone records         | Doesn't authenticate the zone itself     |
+| **RRL**        | UDP reflection / amplification on auth servers  | UDP only; pick `maxRate` per prefix carefully ([guide](rrl.md)) |
 | TSIG           | Tampering on a server-to-server channel         | Shared secret required ([guide](tsig.md))|
-| DNSSEC         | Forged answers from any path                    | Not yet implemented                      |
+| DNSSEC         | Forged answers from any path                    | Authoritative-side signing + stateless verifier shipped ([guide](dnssec.md)) |
 
-The first two are infrastructure hygiene; 0x20 and bailiwick are the two
-cheap-and-effective defenses on top. Once DNSSEC validation lands it
-will be the strongest authentication, but in the meantime 0x20 +
-bailiwick + TSIG + a trusted recursor is a defensible setup.
+The first two are infrastructure hygiene; 0x20, bailiwick, and RRL are
+the cheap-and-effective defenses on top. DNSSEC is the strongest
+authentication; pair it with TSIG on server-to-server channels for full
+end-to-end protection.
 
 ## Related
 
 - [DNS clients](dns-clients.md) — where `use0x20` lives.
+- [Response rate limiting](rrl.md) — the `Rrl` class and `udp.rrl` option.
 - [TSIG](tsig.md) — server-to-server authentication.
+- [DNSSEC](dnssec.md) — answer authenticity.
 - [Reverse proxy](reverse-proxy.md) — additional rate limiting and
   filtering at the edge.

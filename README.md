@@ -30,6 +30,7 @@ Fully rewritten from JavaScript to TypeScript — no JS source files remain.
 - NOTIFY zone-change notification (RFC 1996) — `NotifyClient` on the primary side, opcode-dispatch on the secondary side
 - DNS UPDATE (RFC 2136) — `UpdateBuilder` fluent API, `Update.applyToZone` reference engine, `UpdateClient` over UDP/TCP/TLS
 - 0x20 query-name case randomization (RFC 5452) and bailiwick filtering — opt-in spoofing and cache-poisoning defenses
+- Response Rate Limiting (RFC 5358 reflection mitigation) — token-bucket `Rrl` keyed by client prefix and qtype, with configurable slip (TC=1) ratio. Wired into `UDPServer` via `udp.rrl: Rrl`
 
 <hr>
 
@@ -102,6 +103,10 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   case randomization (`Random0x20`, `use0x20: true`) and bailiwick
   filtering (`Bailiwick.contains`, `Bailiwick.filter`) against off-path
   spoofing and cache poisoning.
+- **[Response rate limiting](docs/rrl.md)** — `Rrl` token bucket and
+  the `udp.rrl` server option. Mitigates UDP reflection / amplification
+  on authoritative servers; configurable rate, prefix granularity, and
+  TC=1 slip ratio.
 - **[DNSSEC validation](docs/dnssec.md)** — `Dnssec.verifyRrsig`,
   `Dnssec.verifyDs`, `Dnssec.computeKeyTag`, `Dnssec.computeDsDigest`. RFC
   4034/4035 algorithms 8/10/13/14/15, DS digest types 1/2/4. Stateless —

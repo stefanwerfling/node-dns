@@ -41,6 +41,7 @@ export class DnsServer extends EventEmitter {
             this._udp = new UDPServer(udpOptions);
             this._udp.on('requestError', (error) => this.emit('requestError', error));
             this._udp.on('request', (request, send, rinfo) => this.emit('request', request, send, rinfo));
+            this._udp.on('rateLimited', (msg, rinfo, decision) => this.emit('rateLimited', msg, rinfo, decision));
             closePromises.push(new Promise((resolve) => { this._udp.once('close', resolve); }));
             listenPromises.push(new Promise((resolve) => { this._udp.once('listening', resolve); }));
         }

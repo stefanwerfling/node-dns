@@ -1,6 +1,7 @@
 import dgram from 'dgram';
 import {Buffer} from 'buffer';
 import {AddressInfo} from 'net';
+import {Rrl, RrlDecision} from '../Lib/Rrl.js';
 import {Packet} from '../Packet/Packet.js';
 import {ServerOptions} from './ServerOptions.js';
 import {ServerPreRequest} from './ServerPreRequest.js';
@@ -36,6 +37,12 @@ export class UDPServer {
     protected _preRequest?: ServerPreRequest<dgram.RemoteInfo>;
 
     /**
+     * Optional Response Rate Limiter (RFC 5358 reflection mitigation).
+     * @protected
+     */
+    protected _rrl?: Rrl;
+
+    /**
      * constructor
      * @param {ServerOptions|null} options
      */
@@ -49,6 +56,10 @@ export class UDPServer {
 
             if (options.udp.preRequest) {
                 this._preRequest = options.udp.preRequest;
+            }
+
+            if (options.udp.rrl) {
+                this._rrl = options.udp.rrl;
             }
         }
 
@@ -76,6 +87,18 @@ export class UDPServer {
      * @return {UDPServer}
      */
     public on(event: 'requestError', listener: (err: unknown) => void): this;
+
+    /**
+     * on rate-limit decision (only emitted when an `rrl` is configured and
+     * fires on a non-`allow` decision). Useful for metrics and logging.
+     * @param {string} event
+     * @param {(msg: Packet, rinfo: dgram.RemoteInfo, decision: RrlDecision) => void} listener
+     * @return {UDPServer}
+     */
+    public on(
+        event: 'rateLimited',
+        listener: (msg: Packet, rinfo: dgram.RemoteInfo, decision: Exclude<RrlDecision, 'allow'>) => void
+    ): this;
 
     /**
      * on
@@ -121,12 +144,48 @@ export class UDPServer {
 
             const message = Packet.parse(tdata);
 
+            if (this._rrl) {
+                const qtype = message.questions[0]?.type ?? 0;
+                const decision = this._rrl.check(emitRinfo.address, qtype);
+
+                if (decision === 'drop') {
+                    this._socket.emit('rateLimited', message, emitRinfo, decision);
+                    return;
+                }
+
+                if (decision === 'truncate') {
+                    await this._sendTruncated(rinfo, message);
+                    this._socket.emit('rateLimited', message, emitRinfo, decision);
+                    return;
+                }
+            }
+
             // Response always goes back to the transport peer (e.g. the proxy),
             // while the emitted rinfo reflects the (optionally overridden) client.
             this._socket.emit('request', message, this._response.bind(this, rinfo), emitRinfo);
         } catch (e) {
             this._socket.emit('requestError', e instanceof Error ? e : new Error(String(e)));
         }
+    }
+
+    /**
+     * Build and send a TC=1 (truncated) response for the given query. Used
+     * by the RRL slip path: the client retries the same query over TCP,
+     * which is much harder to spoof and so cannot be amplified.
+     * @param {dgram.RemoteInfo} rinfo transport peer the datagram is sent to
+     * @param {Packet} request the parsed query
+     * @return {Promise<Buffer|void>}
+     * @protected
+     */
+    protected _sendTruncated(rinfo: dgram.RemoteInfo, request: Packet): Promise<Buffer|void> {
+        const trunc = new Packet();
+        trunc.header.id = request.header.id;
+        trunc.header.qr = 1;
+        trunc.header.opcode = request.header.opcode;
+        trunc.header.tc = 1;
+        trunc.header.rd = request.header.rd;
+        trunc.questions = request.questions.slice();
+        return this._response(rinfo, trunc);
     }
 
     /**

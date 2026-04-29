@@ -3,6 +3,7 @@ import http from 'http';
 import https from 'https';
 import tcp from 'net';
 import tls from 'tls';
+import {Rrl} from '../Lib/Rrl.js';
 import {Packet} from '../Packet/Packet.js';
 import {DohServerUseCors} from './DohServer.js';
 import {ServerPreConnection} from './ServerPreConnection.js';
@@ -26,6 +27,15 @@ export type ServerRequestHandler = (
 export type ServerUdpOptions = {
     type?: 'udp4' | 'udp6';
     preRequest?: ServerPreRequest<dgram.RemoteInfo>;
+
+    /**
+     * Optional Response Rate Limiter. When set, the server consults `rrl.check`
+     * for every incoming UDP query and either allows it through, silently
+     * drops it, or replies with a TC=1 truncation hint. RRL is meaningful
+     * only on UDP — connection-oriented transports do not benefit and should
+     * not be wired up here.
+     */
+    rrl?: Rrl;
 };
 
 /**
