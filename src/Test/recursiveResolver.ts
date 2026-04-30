@@ -802,3 +802,51 @@ test('RecursiveResolver#response OPT is not cached as an RRset', async() => {
     assert.ok(resolver.cache().get('host.test', PacketTypes.A, PacketClass.IN));
     assert.equal(resolver.cache().get('', PacketTypes.EDNS, PacketClass.IN), null);
 });
+
+test('RecursiveResolver#DO bit clear when DNSSEC validation is disabled', async() => {
+    const seen: Packet[] = [];
+    const transport = new MockTransport();
+
+    transport.default('10.0.0.1', (q) => {
+        seen.push(q);
+        return buildAnswer(q, [aRec('host.test', '198.51.100.1')]);
+    });
+
+    const resolver = new RecursiveResolver({
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false
+        // dnssec omitted → DO must stay clear
+    });
+
+    await resolver.resolve('host.test', PacketTypes.A);
+    const opt = seen[0].additionals.find((r) => r.packetType instanceof EDNS);
+    assert.ok(opt);
+    // eslint-disable-next-line no-bitwise
+    assert.equal(opt.ttl & 0x00008000, 0);
+});
+
+test('RecursiveResolver#DO bit set when DNSSEC validation is enabled', async() => {
+    const seen: Packet[] = [];
+    const transport = new MockTransport();
+
+    transport.default('10.0.0.1', (q) => {
+        seen.push(q);
+        return buildAnswer(q, [aRec('host.test', '198.51.100.1')]);
+    });
+
+    const resolver = new RecursiveResolver({
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false,
+        dnssec: true
+    });
+
+    // The query goes out before validation runs; we don't need the
+    // mock to actually carry RRSIGs to inspect the outgoing OPT.
+    await resolver.resolve('host.test', PacketTypes.A);
+    const opt = seen[0].additionals.find((r) => r.packetType instanceof EDNS);
+    assert.ok(opt);
+    // eslint-disable-next-line no-bitwise
+    assert.equal(opt.ttl & 0x00008000, 0x00008000);
+});

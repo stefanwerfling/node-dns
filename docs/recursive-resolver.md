@@ -218,8 +218,15 @@ new RecursiveResolver({
 new RecursiveResolver({useEdns: false});
 ```
 
-The resolver does **not** yet enable DNSSEC OK (DO=1) on the OPT or
-react to the auth's reported buffer size — both are future hardening.
+When `dnssec` is enabled, the OPT also carries the DO (DNSSEC OK) bit
+(RFC 3225) so the upstream includes RRSIG / NSEC / NSEC3 records — the
+validator would otherwise see no signatures and reject every signed
+answer as bogus. The DO bit is cleared automatically when `dnssec` is
+disabled.
+
+The resolver does **not** yet react to the auth's reported buffer size
+(RFC 6891 §6.1.1) — even if a server pins itself to 1232, every
+follow-up query still advertises the configured `udpPayloadSize`.
 
 ## DNSSEC validation (opt-in)
 

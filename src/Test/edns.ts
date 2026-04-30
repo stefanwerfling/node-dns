@@ -234,3 +234,26 @@ test('EDNS#multi-option mix', () => {
     assert.equal((rdata[3] as EdnsExtendedError).extraText, 'cache hit');
     assert.equal((rdata[4] as EdnsPadding).length, 16);
 });
+
+test('EDNS#createResource encodes the DO bit into the TTL field', () => {
+    const off = EDNS.createResource([], 4096, false);
+    assert.equal(off.ttl, 0);
+    assert.equal(off.class, 4096);
+
+    const on = EDNS.createResource([], 4096, true);
+    // RFC 3225: DO is the high bit of the TTL field's low 16 bits.
+    // eslint-disable-next-line no-bitwise
+    assert.equal(on.ttl & 0x00008000, 0x00008000);
+    assert.equal(on.class, 4096);
+
+    // Wire-byte sanity: with DO=1 and udpPayloadSize=4096 the OPT
+    // header is name=0, type=41 (OPT), class=4096, ttl=0x00008000.
+    const buf = PacketResource.encode(on);
+    assert.deepEqual(buf.subarray(0, 11), Buffer.from([
+        0x00,                   // root name
+        0x00, 0x29,             // OPT type (41)
+        0x10, 0x00,             // class = 4096
+        0x00, 0x00, 0x80, 0x00, // ttl with DO bit set
+        0x00, 0x00              // RDLEN = 0 (no options)
+    ]));
+});

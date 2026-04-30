@@ -217,7 +217,7 @@ export class RecursiveResolver {
         query.header.rd = 0;
         query.questions.push(new PacketQuestion(sentName, qtype, qclass));
         if (this._useEdns) {
-            query.additionals.push(EDNS.createResource([], this._udpPayloadSize));
+            query.additionals.push(EDNS.createResource([], this._udpPayloadSize, this._dnssecEnabled));
         }
         const response = await this._sendAndVerify(this._transport, this._port, serverIp, query, sentName, ctx);
         if (response.header.tc === 1 && this._tcpFallback) {

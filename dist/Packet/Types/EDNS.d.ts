@@ -9,7 +9,7 @@ export type { EdnsOption };
 export declare class EDNS extends PacketType {
     rdata: EdnsOption[];
     constructor(rdata?: EdnsOption[]);
-    static createResource(rdata: EdnsOption[], udpPayloadSize?: number): PacketResource;
+    static createResource(rdata: EdnsOption[], udpPayloadSize?: number, dnssecOk?: boolean): PacketResource;
     encode(_resource: PacketResource, writer?: BufferWriter | null): Buffer;
     static decode(reader: BufferReader, length: number): PacketType;
     protected static _decodeOption(code: number, length: number, reader: BufferReader): EdnsOption | null;

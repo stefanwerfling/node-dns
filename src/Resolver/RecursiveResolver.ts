@@ -671,7 +671,11 @@ export class RecursiveResolver {
             // streams aren't size-bounded the same way) but sending the
             // OPT through TCP too is harmless and matches what real
             // recursors do.
-            query.additionals.push(EDNS.createResource([], this._udpPayloadSize));
+            //
+            // RFC 3225: DO=1 is required for the auth to include RRSIG
+            // / NSEC / NSEC3 in the response — without it, validation
+            // would reject every signed answer for missing signatures.
+            query.additionals.push(EDNS.createResource([], this._udpPayloadSize, this._dnssecEnabled));
         }
 
         const response = await this._sendAndVerify(this._transport, this._port, serverIp, query, sentName, ctx);

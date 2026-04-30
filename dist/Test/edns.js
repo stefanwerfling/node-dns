@@ -197,4 +197,20 @@ test('EDNS#multi-option mix', () => {
     assert.equal(rdata[3].extraText, 'cache hit');
     assert.equal(rdata[4].length, 16);
 });
+test('EDNS#createResource encodes the DO bit into the TTL field', () => {
+    const off = EDNS.createResource([], 4096, false);
+    assert.equal(off.ttl, 0);
+    assert.equal(off.class, 4096);
+    const on = EDNS.createResource([], 4096, true);
+    assert.equal(on.ttl & 0x00008000, 0x00008000);
+    assert.equal(on.class, 4096);
+    const buf = PacketResource.encode(on);
+    assert.deepEqual(buf.subarray(0, 11), Buffer.from([
+        0x00,
+        0x00, 0x29,
+        0x10, 0x00,
+        0x00, 0x00, 0x80, 0x00,
+        0x00, 0x00
+    ]));
+});
 //# sourceMappingURL=edns.js.map

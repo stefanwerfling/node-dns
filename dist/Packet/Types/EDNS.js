@@ -17,8 +17,9 @@ export class EDNS extends PacketType {
         super(PacketTypes.EDNS);
         this.rdata = rdata;
     }
-    static createResource(rdata, udpPayloadSize = 512) {
-        return new PacketResource('', new EDNS(rdata), udpPayloadSize, 0);
+    static createResource(rdata, udpPayloadSize = 512, dnssecOk = false) {
+        const ttl = dnssecOk ? 0x00008000 : 0;
+        return new PacketResource('', new EDNS(rdata), udpPayloadSize, ttl);
     }
     encode(_resource, writer = null) {
         const twriter = writer === null ? new BufferWriter() : writer;

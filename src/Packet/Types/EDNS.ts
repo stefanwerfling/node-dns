@@ -39,16 +39,32 @@ export class EDNS extends PacketType {
      * that don't care; the recursive resolver overrides this to bump
      * the buffer (DNS Flag Day 2020 settled on 1232; 4096 is still
      * widely used and what BIND/Unbound default to internally).
+     *
+     * `dnssecOk` toggles the DO (DNSSEC OK) bit (RFC 3225 / RFC 6891
+     * §6.1.4) — high bit of the TTL field's low 16 bits, i.e.
+     * 0x00008000. Authoritative servers must include RRSIG / NSEC /
+     * NSEC3 records in the response only when DO is set; without it,
+     * a DNSSEC-validating recursor will see no signatures and reject
+     * every signed answer as bogus. Default false; the recursive
+     * resolver flips it on automatically when DNSSEC validation is
+     * enabled.
      * @param {EdnsOption[]} rdata
      * @param {number} udpPayloadSize
+     * @param {boolean} dnssecOk
      * @return {PacketResource}
      */
-    public static createResource(rdata: EdnsOption[], udpPayloadSize: number = 512): PacketResource {
+    public static createResource(
+        rdata: EdnsOption[],
+        udpPayloadSize: number = 512,
+        dnssecOk: boolean = false
+    ): PacketResource {
+        // eslint-disable-next-line no-bitwise
+        const ttl = dnssecOk ? 0x00008000 : 0;
         return new PacketResource(
             '',
             new EDNS(rdata),
             udpPayloadSize,
-            0
+            ttl
         );
     }
 
