@@ -1,6 +1,7 @@
 import {Buffer} from 'buffer';
 import {Dnssec} from '../Lib/Dnssec.js';
 import {PacketResource} from '../Packet/PacketResource.js';
+import {PacketTypes} from '../Packet/PacketTypes.js';
 import {NSEC} from '../Packet/Types/NSEC.js';
 import {NSEC3} from '../Packet/Types/NSEC3.js';
 
@@ -31,6 +32,22 @@ import {NSEC3} from '../Packet/Types/NSEC3.js';
  *
  *  - **NODATA with NSEC3** (RFC 5155 §8.5 / §8.6):
  *    NSEC3 matching `qname`'s hash, type bit map omits `qtype`
+ *
+ *  - **Insecure delegation with NSEC** (RFC 4035 §5.2): NSEC at the
+ *    delegation owner whose bitmap lists `NS` but neither `DS` nor
+ *    `SOA` (the absence of SOA disambiguates an apex from a true
+ *    delegation point).
+ *
+ *  - **Insecure delegation with NSEC3** (RFC 5155 §8.9 / §6 opt-out):
+ *    1. *Match path* — NSEC3 whose hash matches the delegation owner,
+ *       bitmap has `NS` but neither `DS` nor `SOA`. This is what an
+ *       NSEC3 chain *without* opt-out emits.
+ *    2. *Opt-out cover path* — any NSEC3 with the opt-out flag set
+ *       (RFC 5155 §3.1.2.1, bit 0) whose `(ownerHash, nextHash)`
+ *       interval covers the delegation hash. With opt-out, large
+ *       parent zones (`.com`, `.net`) skip explicit signing of every
+ *       insecure child; the cover proves "no signed delegation
+ *       exists in this hash range".
  *
  * The cryptographic verification of the NSEC / NSEC3 RRsets themselves
  * (RRSIG check) is the chain validator's job — `NegativeProof` only
@@ -308,9 +325,140 @@ export class NegativeProof {
         return false;
     }
 
+    /**
+     * Verify an insecure-delegation proof made of NSEC records (RFC
+     * 4035 §5.2): there must be an NSEC at the delegation owner whose
+     * type bitmap includes `NS` but excludes both `DS` and `SOA`.
+     *
+     * Excluding `SOA` is what distinguishes a delegation point from a
+     * zone apex: an NS-bearing NSEC at the apex would also be missing
+     * its DS, but that's a zone you ARE authoritative for, not an
+     * insecure child.
+     *
+     * @param {string} delegationName the zone whose DS the parent denied
+     * @param {PacketResource[]} records authoritative NSEC records
+     * @return {boolean}
+     */
+    public static verifyInsecureDelegationNsec(
+        delegationName: string,
+        records: PacketResource[]
+    ): boolean {
+        const nsecs = NegativeProof._nsecsOnly(records);
+
+        for (const r of nsecs) {
+            if (!NegativeProof._nameEquals(r.name, delegationName)) {
+                continue;
+            }
+
+            const types = (r.packetType as NSEC).rdtypes;
+
+            if (NegativeProof._isInsecureBitmap(types)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Verify an insecure-delegation proof made of NSEC3 records (RFC
+     * 5155 §8.9 + §6 opt-out). Two acceptable shapes:
+     *
+     *  1. *Match*: an NSEC3 whose owner hash equals
+     *     `hash(delegationName)`, bitmap has `NS` but neither `DS`
+     *     nor `SOA`. Emitted by NSEC3 chains *without* opt-out.
+     *  2. *Opt-out cover*: any NSEC3 with the opt-out flag set whose
+     *     `(ownerHash, nextHash)` interval covers
+     *     `hash(delegationName)`. Big parent zones use opt-out to
+     *     avoid signing every insecure child; this path proves "no
+     *     signed delegation exists in the hash range that contains
+     *     `delegationName`".
+     *
+     * @param {string} delegationName
+     * @param {PacketResource[]} records authoritative NSEC3 records
+     * @return {boolean}
+     */
+    public static verifyInsecureDelegationNsec3(
+        delegationName: string,
+        records: PacketResource[]
+    ): boolean {
+        const nsec3s = NegativeProof._nsec3sOnly(records);
+
+        if (nsec3s.length === 0) {
+            return false;
+        }
+
+        const params = NegativeProof._nsec3Params(nsec3s);
+
+        if (params === null) {
+            return false;
+        }
+
+        const target = Dnssec.nsec3Hash(delegationName, params.saltHex, params.iterations);
+
+        // Path 1 — explicit match with NS-but-no-DS bitmap.
+        for (const r of nsec3s) {
+            const ownerHash = NegativeProof._extractNsec3OwnerHash(r.name);
+
+            if (ownerHash === null || !ownerHash.equals(target)) {
+                continue;
+            }
+
+            const types = (r.packetType as NSEC3).rdtypes;
+
+            if (NegativeProof._isInsecureBitmap(types)) {
+                return true;
+            }
+        }
+
+        // Path 2 — opt-out cover. RFC 5155 §3.1.2.1: the opt-out flag
+        // is bit 0 (LSB) of the flags field.
+        for (const r of nsec3s) {
+            const nsec3 = r.packetType as NSEC3;
+
+            // eslint-disable-next-line no-bitwise
+            if ((nsec3.flags & 0x01) === 0) {
+                continue;
+            }
+
+            const ownerHash = NegativeProof._extractNsec3OwnerHash(r.name);
+
+            if (ownerHash === null) {
+                continue;
+            }
+
+            const nextHash = NegativeProof._decodeNsec3NextHash(nsec3.nextHashedOwner);
+
+            if (nextHash === null) {
+                continue;
+            }
+
+            if (Dnssec.nsec3CoversHash(ownerHash, nextHash, target)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /* ----------------------------------------------------------------- */
     /*  Helpers                                                          */
     /* ----------------------------------------------------------------- */
+
+    /**
+     * The bitmap shape that proves an unsigned delegation: `NS` is
+     * present (the name IS a delegation) and `DS` is absent (no
+     * signed link) and `SOA` is absent (the name is not a zone
+     * apex).
+     * @param {number[]} types
+     * @return {boolean}
+     * @protected
+     */
+    protected static _isInsecureBitmap(types: number[]): boolean {
+        return types.includes(PacketTypes.NS)
+            && !types.includes(PacketTypes.DS)
+            && !types.includes(PacketTypes.SOA);
+    }
 
     /**
      * @param {PacketResource[]} records

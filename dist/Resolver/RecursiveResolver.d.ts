@@ -95,6 +95,7 @@ export declare class RecursiveResolver {
         kind: 'insecure' | 'bogus';
         reason?: string;
     }>;
+    protected _verifyInsecureDelegationProof(delegationName: string, response: Packet, parentDnskeys: PacketResource[]): boolean;
     protected _queryDsAtParent(zone: string, ctx: ResolveCtx): Promise<Packet>;
     protected static _parentOf(zone: string): string;
     protected static _defaultUdpTransport(serverIp: string, port: number, query: Packet): Promise<Packet>;

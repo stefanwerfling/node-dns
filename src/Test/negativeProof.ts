@@ -1,8 +1,11 @@
 import assert from 'assert';
 import * as crypto from 'crypto';
+import {PacketClass} from '../Packet/PacketClass.js';
 import {Dnssec, DnssecAlgorithm} from '../Lib/Dnssec.js';
 import {PacketResource} from '../Packet/PacketResource.js';
 import {PacketTypes} from '../Packet/PacketTypes.js';
+import {NSEC} from '../Packet/Types/NSEC.js';
+import {NSEC3} from '../Packet/Types/NSEC3.js';
 import {Zone} from '../Packet/Zone.js';
 import {NegativeProof} from '../Resolver/NegativeProof.js';
 import {test} from './test.js';
@@ -143,4 +146,134 @@ test('NegativeProof#verifyNodataNsec3 accepts when bitmap omits qtype', () => {
 test('NegativeProof#verifyNodataNsec3 rejects when bitmap includes qtype', () => {
     const {nsec3s} = signedZoneNsec3();
     assert.equal(NegativeProof.verifyNodataNsec3('www.example.com', PacketTypes.A, 'example.com', nsec3s), false);
+});
+
+/* ----------------------------------------------------------------------- */
+/*  Insecure delegation                                                     */
+/* ----------------------------------------------------------------------- */
+
+const NSEC3_DEFAULT_SALT = 'aabbcc';
+const NSEC3_DEFAULT_ITER = 0;
+
+const nsec3Rec = (
+    delegationName: string,
+    bitmapTypes: number[],
+    flags: number = 0,
+    parentApex: string = 'com.'
+): PacketResource => {
+    const ownerHashBuf = Dnssec.nsec3Hash(delegationName, NSEC3_DEFAULT_SALT, NSEC3_DEFAULT_ITER);
+    const ownerLabel = Dnssec.base32hexEncode(ownerHashBuf).toLowerCase();
+    // The chain wraps; for a single-record fixture next == owner is fine
+    // because nsec3CoversHash treats owner==next as "everything except
+    // owner-hash itself is covered" — but we want a record matching the
+    // owner, not covering it, so we pick a distinct nextHash that's
+    // strictly greater. For opt-out coverage tests we override below.
+    const nextHashHex = Buffer.alloc(20, 0xff).toString('hex');
+    const nsec3 = new NSEC3(1, flags, NSEC3_DEFAULT_ITER, NSEC3_DEFAULT_SALT, nextHashHex, bitmapTypes);
+    return new PacketResource(`${ownerLabel}.${parentApex}`, nsec3, PacketClass.IN, 3600);
+};
+
+const nsec3CoverRec = (
+    ownerHashBuf: Buffer,
+    nextHashBuf: Buffer,
+    flags: number,
+    bitmapTypes: number[],
+    parentApex: string = 'com.'
+): PacketResource => {
+    const ownerLabel = Dnssec.base32hexEncode(ownerHashBuf).toLowerCase();
+    const nsec3 = new NSEC3(1, flags, NSEC3_DEFAULT_ITER, NSEC3_DEFAULT_SALT,
+        nextHashBuf.toString('hex'), bitmapTypes);
+    return new PacketResource(`${ownerLabel}.${parentApex}`, nsec3, PacketClass.IN, 3600);
+};
+
+test('NegativeProof#verifyInsecureDelegationNsec accepts NS-but-no-DS bitmap at owner', () => {
+    const rec = new PacketResource(
+        'unsigned.com.',
+        new NSEC('next.com.', [PacketTypes.NS, PacketTypes.RRSIG]),
+        PacketClass.IN,
+        3600
+    );
+    assert.equal(NegativeProof.verifyInsecureDelegationNsec('unsigned.com.', [rec]), true);
+});
+
+test('NegativeProof#verifyInsecureDelegationNsec rejects when DS is in the bitmap', () => {
+    const rec = new PacketResource(
+        'signed.com.',
+        new NSEC('next.com.', [PacketTypes.NS, PacketTypes.DS, PacketTypes.RRSIG]),
+        PacketClass.IN,
+        3600
+    );
+    assert.equal(NegativeProof.verifyInsecureDelegationNsec('signed.com.', [rec]), false);
+});
+
+test('NegativeProof#verifyInsecureDelegationNsec rejects an apex (SOA in bitmap) — not a delegation', () => {
+    const rec = new PacketResource(
+        'apex.com.',
+        new NSEC('next.com.', [PacketTypes.SOA, PacketTypes.NS, PacketTypes.RRSIG]),
+        PacketClass.IN,
+        3600
+    );
+    assert.equal(NegativeProof.verifyInsecureDelegationNsec('apex.com.', [rec]), false);
+});
+
+test('NegativeProof#verifyInsecureDelegationNsec rejects when no NSEC matches the owner', () => {
+    const rec = new PacketResource(
+        'other.com.',
+        new NSEC('next.com.', [PacketTypes.NS, PacketTypes.RRSIG]),
+        PacketClass.IN,
+        3600
+    );
+    assert.equal(NegativeProof.verifyInsecureDelegationNsec('unsigned.com.', [rec]), false);
+});
+
+test('NegativeProof#verifyInsecureDelegationNsec3 accepts a hash-match with NS-but-no-DS bitmap', () => {
+    const rec = nsec3Rec('unsigned.com.', [PacketTypes.NS, PacketTypes.RRSIG]);
+    assert.equal(NegativeProof.verifyInsecureDelegationNsec3('unsigned.com.', [rec]), true);
+});
+
+test('NegativeProof#verifyInsecureDelegationNsec3 rejects a hash-match with DS in bitmap', () => {
+    const rec = nsec3Rec('signed.com.', [PacketTypes.NS, PacketTypes.DS, PacketTypes.RRSIG]);
+    assert.equal(NegativeProof.verifyInsecureDelegationNsec3('signed.com.', [rec]), false);
+});
+
+test('NegativeProof#verifyInsecureDelegationNsec3 accepts opt-out cover for a non-existent NSEC3 owner', () => {
+    // Build an opt-out NSEC3 whose (owner, next) hash range brackets
+    // the delegation's hash. The delegation itself has NO NSEC3
+    // record — the opt-out cover stands in for it.
+    const target = Dnssec.nsec3Hash('skipped.com.', NSEC3_DEFAULT_SALT, NSEC3_DEFAULT_ITER);
+    const owner = Buffer.from(target);
+    owner[19] = (owner[19] - 1) & 0xff; // strictly less than target
+    const next = Buffer.from(target);
+    next[19] = (next[19] + 1) & 0xff;   // strictly greater than target
+
+    const rec = nsec3CoverRec(owner, next, 0x01 /* opt-out */, [PacketTypes.NS, PacketTypes.RRSIG]);
+    assert.equal(NegativeProof.verifyInsecureDelegationNsec3('skipped.com.', [rec]), true);
+});
+
+test('NegativeProof#verifyInsecureDelegationNsec3 rejects opt-out cover when range does not include target', () => {
+    const target = Dnssec.nsec3Hash('outside.com.', NSEC3_DEFAULT_SALT, NSEC3_DEFAULT_ITER);
+    // Pick an unrelated (owner, next) range that does NOT bracket
+    // the target. zeros < ones < target, so [zeros..ones] excludes
+    // target if target's high byte > 1.
+    const owner = Buffer.alloc(20, 0x00);
+    const next = Buffer.alloc(20, 0x01);
+    if (target[0] <= 1) {
+        // tweak so the assertion holds regardless of hash value
+        target[0] = 0x80;
+    }
+    const rec = nsec3CoverRec(owner, next, 0x01 /* opt-out */, [PacketTypes.NS, PacketTypes.RRSIG]);
+    assert.equal(NegativeProof.verifyInsecureDelegationNsec3('outside.com.', [rec]), false);
+});
+
+test('NegativeProof#verifyInsecureDelegationNsec3 rejects cover without opt-out flag', () => {
+    const target = Dnssec.nsec3Hash('skipped.com.', NSEC3_DEFAULT_SALT, NSEC3_DEFAULT_ITER);
+    const owner = Buffer.from(target);
+    owner[19] = (owner[19] - 1) & 0xff;
+    const next = Buffer.from(target);
+    next[19] = (next[19] + 1) & 0xff;
+
+    // flags=0 — the range covers the target hash but the auth did NOT
+    // signal opt-out, so a non-existent hash isn't proven.
+    const rec = nsec3CoverRec(owner, next, 0x00, [PacketTypes.NS, PacketTypes.RRSIG]);
+    assert.equal(NegativeProof.verifyInsecureDelegationNsec3('skipped.com.', [rec]), false);
 });

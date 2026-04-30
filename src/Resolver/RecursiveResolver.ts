@@ -1182,8 +1182,13 @@ export class RecursiveResolver {
      * a discriminated outcome:
      *
      *  - `secure` — DS validates, returns the DS records for chain continuation
-     *  - `insecure` — parent NOERRORed with no DS (insecure delegation)
-     *  - `bogus` — DS query failed, or the DS RRset's RRSIG didn't verify
+     *  - `insecure` — parent NOERRORed with no DS *and* attached an
+     *    NSEC/NSEC3 proof of the insecure delegation that verifies
+     *    against the parent's DNSKEYs. RFC 5155 §6 opt-out is honoured
+     *    via `NegativeProof.verifyInsecureDelegationNsec3`.
+     *  - `bogus` — DS query failed, the DS RRset's RRSIG didn't verify,
+     *    or an empty answer arrived without a valid insecure-delegation
+     *    proof (a forged empty answer must not downgrade a signed zone).
      *
      * @param {string} zone
      * @param {PacketResource[]} parentDnskeys
@@ -1219,11 +1224,22 @@ export class RecursiveResolver {
         const dsRrsigs = DnssecChain.rrsigsFor(rrsigEntry?.records ?? [], zone, PacketTypes.DS);
 
         if (dsRecords.length === 0) {
-            if (dsResp.header.rcode === RCODE.NOERROR) {
-                return {kind: 'insecure', reason: 'no DS record (insecure delegation)'};
+            if (dsResp.header.rcode !== RCODE.NOERROR) {
+                return {kind: 'bogus', reason: 'DS query did not return NOERROR'};
             }
 
-            return {kind: 'bogus', reason: 'DS query did not return NOERROR'};
+            // RFC 4035 §5.2 / RFC 5155 §6: a missing-DS claim must be
+            // proved with NSEC/NSEC3. Otherwise an attacker who can
+            // strip RRSIGs from an empty response would downgrade every
+            // signed zone to "insecure" and disable validation
+            // entirely.
+            const proven = this._verifyInsecureDelegationProof(zone, dsResp, parentDnskeys);
+
+            if (!proven) {
+                return {kind: 'bogus', reason: 'no valid NSEC/NSEC3 proof of insecure delegation'};
+            }
+
+            return {kind: 'insecure', reason: 'no DS record (insecure delegation, proved)'};
         }
 
         const validated = DnssecChain.validateRrset(
@@ -1239,6 +1255,75 @@ export class RecursiveResolver {
         }
 
         return {kind: 'secure', ds: dsRecords.map((r) => r.packetType as DS)};
+    }
+
+    /**
+     * Verify an "insecure delegation" claim by checking the
+     * NSEC/NSEC3 records in the response's authority section against
+     * `parentDnskeys` and then running the proof-shape check from
+     * `NegativeProof`.
+     *
+     * Returns `true` only when:
+     *  1. At least one NSEC or NSEC3 RRset is present.
+     *  2. Each such RRset has an RRSIG that verifies against
+     *     `parentDnskeys`.
+     *  3. The validated records form a valid insecure-delegation
+     *     proof for `delegationName` — either the NSEC NS-but-no-DS
+     *     bitmap shape, the NSEC3 match-with-bitmap shape, or the
+     *     NSEC3 opt-out cover (RFC 5155 §6).
+     *
+     * @param {string} delegationName
+     * @param {Packet} response the parent's DS-query response
+     * @param {PacketResource[]} parentDnskeys
+     * @return {boolean}
+     * @protected
+     */
+    protected _verifyInsecureDelegationProof(
+        delegationName: string,
+        response: Packet,
+        parentDnskeys: PacketResource[]
+    ): boolean {
+        const auth = response.authorities;
+        const nsecs = auth.filter((r) => r.packetType.type === PacketTypes.NSEC);
+        const nsec3s = auth.filter((r) => r.packetType.type === PacketTypes.NSEC3);
+
+        if (nsecs.length === 0 && nsec3s.length === 0) {
+            return false;
+        }
+
+        // Validate every NSEC/NSEC3 RRset's RRSIGs against the parent
+        // DNSKEYs before consulting the proof shape — otherwise an
+        // off-path attacker could mint forged NSEC3s with the opt-out
+        // bit and downgrade arbitrary zones to insecure.
+        const groups = DnssecChain.groupRrsets(auth);
+        const rrsigs = DnssecChain.rrsigs(auth);
+
+        for (const [, recs] of groups) {
+            const t = recs[0].packetType.type;
+
+            if (t !== PacketTypes.NSEC && t !== PacketTypes.NSEC3) {
+                continue;
+            }
+
+            const owner = recs[0].name;
+            const matchingSigs = DnssecChain.rrsigsFor(rrsigs, owner, t);
+
+            if (matchingSigs.length === 0) {
+                return false;
+            }
+
+            const v = DnssecChain.validateRrset(owner, recs, matchingSigs, parentDnskeys, this._dnssecVerifyOptions);
+
+            if (v.validity !== 'secure') {
+                return false;
+            }
+        }
+
+        if (nsecs.length > 0 && NegativeProof.verifyInsecureDelegationNsec(delegationName, nsecs)) {
+            return true;
+        }
+
+        return nsec3s.length > 0 && NegativeProof.verifyInsecureDelegationNsec3(delegationName, nsec3s);
     }
 
     /**

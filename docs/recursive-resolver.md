@@ -263,7 +263,16 @@ const ad = (r.header.z & 0b010) >> 1;
      `DnssecChain.validateDnskeyRrset`
    - Fetch DS of next-deeper zone *from the parent* (RFC 4035 §5.2 —
      `_queryDsAtParent` bypasses normal NS-chasing)
-   - Validate DS RRset against current zone's DNSKEYs
+   - Validate DS RRset against current zone's DNSKEYs. **Insecure
+     delegations** (parent NOERRORs with no DS records) must arrive
+     with a valid NSEC or NSEC3 proof — `_verifyInsecureDelegationProof`
+     authenticates the NSEC/NSEC3 RRsets against the parent's DNSKEYs
+     and runs `NegativeProof.verifyInsecureDelegationNsec` /
+     `verifyInsecureDelegationNsec3` (the latter honours the RFC 5155
+     §6 opt-out flag — large parent zones use opt-out NSEC3 to avoid
+     enumerating every unsigned child). A claim of "no DS" without a
+     verifying proof is rejected as **bogus** so an off-path attacker
+     can't downgrade signed zones by stripping records.
 3. Validate every RRset in the answer against the authenticated
    DNSKEYs via `DnssecChain.validateRrset`.
 4. For NXDOMAIN/NODATA: validate the NSEC or NSEC3 proof via

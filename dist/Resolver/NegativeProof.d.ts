@@ -6,6 +6,9 @@ export declare class NegativeProof {
     static closestEncloserNsec(qname: string, zone: string, nsecs: PacketResource[]): string | null;
     static verifyNxdomainNsec3(qname: string, zone: string, records: PacketResource[]): boolean;
     static verifyNodataNsec3(qname: string, qtype: number, zone: string, records: PacketResource[]): boolean;
+    static verifyInsecureDelegationNsec(delegationName: string, records: PacketResource[]): boolean;
+    static verifyInsecureDelegationNsec3(delegationName: string, records: PacketResource[]): boolean;
+    protected static _isInsecureBitmap(types: number[]): boolean;
     protected static _nsecsOnly(records: PacketResource[]): PacketResource[];
     protected static _nsec3sOnly(records: PacketResource[]): PacketResource[];
     protected static _nsec3Params(nsec3s: PacketResource[]): {

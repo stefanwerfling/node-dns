@@ -494,16 +494,49 @@ export class RecursiveResolver {
         const dsRecords = dsEntry?.records ?? [];
         const dsRrsigs = DnssecChain.rrsigsFor(rrsigEntry?.records ?? [], zone, PacketTypes.DS);
         if (dsRecords.length === 0) {
-            if (dsResp.header.rcode === RCODE.NOERROR) {
-                return { kind: 'insecure', reason: 'no DS record (insecure delegation)' };
+            if (dsResp.header.rcode !== RCODE.NOERROR) {
+                return { kind: 'bogus', reason: 'DS query did not return NOERROR' };
             }
-            return { kind: 'bogus', reason: 'DS query did not return NOERROR' };
+            const proven = this._verifyInsecureDelegationProof(zone, dsResp, parentDnskeys);
+            if (!proven) {
+                return { kind: 'bogus', reason: 'no valid NSEC/NSEC3 proof of insecure delegation' };
+            }
+            return { kind: 'insecure', reason: 'no DS record (insecure delegation, proved)' };
         }
         const validated = DnssecChain.validateRrset(zone, dsRecords, dsRrsigs, parentDnskeys, this._dnssecVerifyOptions);
         if (validated.validity !== 'secure') {
             return { kind: 'bogus', reason: validated.reason ?? 'DS RRset signature did not verify' };
         }
         return { kind: 'secure', ds: dsRecords.map((r) => r.packetType) };
+    }
+    _verifyInsecureDelegationProof(delegationName, response, parentDnskeys) {
+        const auth = response.authorities;
+        const nsecs = auth.filter((r) => r.packetType.type === PacketTypes.NSEC);
+        const nsec3s = auth.filter((r) => r.packetType.type === PacketTypes.NSEC3);
+        if (nsecs.length === 0 && nsec3s.length === 0) {
+            return false;
+        }
+        const groups = DnssecChain.groupRrsets(auth);
+        const rrsigs = DnssecChain.rrsigs(auth);
+        for (const [, recs] of groups) {
+            const t = recs[0].packetType.type;
+            if (t !== PacketTypes.NSEC && t !== PacketTypes.NSEC3) {
+                continue;
+            }
+            const owner = recs[0].name;
+            const matchingSigs = DnssecChain.rrsigsFor(rrsigs, owner, t);
+            if (matchingSigs.length === 0) {
+                return false;
+            }
+            const v = DnssecChain.validateRrset(owner, recs, matchingSigs, parentDnskeys, this._dnssecVerifyOptions);
+            if (v.validity !== 'secure') {
+                return false;
+            }
+        }
+        if (nsecs.length > 0 && NegativeProof.verifyInsecureDelegationNsec(delegationName, nsecs)) {
+            return true;
+        }
+        return nsec3s.length > 0 && NegativeProof.verifyInsecureDelegationNsec3(delegationName, nsec3s);
     }
     async _queryDsAtParent(zone, ctx) {
         const parent = RecursiveResolver._parentOf(zone);

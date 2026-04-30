@@ -1,5 +1,6 @@
 import { Buffer } from 'buffer';
 import { Dnssec } from '../Lib/Dnssec.js';
+import { PacketTypes } from '../Packet/PacketTypes.js';
 import { NSEC } from '../Packet/Types/NSEC.js';
 import { NSEC3 } from '../Packet/Types/NSEC3.js';
 export class NegativeProof {
@@ -115,6 +116,63 @@ export class NegativeProof {
             }
         }
         return false;
+    }
+    static verifyInsecureDelegationNsec(delegationName, records) {
+        const nsecs = NegativeProof._nsecsOnly(records);
+        for (const r of nsecs) {
+            if (!NegativeProof._nameEquals(r.name, delegationName)) {
+                continue;
+            }
+            const types = r.packetType.rdtypes;
+            if (NegativeProof._isInsecureBitmap(types)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    static verifyInsecureDelegationNsec3(delegationName, records) {
+        const nsec3s = NegativeProof._nsec3sOnly(records);
+        if (nsec3s.length === 0) {
+            return false;
+        }
+        const params = NegativeProof._nsec3Params(nsec3s);
+        if (params === null) {
+            return false;
+        }
+        const target = Dnssec.nsec3Hash(delegationName, params.saltHex, params.iterations);
+        for (const r of nsec3s) {
+            const ownerHash = NegativeProof._extractNsec3OwnerHash(r.name);
+            if (ownerHash === null || !ownerHash.equals(target)) {
+                continue;
+            }
+            const types = r.packetType.rdtypes;
+            if (NegativeProof._isInsecureBitmap(types)) {
+                return true;
+            }
+        }
+        for (const r of nsec3s) {
+            const nsec3 = r.packetType;
+            if ((nsec3.flags & 0x01) === 0) {
+                continue;
+            }
+            const ownerHash = NegativeProof._extractNsec3OwnerHash(r.name);
+            if (ownerHash === null) {
+                continue;
+            }
+            const nextHash = NegativeProof._decodeNsec3NextHash(nsec3.nextHashedOwner);
+            if (nextHash === null) {
+                continue;
+            }
+            if (Dnssec.nsec3CoversHash(ownerHash, nextHash, target)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    static _isInsecureBitmap(types) {
+        return types.includes(PacketTypes.NS)
+            && !types.includes(PacketTypes.DS)
+            && !types.includes(PacketTypes.SOA);
     }
     static _nsecsOnly(records) {
         return records.filter((r) => r.packetType instanceof NSEC);
