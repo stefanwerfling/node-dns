@@ -101,7 +101,7 @@ export class RecursiveResolver {
         if (ctx.bypassCache !== true) {
             const direct = this._cache.get(qname, qtype, qclass);
             if (direct !== null) {
-                if (direct.stale === true) {
+                if (direct.stale === true || direct.prefetch === true) {
                     this._scheduleRefresh(qname, qtype, qclass);
                 }
                 return RecursiveResolver._cacheEntryToResponse(ctx, direct);
@@ -109,7 +109,7 @@ export class RecursiveResolver {
             if (qtype !== PacketTypes.CNAME) {
                 const cnameHit = this._cache.get(qname, PacketTypes.CNAME, qclass);
                 if (cnameHit !== null && cnameHit.records.length > 0) {
-                    if (cnameHit.stale === true) {
+                    if (cnameHit.stale === true || cnameHit.prefetch === true) {
                         this._scheduleRefresh(qname, PacketTypes.CNAME, qclass);
                     }
                     return this._followCnameFromCache(qname, qtype, qclass, ctx, cnameHit.records);

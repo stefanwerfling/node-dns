@@ -9,13 +9,16 @@ export type DnsCacheEntry = {
     records: PacketResource[];
     rcode: DnsCacheRcode;
     expiresAt: number;
+    cachedAt: number;
     stale?: boolean;
+    prefetch?: boolean;
 };
 export type DnsCacheOptions = {
     maxEntries?: number;
     maxTtlSeconds?: number;
     minTtlSeconds?: number;
     maxStaleSeconds?: number;
+    prefetchThreshold?: number;
     now?: () => number;
 };
 export declare class DnsCache {
@@ -26,6 +29,7 @@ export declare class DnsCache {
     protected _maxTtlSeconds: number;
     protected _minTtlSeconds: number;
     protected _maxStaleSeconds: number;
+    protected _prefetchThreshold: number;
     protected _now: () => number;
     constructor(options?: DnsCacheOptions);
     static key(name: string, type: number, cls: number): string;

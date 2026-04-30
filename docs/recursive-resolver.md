@@ -44,6 +44,7 @@ const cache = new DnsCache({
   maxTtlSeconds: 86_400,     // RFC 8767 ceiling (default 1 day)
   minTtlSeconds: 5,          // floor for TTL=0 responses (default 0)
   maxStaleSeconds: 86_400,   // RFC 8767 serve-stale window (default 0 = off)
+  prefetchThreshold: 0.1,    // BIND-style prefetch (default 0 = off)
 });
 
 cache.get('www.example.com', PacketTypes.A, PacketClass.IN);
@@ -165,9 +166,9 @@ in `Lib/` provide:
 
 What the resolver does **not** do (yet):
 
-- **Prefetch.** Entries are not refreshed proactively before they
-  expire — only on the first access after expiry (when serve-stale
-  is enabled).
+- **Connection pooling** for TCP/TLS. Every TC=1 retry opens a fresh
+  socket. Hot-key prefetch + serve-stale already cover most of the
+  latency wins; pooling matters for high-QPS forwarding setups.
 
 ## Truncation (RFC 7766 §5)
 
@@ -341,7 +342,7 @@ const resolver = new RecursiveResolver({
 });
 ```
 
-## Serve-stale (RFC 8767)
+## Serve-stale (RFC 8767) and prefetch
 
 Configure the underlying cache with `maxStaleSeconds > 0` to enable
 serve-stale: when an entry is past its TTL but still inside the stale
@@ -353,24 +354,36 @@ sees the fresh data.
 import {DnsCache, RecursiveResolver} from 'dns2ts';
 
 const resolver = new RecursiveResolver({
-  cache: new DnsCache({maxStaleSeconds: 86_400}), // 1-day stale window
+  cache: new DnsCache({
+    maxStaleSeconds: 86_400,   // 1-day stale window
+    prefetchThreshold: 0.1,    // refresh hot keys when ≤10% TTL remains
+  }),
 });
 ```
 
-The refresh runs through the full iterative loop (with `bypassCache`
-internally so it doesn't immediately return the stale entry it's
-meant to replace), populates the cache via the normal cache-write
-path, and silently swallows any upstream error — the caller has
-already received the stale answer and a transient upstream failure
-should not surface.
+`prefetchThreshold` is the BIND-style preemptive variant: a *fresh*
+entry whose remaining TTL has dropped below the configured fraction
+of its original window is flagged for refresh on the next read. The
+caller still gets the cached answer (which is still valid), and the
+refresh completes before the entry would actually expire — so a hot
+key never sees a cold-cache stall.
 
-Concurrent stale hits dedupe via an in-flight set keyed by
-`(qname, qtype, qclass)`, so the second of two near-simultaneous
-stale lookups doesn't kick off a duplicate refresh (RFC 8767 §6
-calls out the stampede risk explicitly).
+Both paths reuse the same background-refresh machinery:
 
-`maxStaleSeconds: 0` (the default) disables serve-stale — expired
-entries are dropped and the next caller waits on a fresh resolution.
+- The refresh runs through the full iterative loop (with `bypassCache`
+  internally so it doesn't immediately return the entry it's meant to
+  replace), populates the cache via the normal cache-write path, and
+  silently swallows any upstream error — the caller has already
+  received an answer and a transient upstream failure should not
+  surface.
+- Concurrent hits — stale or prefetch — dedupe via a single
+  in-flight set keyed by `(qname, qtype, qclass)`, so the second of
+  two near-simultaneous lookups doesn't kick off a duplicate refresh
+  (RFC 8767 §6 calls out the stampede risk explicitly).
+
+Both `maxStaleSeconds: 0` and `prefetchThreshold: 0` are defaults —
+opt-in, off out of the box. Stale wins over prefetch: an entry past
+its `expiresAt` is `stale: true`, never `prefetch: true`.
 
 ## Negative caching (RFC 2308)
 

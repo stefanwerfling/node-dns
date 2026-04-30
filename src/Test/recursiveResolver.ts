@@ -1025,6 +1025,92 @@ test('RecursiveResolver#concurrent stale hits dedupe the refresh', async() => {
     assert.equal(refreshCalls, 1);
 });
 
+test('RecursiveResolver#prefetch hit returns the still-fresh record + schedules a refresh', async() => {
+    let now = 1_000_000;
+    const cache = new DnsCache({now: (): number => now, prefetchThreshold: 0.2});
+
+    cache.set('hot.test', PacketTypes.A, PacketClass.IN,
+        [aRec('hot.test', '192.0.2.1')], 60);
+    // 90% elapsed → 10% remaining, below the 20% threshold.
+    now += 54_000;
+
+    const transport = new MockTransport();
+    let refreshCalls = 0;
+    transport.default('10.0.0.1', (q) => buildReferral(q, 'test.', ['auth.test.'],
+        [aRec('auth.test.', '10.0.0.2')]));
+    transport.on('10.0.0.2', 'hot.test', (q) => {
+        refreshCalls++;
+        return buildAnswer(q, [aRec('hot.test', '192.0.2.99')]);
+    });
+
+    const resolver = new RecursiveResolver({
+        cache: cache,
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false
+    });
+
+    // First call sees the still-fresh prefetch-flagged entry.
+    const r = await resolver.resolve('hot.test', PacketTypes.A);
+    assert.equal((r.answers[0].packetType as A).address, '192.0.2.1',
+        'caller still gets the fresh-but-near-expiry record');
+
+    // Let the background refresh complete.
+    for (let i = 0; i < 10; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    assert.equal(refreshCalls, 1, 'prefetch fires exactly one upstream refresh');
+
+    // Cache must now hold the fresh value.
+    now += 1_000;
+    const fresh = cache.get('hot.test', PacketTypes.A, PacketClass.IN);
+    assert.ok(fresh);
+    assert.equal((fresh!.records[0].packetType as A).address, '192.0.2.99');
+});
+
+test('RecursiveResolver#prefetch dedup shares the in-flight set with stale-while-revalidate', async() => {
+    let now = 1_000_000;
+    const cache = new DnsCache({now: (): number => now, prefetchThreshold: 0.2});
+
+    cache.set('hot.test', PacketTypes.A, PacketClass.IN,
+        [aRec('hot.test', '192.0.2.1')], 60);
+    now += 54_000;
+
+    const transport = new MockTransport();
+    let refreshCalls = 0;
+    transport.default('10.0.0.1', (q) => buildReferral(q, 'test.', ['auth.test.'],
+        [aRec('auth.test.', '10.0.0.2')]));
+    transport.on('10.0.0.2', 'hot.test', (q) => {
+        refreshCalls++;
+        return buildAnswer(q, [aRec('hot.test', '192.0.2.99')]);
+    });
+
+    const resolver = new RecursiveResolver({
+        cache: cache,
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false
+    });
+
+    // Five concurrent calls hitting the same prefetch-flagged entry.
+    await Promise.all([
+        resolver.resolve('hot.test', PacketTypes.A),
+        resolver.resolve('hot.test', PacketTypes.A),
+        resolver.resolve('hot.test', PacketTypes.A),
+        resolver.resolve('hot.test', PacketTypes.A),
+        resolver.resolve('hot.test', PacketTypes.A)
+    ]);
+
+    for (let i = 0; i < 10; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    assert.equal(refreshCalls, 1, 'concurrent prefetch hits dedupe to a single refresh');
+});
+
 test('RecursiveResolver#stale-while-revalidate disabled by default — expired entries trigger full re-resolution', async() => {
     let now = 1_000_000;
     const cache = new DnsCache({now: (): number => now}); // no maxStaleSeconds

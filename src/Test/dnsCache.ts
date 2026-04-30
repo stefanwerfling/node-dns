@@ -213,3 +213,58 @@ test('DnsCache#serve-stale does not mutate the stored entry', () => {
     assert.notEqual(fresh!.stale, true,
         'a re-set entry must not inherit a stale flag from earlier reads');
 });
+
+test('DnsCache#prefetch off by default — no flag on a fresh-but-old entry', () => {
+    let now = 1_000_000;
+    const cache = new DnsCache({now: (): number => now});
+
+    cache.set('www.example.com', PacketTypes.A, PacketClass.IN, [a('www.example.com', '192.0.2.1')], 60);
+    now += 58_000; // 2s remaining of TTL; without prefetch, just a fresh hit
+
+    const got = cache.get('www.example.com', PacketTypes.A, PacketClass.IN);
+    assert.ok(got);
+    assert.notEqual(got!.prefetch, true);
+});
+
+test('DnsCache#prefetch flags fresh entries within the threshold window', () => {
+    let now = 1_000_000;
+    const cache = new DnsCache({now: (): number => now, prefetchThreshold: 0.1});
+
+    cache.set('www.example.com', PacketTypes.A, PacketClass.IN, [a('www.example.com', '192.0.2.1')], 100);
+    // 95s elapsed → 5s remaining = 5% of TTL, below the 10% threshold.
+    now += 95_000;
+
+    const got = cache.get('www.example.com', PacketTypes.A, PacketClass.IN);
+    assert.ok(got);
+    assert.equal(got!.prefetch, true);
+});
+
+test('DnsCache#prefetch leaves entries above the threshold untagged', () => {
+    let now = 1_000_000;
+    const cache = new DnsCache({now: (): number => now, prefetchThreshold: 0.1});
+
+    cache.set('www.example.com', PacketTypes.A, PacketClass.IN, [a('www.example.com', '192.0.2.1')], 100);
+    now += 50_000; // 50s remaining = 50% — well above the 10% threshold
+
+    const got = cache.get('www.example.com', PacketTypes.A, PacketClass.IN);
+    assert.ok(got);
+    assert.notEqual(got!.prefetch, true);
+});
+
+test('DnsCache#prefetch never fires on a stale entry — stale wins', () => {
+    let now = 1_000_000;
+    const cache = new DnsCache({
+        now: (): number => now,
+        prefetchThreshold: 0.5,
+        maxStaleSeconds: 300
+    });
+
+    cache.set('www.example.com', PacketTypes.A, PacketClass.IN, [a('www.example.com', '192.0.2.1')], 60);
+    now += 80_000; // past expiresAt → stale path
+
+    const got = cache.get('www.example.com', PacketTypes.A, PacketClass.IN);
+    assert.ok(got);
+    assert.equal(got!.stale, true);
+    assert.notEqual(got!.prefetch, true,
+        'a stale entry must not also carry the prefetch flag');
+});

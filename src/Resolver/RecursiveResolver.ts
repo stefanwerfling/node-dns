@@ -459,10 +459,13 @@ export class RecursiveResolver {
             const direct = this._cache.get(qname, qtype, qclass);
 
             if (direct !== null) {
-                if (direct.stale === true) {
-                    // RFC 8767 — return the stale answer to this caller
-                    // immediately and kick off an async refresh in the
-                    // background so the next caller sees fresh data.
+                if (direct.stale === true || direct.prefetch === true) {
+                    // RFC 8767 (stale) / BIND-style prefetch — return
+                    // the cached answer to this caller immediately and
+                    // kick off an async refresh so the next caller
+                    // sees fresh data. Prefetch fires *before* expiry
+                    // so the cached entry stays valid until the
+                    // refresh completes.
                     this._scheduleRefresh(qname, qtype, qclass);
                 }
 
@@ -474,7 +477,7 @@ export class RecursiveResolver {
                 const cnameHit = this._cache.get(qname, PacketTypes.CNAME, qclass);
 
                 if (cnameHit !== null && cnameHit.records.length > 0) {
-                    if (cnameHit.stale === true) {
+                    if (cnameHit.stale === true || cnameHit.prefetch === true) {
                         this._scheduleRefresh(qname, PacketTypes.CNAME, qclass);
                     }
 
