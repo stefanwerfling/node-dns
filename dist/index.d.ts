@@ -82,6 +82,8 @@ export { TCPServerEvents, TCPServer } from './Server/TCPServer.js';
 export { TLSServer } from './Server/TLSServer.js';
 export { UDPServer } from './Server/UDPServer.js';
 export { DohServer } from './Server/DohServer.js';
+export { MdnsServer } from './Server/MdnsServer.js';
+export type { MdnsServerOptions, MdnsRequestListener, MdnsSendable, MdnsResponseTarget } from './Server/MdnsServer.js';
 export { AClient } from './Client/AClient.js';
 export { ClientOptionsProtocol, ClientOptions } from './Client/ClientOptions.js';
 export { ClientRequestOptions, ClientRequest } from './Client/ClientRequest.js';
