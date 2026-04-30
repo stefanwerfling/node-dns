@@ -33,6 +33,9 @@ export type RecursiveResolverOptions = {
     maxQueries?: number;
     maxCnameDepth?: number;
     port?: number;
+    tcpFallback?: boolean;
+    tcpPort?: number;
+    tcpTransport?: RecursiveResolverTransport;
     dnssec?: boolean | DnssecResolverOptions;
 };
 export type ResolveOptions = {
@@ -51,6 +54,9 @@ export declare class RecursiveResolver {
     protected _maxQueries: number;
     protected _maxCnameDepth: number;
     protected _port: number;
+    protected _tcpFallback: boolean;
+    protected _tcpPort: number;
+    protected _tcpTransport: RecursiveResolverTransport;
     protected _dnssecEnabled: boolean;
     protected _trustAnchors: ReadonlyArray<TrustAnchor>;
     protected _dnssecMode: DnssecMode;
@@ -69,6 +75,7 @@ export declare class RecursiveResolver {
         ns: PacketResource[];
     }, qclass: PacketClass, ctx: ResolveCtx): Promise<string | null>;
     protected _queryServer(serverIp: string, qname: string, qtype: number | PacketTypes, qclass: PacketClass, ctx: ResolveCtx): Promise<Packet>;
+    protected _sendAndVerify(transport: RecursiveResolverTransport, port: number, serverIp: string, query: Packet, sentName: string, ctx: ResolveCtx): Promise<Packet>;
     protected _cacheResponse(response: Packet, zone: string): void;
     protected _handleAnswer(response: Packet, qname: string, qtype: number | PacketTypes, qclass: PacketClass, ctx: ResolveCtx): Promise<Packet>;
     protected _followCnameFromCache(qname: string, qtype: number | PacketTypes, qclass: PacketClass, ctx: ResolveCtx, cnameRecords: PacketResource[]): Promise<Packet>;
@@ -87,6 +94,7 @@ export declare class RecursiveResolver {
     protected _queryDsAtParent(zone: string, ctx: ResolveCtx): Promise<Packet>;
     protected static _parentOf(zone: string): string;
     protected static _defaultUdpTransport(serverIp: string, port: number, query: Packet): Promise<Packet>;
+    protected static _defaultTcpTransport(serverIp: string, port: number, query: Packet): Promise<Packet>;
     protected static _withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T>;
     protected static _buildResponse(ctx: ResolveCtx, rcode: number, answers: PacketResource[], authorities: PacketResource[]): Packet;
     protected static _cacheEntryToResponse(ctx: ResolveCtx, entry: {

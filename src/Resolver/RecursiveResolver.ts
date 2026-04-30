@@ -1,7 +1,9 @@
 import dgram from 'dgram';
+import tcp from 'net';
 import {Bailiwick} from '../Lib/Bailiwick.js';
 import {DnssecVerifyOptions} from '../Lib/Dnssec.js';
 import {Random0x20} from '../Lib/Random0x20.js';
+import {SocketReader} from '../Lib/SocketReader.js';
 import {Packet} from '../Packet/Packet.js';
 import {PacketClass} from '../Packet/PacketClass.js';
 import {PacketQuestion} from '../Packet/PacketQuestion.js';
@@ -152,6 +154,25 @@ export type RecursiveResolverOptions = {
     port?: number;
 
     /**
+     * Retry over TCP (RFC 7766 §5) when an upstream replies with the
+     * truncation bit set (TC=1). Default: true.
+     */
+    tcpFallback?: boolean;
+
+    /**
+     * Default TCP port queried for the truncation retry. Default: 53.
+     */
+    tcpPort?: number;
+
+    /**
+     * Transport callback used for the TC=1 retry. Default: a one-shot
+     * length-prefixed connection via Node `net`. Mocks can supply an
+     * alternate implementation alongside `transport` to drive
+     * deterministic UDP / TCP routes in tests.
+     */
+    tcpTransport?: RecursiveResolverTransport;
+
+    /**
      * Enable DNSSEC validation. `true` uses bundled IANA trust anchors
      * and `permissive` mode; pass an object for finer-grained control.
      * Default: disabled — answers pass through unvalidated.
@@ -183,12 +204,13 @@ export type ResolveOptions = {
  *    cache untouched but are not verified against a trust anchor. A
  *    follow-up commit will plug the existing `Lib/Dnssec` validator
  *    into the response path and add NXDOMAIN/NODATA proof composition.
- *  - **UDP only.** No TCP fallback on TC=1 — we drop the truncated
- *    response and try the next NS. Most query/response traffic fits in
- *    UDP+EDNS, so this is fine for v1; a TCP retry path will follow.
+ *  - **TCP fallback on TC=1** is on by default (RFC 7766 §5). When an
+ *    upstream replies with the truncation bit set the same question is
+ *    reissued over TCP via the configurable `tcpTransport`. Opt out via
+ *    `tcpFallback: false`; override the port via `tcpPort`.
  *  - **No EDNS-buffer bumping.** We send queries without an OPT record;
- *    auths reply with the standard 512-byte ceiling. Once TCP fallback
- *    lands we'll add EDNS to negotiate larger UDP responses.
+ *    auths reply with the standard 512-byte UDP ceiling and the resolver
+ *    relies on the TCP retry path for oversize answers.
  *  - **No prefetch or stale-while-revalidate.** Cache entries simply
  *    expire and the next query re-resolves from scratch.
  *
@@ -244,6 +266,21 @@ export class RecursiveResolver {
     /**
      * @protected
      */
+    protected _tcpFallback: boolean;
+
+    /**
+     * @protected
+     */
+    protected _tcpPort: number;
+
+    /**
+     * @protected
+     */
+    protected _tcpTransport: RecursiveResolverTransport;
+
+    /**
+     * @protected
+     */
     protected _dnssecEnabled: boolean;
 
     /**
@@ -281,6 +318,9 @@ export class RecursiveResolver {
         this._maxQueries = options.maxQueries ?? 50;
         this._maxCnameDepth = options.maxCnameDepth ?? 16;
         this._port = options.port ?? 53;
+        this._tcpFallback = options.tcpFallback ?? true;
+        this._tcpPort = options.tcpPort ?? 53;
+        this._tcpTransport = options.tcpTransport ?? RecursiveResolver._defaultTcpTransport;
 
         const dnssecOpt = options.dnssec;
         this._dnssecEnabled = dnssecOpt !== undefined && dnssecOpt !== false;
@@ -566,6 +606,13 @@ export class RecursiveResolver {
      * 16-bit ID and an optional 0x20 case scramble. Verifies the
      * response's question echoes the case (RFC 5452 §9.2) before
      * returning.
+     *
+     * RFC 7766 §5: when the UDP response carries TC=1, the resolver
+     * reissues the same question over TCP (default port 53) using the
+     * configured TCP transport. The retry counts as a separate query
+     * against the resolution budget and runs under the remaining
+     * `timeoutMs` window. TCP failures propagate; the outer iteration
+     * loop converts them to SERVFAIL via the `try/catch` in `resolve()`.
      * @protected
      */
     protected async _queryServer(
@@ -575,9 +622,6 @@ export class RecursiveResolver {
         qclass: PacketClass,
         ctx: ResolveCtx
     ): Promise<Packet> {
-        ctx.queriesIssued++;
-        this._guardBudget(ctx);
-
         const sentName = this._use0x20 ? Random0x20.scramble(qname) : qname;
 
         const query = new Packet();
@@ -586,13 +630,41 @@ export class RecursiveResolver {
         query.header.rd = 0; // We're iterating ourselves.
         query.questions.push(new PacketQuestion(sentName, qtype, qclass));
 
+        const response = await this._sendAndVerify(this._transport, this._port, serverIp, query, sentName, ctx);
+
+        if (response.header.tc === 1 && this._tcpFallback) {
+            return this._sendAndVerify(this._tcpTransport, this._tcpPort, serverIp, query, sentName, ctx);
+        }
+
+        return response;
+    }
+
+    /**
+     * Send `query` via `transport`, enforce the per-query deadline, and
+     * verify the response's transaction ID + 0x20 case echo. Each call
+     * counts as one upstream query against the resolution budget.
+     * @protected
+     */
+    protected async _sendAndVerify(
+        transport: RecursiveResolverTransport,
+        port: number,
+        serverIp: string,
+        query: Packet,
+        sentName: string,
+        ctx: ResolveCtx
+    ): Promise<Packet> {
+        ctx.queriesIssued++;
+        this._guardBudget(ctx);
+
         const remaining = Math.max(1, ctx.timeoutMs - (Date.now() - ctx.startTime));
         const deadline = Math.min(ctx.queryTimeoutMs, remaining);
 
+        const q = query.questions[0];
+
         const response = await RecursiveResolver._withTimeout(
-            this._transport(serverIp, this._port, query),
+            transport(serverIp, port, query),
             deadline,
-            `query ${serverIp} for ${qname}/${qtype}`
+            `query ${serverIp} for ${q.name}/${q.type}`
         );
 
         if (response.header.id !== query.header.id) {
@@ -1242,6 +1314,61 @@ export class RecursiveResolver {
                     finish(err);
                 }
             });
+        });
+    }
+
+    /**
+     * Default TCP transport for the TC=1 retry path (RFC 7766). One-shot
+     * length-prefixed connection per query — no connection pooling in
+     * v1. Returns the parsed `Packet`.
+     * @protected
+     */
+    protected static _defaultTcpTransport(
+        serverIp: string,
+        port: number,
+        query: Packet
+    ): Promise<Packet> {
+        return new Promise((resolve, reject) => {
+            const socket = tcp.createConnection({host: serverIp, port: port});
+            let settled = false;
+
+            const finish = (err: Error | null, packet?: Packet): void => {
+                if (settled) {
+                    return;
+                }
+
+                settled = true;
+
+                try {
+                    socket.destroy();
+                } catch {
+                    /* socket may already be closed */
+                }
+
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(packet!);
+                }
+            };
+
+            socket.once('connect', () => {
+                const message = query.toBuffer();
+                const len = Buffer.alloc(2);
+                len.writeUInt16BE(message.length);
+                socket.write(Buffer.concat([len, message]));
+            });
+
+            SocketReader.readStream(socket).then(
+                (data) => {
+                    try {
+                        finish(null, Packet.parse(data));
+                    } catch (err) {
+                        finish(err instanceof Error ? err : new Error(String(err)));
+                    }
+                },
+                (err) => finish(err)
+            );
         });
     }
 

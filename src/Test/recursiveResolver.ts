@@ -542,6 +542,157 @@ test('RecursiveResolver#min TTL of an RRset is what gets cached', async() => {
     assert.equal(entry!.expiresAt, 1_000_000 + 50_000);
 });
 
+test('RecursiveResolver#TC=1 triggers TCP retry that returns full answer', async() => {
+    const udp = new MockTransport();
+    const tcp = new MockTransport();
+
+    udp.default('10.0.0.1', (q) => buildReferral(q, 'example.com.', ['auth.test.'],
+        [aRec('auth.test.', '10.0.0.2')]));
+
+    // Auth replies over UDP with TC=1 and an empty answer set — the
+    // resolver must reissue the same question over TCP.
+    udp.on('10.0.0.2', 'big.example.com', (q) => {
+        const r = new Packet();
+        r.header.id = q.header.id;
+        r.header.qr = 1;
+        r.header.aa = 1;
+        r.header.tc = 1;
+        r.questions = q.questions.slice();
+        r.answers = [];
+        return r;
+    });
+
+    // TCP path: full answer (multiple A records, way over 512 bytes in
+    // a real scenario; we only need the resolver to follow the retry).
+    tcp.on('10.0.0.2', 'big.example.com', (q) => buildAnswer(q, [
+        aRec('big.example.com', '198.51.100.1'),
+        aRec('big.example.com', '198.51.100.2'),
+        aRec('big.example.com', '198.51.100.3')
+    ]));
+
+    const resolver = new RecursiveResolver({
+        transport: udp.asTransport(),
+        tcpTransport: tcp.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false
+    });
+
+    const r = await resolver.resolve('big.example.com', PacketTypes.A);
+    assert.equal(r.header.rcode, RCODE.NOERROR);
+    assert.equal(r.answers.length, 3);
+    // One UDP query (truncated) plus one TCP query for the same NS.
+    assert.equal(udp.count('10.0.0.2'), 1);
+    assert.equal(tcp.count('10.0.0.2'), 1);
+});
+
+test('RecursiveResolver#TC=1 does not retry when tcpFallback is disabled', async() => {
+    const udp = new MockTransport();
+    const tcp = new MockTransport();
+
+    udp.default('10.0.0.1', (q) => buildReferral(q, 'example.com.', ['auth.test.'],
+        [aRec('auth.test.', '10.0.0.2')]));
+
+    udp.on('10.0.0.2', 'big.example.com', (q) => {
+        const r = new Packet();
+        r.header.id = q.header.id;
+        r.header.qr = 1;
+        r.header.aa = 1;
+        r.header.tc = 1;
+        r.questions = q.questions.slice();
+        r.answers = [aRec('big.example.com', '198.51.100.1')];
+        return r;
+    });
+
+    // If the resolver would retry, this would fire — we assert it never does.
+    tcp.on('10.0.0.2', 'big.example.com', () => {
+        throw new Error('TCP transport must not be used when tcpFallback is disabled');
+    });
+
+    const resolver = new RecursiveResolver({
+        transport: udp.asTransport(),
+        tcpTransport: tcp.asTransport(),
+        tcpFallback: false,
+        rootHints: TEST_ROOTS,
+        use0x20: false
+    });
+
+    // The truncated UDP answer (aa=1, answers present) is taken at face
+    // value when fallback is off — useful only for testing the opt-out
+    // shape; in production this is why fallback is on by default.
+    const r = await resolver.resolve('big.example.com', PacketTypes.A);
+    assert.equal(r.header.rcode, RCODE.NOERROR);
+    assert.equal(udp.count('10.0.0.2'), 1);
+    assert.equal(tcp.count('10.0.0.2'), 0);
+});
+
+test('RecursiveResolver#TCP transport failure surfaces as SERVFAIL', async() => {
+    const udp = new MockTransport();
+    const tcp = new MockTransport();
+
+    udp.default('10.0.0.1', (q) => buildReferral(q, 'example.com.', ['auth.test.'],
+        [aRec('auth.test.', '10.0.0.2')]));
+
+    udp.on('10.0.0.2', 'big.example.com', (q) => {
+        const r = new Packet();
+        r.header.id = q.header.id;
+        r.header.qr = 1;
+        r.header.aa = 1;
+        r.header.tc = 1;
+        r.questions = q.questions.slice();
+        r.answers = [];
+        return r;
+    });
+
+    tcp.on('10.0.0.2', 'big.example.com', () => {
+        throw new Error('connection refused');
+    });
+
+    const resolver = new RecursiveResolver({
+        transport: udp.asTransport(),
+        tcpTransport: tcp.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false
+    });
+
+    const r = await resolver.resolve('big.example.com', PacketTypes.A);
+    assert.equal(r.header.rcode, RCODE.SERVFAIL);
+});
+
+test('RecursiveResolver#TCP retry counts toward query budget', async() => {
+    const udp = new MockTransport();
+    const tcp = new MockTransport();
+
+    udp.default('10.0.0.1', (q) => buildReferral(q, 'example.com.', ['auth.test.'],
+        [aRec('auth.test.', '10.0.0.2')]));
+
+    udp.on('10.0.0.2', 'big.example.com', (q) => {
+        const r = new Packet();
+        r.header.id = q.header.id;
+        r.header.qr = 1;
+        r.header.aa = 1;
+        r.header.tc = 1;
+        r.questions = q.questions.slice();
+        return r;
+    });
+
+    tcp.on('10.0.0.2', 'big.example.com', (q) => buildAnswer(q, [
+        aRec('big.example.com', '198.51.100.1')
+    ]));
+
+    // Budget = 2: root referral (1) + UDP query (2). The TCP retry
+    // should bump us over → SERVFAIL.
+    const resolver = new RecursiveResolver({
+        transport: udp.asTransport(),
+        tcpTransport: tcp.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false,
+        maxQueries: 2
+    });
+
+    const r = await resolver.resolve('big.example.com', PacketTypes.A);
+    assert.equal(r.header.rcode, RCODE.SERVFAIL);
+});
+
 test('RecursiveResolver#AAAA glue is used when no A is available', async() => {
     const transport = new MockTransport();
     transport.default('::1', (q) => buildAnswer(q, [

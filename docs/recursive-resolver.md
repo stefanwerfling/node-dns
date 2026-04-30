@@ -98,6 +98,11 @@ new RecursiveResolver({
   maxCnameDepth: 16,          // CNAME hops before giving up
 
   port: 53,                   // upstream UDP port
+
+  // RFC 7766 §5 TCP fallback — see "Truncation" below
+  tcpFallback: true,          // retry over TCP on TC=1 (default true)
+  tcpPort: 53,                // upstream TCP port
+  tcpTransport: myTcp,        // injectable, default = Node `net` one-shot
 });
 ```
 
@@ -155,14 +160,36 @@ in `Lib/` provide:
 
 What the resolver does **not** do (yet):
 
-- **TCP fallback on TC=1.** Truncated UDP responses are dropped and the
-  next nameserver is tried. Most query/response traffic fits in 512
-  bytes UDP; this becomes important once large-AXFR-style answers
-  enter the recursive path.
 - **EDNS-buffer negotiation.** No OPT record is sent on outgoing
   queries.
 - **Stale-while-revalidate / prefetch.** Entries simply expire and are
   re-resolved.
+
+## Truncation (RFC 7766 §5)
+
+When an upstream replies with `TC=1` (response too large for UDP) the
+resolver reissues the same question over TCP via `tcpTransport`
+(default: a one-shot length-prefixed connection over Node `net`). The
+retry counts as a separate query against `maxQueries` and runs under
+the remaining `timeoutMs` window — so a poorly-behaved upstream that
+truncates everything still hits the budget cap.
+
+```ts
+new RecursiveResolver({
+  tcpFallback: true,                // default
+  tcpPort: 53,                      // default
+  tcpTransport: async (ip, port, query) => {
+    /* custom TCP transport — same shape as `transport` */
+  },
+});
+
+// Opt out (truncated responses are passed through unmodified):
+new RecursiveResolver({tcpFallback: false});
+```
+
+Failures of the TCP retry (timeout, connection refused, parse error)
+propagate up and surface as `SERVFAIL` to the caller. There is no
+TCP-side connection pooling in v1 — every retry opens a fresh socket.
 
 ## DNSSEC validation (opt-in)
 
