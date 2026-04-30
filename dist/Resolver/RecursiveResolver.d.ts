@@ -60,6 +60,7 @@ export declare class RecursiveResolver {
     protected _tcpTransport: RecursiveResolverTransport;
     protected _useEdns: boolean;
     protected _serverBuffers: Map<string, number>;
+    protected _refreshInFlight: Set<string>;
     protected _udpPayloadSize: number;
     protected _dnssecEnabled: boolean;
     protected _dnssecValidator: DnssecValidator | null;
@@ -82,6 +83,7 @@ export declare class RecursiveResolver {
     protected _followCnameFromCache(qname: string, qtype: number | PacketTypes, qclass: PacketClass, ctx: ResolveCtx, cnameRecords: PacketResource[]): Promise<Packet>;
     protected _referralZone(response: Packet, currentZone: string): string | null;
     protected _guardBudget(ctx: ResolveCtx): void;
+    protected _scheduleRefresh(qname: string, qtype: number | PacketTypes, qclass: PacketClass): void;
     protected static _buildResponse(ctx: ResolveCtx, rcode: number, answers: PacketResource[], authorities: PacketResource[]): Packet;
     protected static _cacheEntryToResponse(ctx: ResolveCtx, entry: {
         records: PacketResource[];
@@ -102,4 +104,5 @@ export type ResolveCtx = {
     originalQtype: number | PacketTypes;
     qclass: PacketClass;
     inAuthChain?: boolean;
+    bypassCache?: boolean;
 };

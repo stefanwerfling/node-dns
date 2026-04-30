@@ -319,6 +319,15 @@ export class RecursiveResolver {
     protected _serverBuffers: Map<string, number>;
 
     /**
+     * In-flight serve-stale refresh keys — `<qname>|<qtype>|<qclass>`.
+     * Used to dedupe: if a refresh is already running for a given
+     * triple, a second stale hit on the same key won't kick off
+     * another. RFC 8767 §6 calls out the stampede risk explicitly.
+     * @protected
+     */
+    protected _refreshInFlight: Set<string>;
+
+    /**
      * @protected
      */
     protected _udpPayloadSize: number;
@@ -355,6 +364,7 @@ export class RecursiveResolver {
         this._useEdns = options.useEdns ?? true;
         this._udpPayloadSize = options.udpPayloadSize ?? 4096;
         this._serverBuffers = new Map();
+        this._refreshInFlight = new Set();
 
         const dnssecOpt = options.dnssec;
         this._dnssecEnabled = dnssecOpt !== undefined && dnssecOpt !== false;
@@ -443,18 +453,33 @@ export class RecursiveResolver {
         ctx: ResolveCtx
     ): Promise<Packet> {
         // Direct cache hit on the requested (qname, qtype)?
-        const direct = this._cache.get(qname, qtype, qclass);
+        // Skip the cache check for refresh resolutions — those are
+        // explicitly asking the upstream chain for fresh data.
+        if (ctx.bypassCache !== true) {
+            const direct = this._cache.get(qname, qtype, qclass);
 
-        if (direct !== null) {
-            return RecursiveResolver._cacheEntryToResponse(ctx, direct);
-        }
+            if (direct !== null) {
+                if (direct.stale === true) {
+                    // RFC 8767 — return the stale answer to this caller
+                    // immediately and kick off an async refresh in the
+                    // background so the next caller sees fresh data.
+                    this._scheduleRefresh(qname, qtype, qclass);
+                }
 
-        // Cached CNAME at qname → follow it (when qtype isn't CNAME itself).
-        if (qtype !== PacketTypes.CNAME) {
-            const cnameHit = this._cache.get(qname, PacketTypes.CNAME, qclass);
+                return RecursiveResolver._cacheEntryToResponse(ctx, direct);
+            }
 
-            if (cnameHit !== null && cnameHit.records.length > 0) {
-                return this._followCnameFromCache(qname, qtype, qclass, ctx, cnameHit.records);
+            // Cached CNAME at qname → follow it (when qtype isn't CNAME itself).
+            if (qtype !== PacketTypes.CNAME) {
+                const cnameHit = this._cache.get(qname, PacketTypes.CNAME, qclass);
+
+                if (cnameHit !== null && cnameHit.records.length > 0) {
+                    if (cnameHit.stale === true) {
+                        this._scheduleRefresh(qname, PacketTypes.CNAME, qclass);
+                    }
+
+                    return this._followCnameFromCache(qname, qtype, qclass, ctx, cnameHit.records);
+                }
             }
         }
 
@@ -939,6 +964,56 @@ export class RecursiveResolver {
         }
     }
 
+    /**
+     * Kick off an asynchronous re-resolution of `(qname, qtype, qclass)`
+     * to refresh a stale cache entry under RFC 8767 serve-stale.
+     *
+     * The refresh runs through the full iterative loop (`bypassCache:
+     * true` so it doesn't immediately return the stale entry it's
+     * meant to replace), populates the cache via the normal
+     * `_cacheResponse` path on success, and silently swallows any
+     * upstream errors — the caller has already received the stale
+     * answer and we don't want a transient failure to surface.
+     *
+     * In-flight refreshes are tracked in `_refreshInFlight` so the
+     * second of two near-simultaneous stale hits doesn't kick off a
+     * duplicate.
+     *
+     * @param {string} qname
+     * @param {number|PacketTypes} qtype
+     * @param {PacketClass} qclass
+     * @protected
+     */
+    protected _scheduleRefresh(qname: string, qtype: number | PacketTypes, qclass: PacketClass): void {
+        const key = `${qname.toLowerCase()}|${qtype}|${qclass}`;
+
+        if (this._refreshInFlight.has(key)) {
+            return;
+        }
+
+        this._refreshInFlight.add(key);
+
+        const refreshCtx: ResolveCtx = {
+            startTime: Date.now(),
+            timeoutMs: this._timeoutMs,
+            queryTimeoutMs: this._queryTimeoutMs,
+            maxQueries: this._maxQueries,
+            maxCnameDepth: this._maxCnameDepth,
+            queriesIssued: 0,
+            cnameDepth: 0,
+            chain: [],
+            visited: new Set(),
+            originalQname: qname,
+            originalQtype: qtype,
+            qclass: qclass,
+            bypassCache: true
+        };
+
+        this._resolveOnce(qname, qtype, qclass, refreshCtx).then(
+            () => this._refreshInFlight.delete(key),
+            () => this._refreshInFlight.delete(key)
+        );
+    }
 
     /* ---------------------------------------------------------------- */
     /*  Static helpers                                                   */
@@ -1016,4 +1091,14 @@ export type ResolveCtx = {
      * must not themselves be DNSSEC-validated (would recurse forever).
      */
     inAuthChain?: boolean;
+
+    /**
+     * Set on the ctx of an asynchronous serve-stale refresh — the
+     * background resolution that runs while a stale answer is being
+     * returned to the original caller. Forces `_resolveOnce` to skip
+     * its cache lookup so the refresh actually hits the upstream
+     * chain instead of seeing the still-cached stale entry and
+     * returning that.
+     */
+    bypassCache?: boolean;
 };

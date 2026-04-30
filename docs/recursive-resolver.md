@@ -43,6 +43,7 @@ const cache = new DnsCache({
   maxEntries: 50_000,        // LRU cap (default 10 000)
   maxTtlSeconds: 86_400,     // RFC 8767 ceiling (default 1 day)
   minTtlSeconds: 5,          // floor for TTL=0 responses (default 0)
+  maxStaleSeconds: 86_400,   // RFC 8767 serve-stale window (default 0 = off)
 });
 
 cache.get('www.example.com', PacketTypes.A, PacketClass.IN);
@@ -164,8 +165,9 @@ in `Lib/` provide:
 
 What the resolver does **not** do (yet):
 
-- **Stale-while-revalidate / prefetch.** Entries simply expire and are
-  re-resolved.
+- **Prefetch.** Entries are not refreshed proactively before they
+  expire — only on the first access after expiry (when serve-stale
+  is enabled).
 
 ## Truncation (RFC 7766 §5)
 
@@ -338,6 +340,37 @@ const resolver = new RecursiveResolver({
   },
 });
 ```
+
+## Serve-stale (RFC 8767)
+
+Configure the underlying cache with `maxStaleSeconds > 0` to enable
+serve-stale: when an entry is past its TTL but still inside the stale
+window, the resolver returns the stale answer to the current request
+*and* fires an asynchronous refresh in the background. The next caller
+sees the fresh data.
+
+```ts
+import {DnsCache, RecursiveResolver} from 'dns2ts';
+
+const resolver = new RecursiveResolver({
+  cache: new DnsCache({maxStaleSeconds: 86_400}), // 1-day stale window
+});
+```
+
+The refresh runs through the full iterative loop (with `bypassCache`
+internally so it doesn't immediately return the stale entry it's
+meant to replace), populates the cache via the normal cache-write
+path, and silently swallows any upstream error — the caller has
+already received the stale answer and a transient upstream failure
+should not surface.
+
+Concurrent stale hits dedupe via an in-flight set keyed by
+`(qname, qtype, qclass)`, so the second of two near-simultaneous
+stale lookups doesn't kick off a duplicate refresh (RFC 8767 §6
+calls out the stampede risk explicitly).
+
+`maxStaleSeconds: 0` (the default) disables serve-stale — expired
+entries are dropped and the next caller waits on a fresh resolution.
 
 ## Negative caching (RFC 2308)
 

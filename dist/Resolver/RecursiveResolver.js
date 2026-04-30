@@ -36,6 +36,7 @@ export class RecursiveResolver {
     _tcpTransport;
     _useEdns;
     _serverBuffers;
+    _refreshInFlight;
     _udpPayloadSize;
     _dnssecEnabled;
     _dnssecValidator;
@@ -54,6 +55,7 @@ export class RecursiveResolver {
         this._useEdns = options.useEdns ?? true;
         this._udpPayloadSize = options.udpPayloadSize ?? 4096;
         this._serverBuffers = new Map();
+        this._refreshInFlight = new Set();
         const dnssecOpt = options.dnssec;
         this._dnssecEnabled = dnssecOpt !== undefined && dnssecOpt !== false;
         if (this._dnssecEnabled) {
@@ -96,14 +98,22 @@ export class RecursiveResolver {
         }
     }
     async _resolveOnce(qname, qtype, qclass, ctx) {
-        const direct = this._cache.get(qname, qtype, qclass);
-        if (direct !== null) {
-            return RecursiveResolver._cacheEntryToResponse(ctx, direct);
-        }
-        if (qtype !== PacketTypes.CNAME) {
-            const cnameHit = this._cache.get(qname, PacketTypes.CNAME, qclass);
-            if (cnameHit !== null && cnameHit.records.length > 0) {
-                return this._followCnameFromCache(qname, qtype, qclass, ctx, cnameHit.records);
+        if (ctx.bypassCache !== true) {
+            const direct = this._cache.get(qname, qtype, qclass);
+            if (direct !== null) {
+                if (direct.stale === true) {
+                    this._scheduleRefresh(qname, qtype, qclass);
+                }
+                return RecursiveResolver._cacheEntryToResponse(ctx, direct);
+            }
+            if (qtype !== PacketTypes.CNAME) {
+                const cnameHit = this._cache.get(qname, PacketTypes.CNAME, qclass);
+                if (cnameHit !== null && cnameHit.records.length > 0) {
+                    if (cnameHit.stale === true) {
+                        this._scheduleRefresh(qname, PacketTypes.CNAME, qclass);
+                    }
+                    return this._followCnameFromCache(qname, qtype, qclass, ctx, cnameHit.records);
+                }
             }
         }
         let currentName = qname;
@@ -359,6 +369,29 @@ export class RecursiveResolver {
         if (ctx.queriesIssued >= ctx.maxQueries) {
             throw new Error(`RecursiveResolver: max queries (${ctx.maxQueries})`);
         }
+    }
+    _scheduleRefresh(qname, qtype, qclass) {
+        const key = `${qname.toLowerCase()}|${qtype}|${qclass}`;
+        if (this._refreshInFlight.has(key)) {
+            return;
+        }
+        this._refreshInFlight.add(key);
+        const refreshCtx = {
+            startTime: Date.now(),
+            timeoutMs: this._timeoutMs,
+            queryTimeoutMs: this._queryTimeoutMs,
+            maxQueries: this._maxQueries,
+            maxCnameDepth: this._maxCnameDepth,
+            queriesIssued: 0,
+            cnameDepth: 0,
+            chain: [],
+            visited: new Set(),
+            originalQname: qname,
+            originalQtype: qtype,
+            qclass: qclass,
+            bypassCache: true
+        };
+        this._resolveOnce(qname, qtype, qclass, refreshCtx).then(() => this._refreshInFlight.delete(key), () => this._refreshInFlight.delete(key));
     }
     static _buildResponse(ctx, rcode, answers, authorities) {
         const out = new Packet();

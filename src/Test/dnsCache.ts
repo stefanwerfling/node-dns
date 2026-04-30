@@ -150,3 +150,66 @@ test('DnsCache#stored records are detached from the input array', () => {
     const got = cache.get('www.example.com', PacketTypes.A, PacketClass.IN);
     assert.equal(got!.records.length, 1);
 });
+
+test('DnsCache#serve-stale off by default — expired entries return null', () => {
+    let now = 1_000_000;
+    const cache = new DnsCache({now: (): number => now});
+
+    cache.set('www.example.com', PacketTypes.A, PacketClass.IN, [a('www.example.com', '192.0.2.1')], 60);
+    now += 70_000; // 10s past expiry
+    assert.equal(cache.get('www.example.com', PacketTypes.A, PacketClass.IN), null);
+});
+
+test('DnsCache#serve-stale returns expired entries with stale=true within the window', () => {
+    let now = 1_000_000;
+    const cache = new DnsCache({now: (): number => now, maxStaleSeconds: 300});
+
+    cache.set('www.example.com', PacketTypes.A, PacketClass.IN, [a('www.example.com', '192.0.2.1')], 60);
+    now += 70_000; // 10s past expiry, still inside the 300s stale window
+
+    const got = cache.get('www.example.com', PacketTypes.A, PacketClass.IN);
+    assert.ok(got);
+    assert.equal(got!.stale, true);
+    assert.equal((got!.records[0].packetType as A).address, '192.0.2.1');
+});
+
+test('DnsCache#serve-stale evicts past the max-stale window', () => {
+    let now = 1_000_000;
+    const cache = new DnsCache({now: (): number => now, maxStaleSeconds: 300});
+
+    cache.set('www.example.com', PacketTypes.A, PacketClass.IN, [a('www.example.com', '192.0.2.1')], 60);
+    // Past expiresAt (60s) + maxStale (300s) = 360s past insert.
+    now += 400_000;
+    assert.equal(cache.get('www.example.com', PacketTypes.A, PacketClass.IN), null);
+});
+
+test('DnsCache#serve-stale leaves fresh entries untagged', () => {
+    let now = 1_000_000;
+    const cache = new DnsCache({now: (): number => now, maxStaleSeconds: 300});
+
+    cache.set('www.example.com', PacketTypes.A, PacketClass.IN, [a('www.example.com', '192.0.2.1')], 60);
+    now += 30_000; // still inside the original 60s TTL
+
+    const got = cache.get('www.example.com', PacketTypes.A, PacketClass.IN);
+    assert.ok(got);
+    assert.notEqual(got!.stale, true, 'fresh entries must not be flagged stale');
+});
+
+test('DnsCache#serve-stale does not mutate the stored entry', () => {
+    let now = 1_000_000;
+    const cache = new DnsCache({now: (): number => now, maxStaleSeconds: 300});
+
+    cache.set('www.example.com', PacketTypes.A, PacketClass.IN, [a('www.example.com', '192.0.2.1')], 60);
+    now += 70_000;
+
+    const stale = cache.get('www.example.com', PacketTypes.A, PacketClass.IN);
+    assert.ok(stale);
+    assert.equal(stale!.stale, true);
+
+    // Re-set the entry with a fresh TTL.
+    cache.set('www.example.com', PacketTypes.A, PacketClass.IN, [a('www.example.com', '192.0.2.2')], 60);
+    const fresh = cache.get('www.example.com', PacketTypes.A, PacketClass.IN);
+    assert.ok(fresh);
+    assert.notEqual(fresh!.stale, true,
+        'a re-set entry must not inherit a stale flag from earlier reads');
+});

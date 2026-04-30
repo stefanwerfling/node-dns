@@ -934,3 +934,123 @@ test('RecursiveResolver#missing OPT in response leaves our default unchanged', a
     assert.ok(opt);
     assert.equal(opt.class, 4096);
 });
+
+test('RecursiveResolver#stale cache hit is returned immediately and triggers a background refresh', async() => {
+    let now = 1_000_000;
+    const cache = new DnsCache({now: (): number => now, maxStaleSeconds: 300});
+
+    // Seed the cache with a record that's already 10s past TTL.
+    cache.set('stale.test', PacketTypes.A, PacketClass.IN,
+        [aRec('stale.test', '192.0.2.1')], 60);
+    now += 70_000;
+
+    const transport = new MockTransport();
+    let refreshCalls = 0;
+    transport.default('10.0.0.1', (q) => buildReferral(q, 'test.', ['auth.test.'],
+        [aRec('auth.test.', '10.0.0.2')]));
+    transport.on('10.0.0.2', 'stale.test', (q) => {
+        refreshCalls++;
+        return buildAnswer(q, [aRec('stale.test', '192.0.2.99')]);
+    });
+
+    const resolver = new RecursiveResolver({
+        cache: cache,
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false
+    });
+
+    // First call — cache hit, returns the *stale* record (10.0.0.2 not consulted yet).
+    const r = await resolver.resolve('stale.test', PacketTypes.A);
+    assert.equal(r.header.rcode, RCODE.NOERROR);
+    assert.equal((r.answers[0].packetType as A).address, '192.0.2.1',
+        'caller must see the stale record on the original request');
+
+    // Let the background refresh complete. The mock transport resolves
+    // synchronously inside an async wrapper, so a few microtask ticks
+    // is enough.
+    for (let i = 0; i < 10; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    assert.equal(refreshCalls, 1, 'background refresh must have hit the upstream auth');
+
+    // The cache should now hold the fresh value.
+    now += 1_000;
+    const fresh = cache.get('stale.test', PacketTypes.A, PacketClass.IN);
+    assert.ok(fresh);
+    assert.notEqual(fresh!.stale, true);
+    assert.equal((fresh!.records[0].packetType as A).address, '192.0.2.99');
+});
+
+test('RecursiveResolver#concurrent stale hits dedupe the refresh', async() => {
+    let now = 1_000_000;
+    const cache = new DnsCache({now: (): number => now, maxStaleSeconds: 300});
+
+    cache.set('stale.test', PacketTypes.A, PacketClass.IN,
+        [aRec('stale.test', '192.0.2.1')], 60);
+    now += 70_000;
+
+    const transport = new MockTransport();
+    let refreshCalls = 0;
+    transport.default('10.0.0.1', (q) => buildReferral(q, 'test.', ['auth.test.'],
+        [aRec('auth.test.', '10.0.0.2')]));
+    transport.on('10.0.0.2', 'stale.test', (q) => {
+        refreshCalls++;
+        return buildAnswer(q, [aRec('stale.test', '192.0.2.99')]);
+    });
+
+    const resolver = new RecursiveResolver({
+        cache: cache,
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false
+    });
+
+    // Three concurrent calls hitting the same stale entry.
+    await Promise.all([
+        resolver.resolve('stale.test', PacketTypes.A),
+        resolver.resolve('stale.test', PacketTypes.A),
+        resolver.resolve('stale.test', PacketTypes.A)
+    ]);
+
+    for (let i = 0; i < 10; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    // RFC 8767 §6 — only one refresh should fire even though three
+    // callers saw a stale entry.
+    assert.equal(refreshCalls, 1);
+});
+
+test('RecursiveResolver#stale-while-revalidate disabled by default — expired entries trigger full re-resolution', async() => {
+    let now = 1_000_000;
+    const cache = new DnsCache({now: (): number => now}); // no maxStaleSeconds
+
+    cache.set('stale.test', PacketTypes.A, PacketClass.IN,
+        [aRec('stale.test', '192.0.2.1')], 60);
+    now += 70_000;
+
+    const transport = new MockTransport();
+    let upstreamCalls = 0;
+    transport.default('10.0.0.1', (q) => buildReferral(q, 'test.', ['auth.test.'],
+        [aRec('auth.test.', '10.0.0.2')]));
+    transport.on('10.0.0.2', 'stale.test', (q) => {
+        upstreamCalls++;
+        return buildAnswer(q, [aRec('stale.test', '192.0.2.99')]);
+    });
+
+    const resolver = new RecursiveResolver({
+        cache: cache,
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false
+    });
+
+    const r = await resolver.resolve('stale.test', PacketTypes.A);
+    // The expired entry was discarded — caller waits on a fresh resolution.
+    assert.equal((r.answers[0].packetType as A).address, '192.0.2.99');
+    assert.equal(upstreamCalls, 1);
+});
