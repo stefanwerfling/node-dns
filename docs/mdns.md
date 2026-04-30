@@ -133,13 +133,60 @@ multicast group. The `joinMulticastGroup` flag default makes that
 join, and behaves like a regular UDP client over loopback. See
 `Test/mdns.ts` for the pattern.
 
-## Out of scope (for now)
+## Server side — `MdnsServer`
 
-- **Probing / conflict resolution** (RFC 6762 §8) — applies to
-  *responders*, not clients. The application is on the hook.
-- **Goodbye / TTL=0 announcements** (§10.1) — same.
-- **Continuous monitoring** — the client is a one-shot lookup, not a
-  long-lived subscription. RFC 8765 (DNS Push) is the right tool for
-  that.
-- **Server side.** A `MdnsServer` is a natural follow-up; this commit
-  only ships the client.
+Listens on the multicast group + 5353 and emits `request` events
+shaped like every other server in the project. The handler decides
+what to respond with — there is no built-in record store.
+
+```ts
+import {MdnsServer, Packet, PacketResource, PacketClass, A} from 'dns2ts';
+
+const server = new MdnsServer({
+  // multicastAddr: '224.0.0.251',  // default IPv4 mcast group
+  // port: 5353,                     // default mDNS port
+  // family: 'udp4',                 // 'udp4' | 'udp6'
+  // joinMulticastGroup: true,       // auto-detected from multicastAddr
+  // reuseAddr: true,                // share 5353 with avahi-daemon etc.
+});
+
+server.on('request', (msg, send, rinfo) => {
+  // Match the question(s) and respond.
+  if (msg.questions[0]?.name === 'printer.local') {
+    const reply = new Packet();
+    reply.header.qr = 1;
+    reply.header.aa = 1;
+    reply.questions = msg.questions.slice();
+    reply.answers = [
+      new PacketResource('printer.local', new A('192.168.1.5'),
+                         PacketClass.IN, 120)
+    ];
+    send(reply);   // 'auto' — multicast unless any question carried QU
+  }
+});
+
+await server.listen();
+```
+
+`send(msg, target?)` decides the routing:
+
+- `'auto'` (default) — multicast, *unless* any question on the
+  request had the QU bit set, in which case unicast back to the
+  source.
+- `'multicast'` — always send to the configured multicast group.
+- `'unicast'` — always send back to `rinfo.address:rinfo.port`.
+
+`qr=1` traffic (other devices' responses) and malformed datagrams are
+silently filtered before reaching the handler — the multicast group
+sees a lot of unrelated chatter.
+
+### Out of scope (for now)
+
+- **Probing / conflict resolution** (RFC 6762 §8) — a real-world
+  responder must probe before claiming a name and re-probe on
+  conflict; that depends on what records you're announcing, so it's
+  left to application code. The server gives you the wire primitives.
+- **Goodbye / TTL=0 announcements** (§10.1) — the handler can
+  construct and send these via `send()`; the server doesn't
+  synthesize them.
+- **Continuous announcements** — same.

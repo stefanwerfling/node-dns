@@ -77,6 +77,7 @@ export { UpdateClient } from './Client/UpdateClient.js';
 export { DohClient } from './Client/DohClient.js';
 export { GoogleClient } from './Client/GoogleClient.js';
 export { MdnsClient, MDNS_MULTICAST_IPV4, MDNS_MULTICAST_IPV6, MDNS_PORT, MDNS_QU_BIT, MDNS_CACHE_FLUSH_BIT } from './Client/MdnsClient.js';
+export { ServiceDiscovery } from './Client/ServiceDiscovery.js';
 export { DnsCache } from './Resolver/DnsCache.js';
 export { RootHints } from './Resolver/RootHints.js';
 export { RCODE, RecursiveResolver } from './Resolver/RecursiveResolver.js';
