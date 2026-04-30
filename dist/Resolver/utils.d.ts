@@ -1,0 +1,12 @@
+import { Packet } from '../Packet/Packet.js';
+import { PacketResource } from '../Packet/PacketResource.js';
+export declare const parentOf: (zone: string) => string;
+export declare const normZone: (zone: string) => string;
+export declare const labels: (name: string) => string[];
+export declare const nameEquals: (a: string, b: string) => boolean;
+export declare const chainPath: (anchorZone: string, target: string) => string[];
+export declare const isStrictlyDeeper: (child: string, parent: string) => boolean;
+export declare const minTtl: (records: PacketResource[]) => number;
+export declare const negativeTtl: (soa: PacketResource[]) => number;
+export declare const extractSoa: (packet: Packet) => PacketResource[];
+export declare const withTimeout: <T>(promise: Promise<T>, ms: number, label: string) => Promise<T>;
