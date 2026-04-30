@@ -415,6 +415,36 @@ filtering, 0x20 verification, and budget enforcement — all without
 opening a socket. Worth a look as a template for application-level
 tests.
 
+## System resolver configuration
+
+The library ships a small `ResolvConf` parser for `/etc/resolv.conf`-
+format files. It's a utility for callers that want to bootstrap a
+forwarding setup from the host's system resolver settings — the
+recursive resolver itself doesn't read it.
+
+```ts
+import {ResolvConf} from 'dns2ts';
+
+// Parse the system file (Linux/BSD).
+const conf = ResolvConf.fromFile();           // defaults to /etc/resolv.conf
+
+// Or feed an explicit string (tests, embedded configs).
+const conf2 = ResolvConf.parse(`
+search corp.example.com
+nameserver 192.168.1.1
+options ndots:2 timeout:3
+`);
+
+console.log(conf.nameservers);   // ['192.168.1.1', ...]
+console.log(conf.search);        // ['corp.example.com', ...]
+console.log(conf.options.ndots); // 2
+```
+
+The parser is tolerant: unknown directives are skipped silently, and
+unknown `options` tokens land in `options.unknown` so callers don't
+lose information. Last-write-wins for `search` per resolver(5) §3,
+malformed numeric options fall back to resolver(5) defaults.
+
 ## Related
 
 - [Security hardening](security-hardening.md) — Bailiwick + 0x20 are

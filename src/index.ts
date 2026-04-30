@@ -8,6 +8,8 @@ export {Random0x20} from './Lib/Random0x20.js';
 export {Bailiwick} from './Lib/Bailiwick.js';
 export {Rrl} from './Lib/Rrl.js';
 export type {RrlOptions, RrlDecision} from './Lib/Rrl.js';
+export {ResolvConf} from './Lib/ResolvConf.js';
+export type {ParsedResolvConf, ResolvConfOptions} from './Lib/ResolvConf.js';
 export {Dnssec, DnssecAlgorithm, DnssecDigest} from './Lib/Dnssec.js';
 export type {
     DnssecVerifyOptions,

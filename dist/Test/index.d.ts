@@ -12,6 +12,7 @@ import './notify.js';
 import './update.js';
 import './security.js';
 import './rrl.js';
+import './resolvConf.js';
 import './dnssec.js';
 import './dnsCache.js';
 import './rootHints.js';
