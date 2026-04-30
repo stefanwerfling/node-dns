@@ -307,6 +307,18 @@ export class RecursiveResolver {
     protected _useEdns: boolean;
 
     /**
+     * Per-server learned UDP buffer size. Populated whenever a response
+     * carries an OPT RR whose CLASS field (the server's advertised
+     * payload size, RFC 6891 §6.1.2) is smaller than our configured
+     * `_udpPayloadSize`. Subsequent queries to the same server use the
+     * smaller value so we don't ask for more than the server can ship
+     * — RFC 6891 §6.2.3 says the requestor MAY downgrade based on the
+     * responder's advertised maximum.
+     * @protected
+     */
+    protected _serverBuffers: Map<string, number>;
+
+    /**
      * @protected
      */
     protected _udpPayloadSize: number;
@@ -342,6 +354,7 @@ export class RecursiveResolver {
         this._tcpTransport = options.tcpTransport ?? defaultTcpTransport;
         this._useEdns = options.useEdns ?? true;
         this._udpPayloadSize = options.udpPayloadSize ?? 4096;
+        this._serverBuffers = new Map();
 
         const dnssecOpt = options.dnssec;
         this._dnssecEnabled = dnssecOpt !== undefined && dnssecOpt !== false;
@@ -676,7 +689,15 @@ export class RecursiveResolver {
             // RFC 3225: DO=1 is required for the auth to include RRSIG
             // / NSEC / NSEC3 in the response — without it, validation
             // would reject every signed answer for missing signatures.
-            query.additionals.push(EDNS.createResource([], this._udpPayloadSize, this._dnssecEnabled));
+            //
+            // If a previous response from this server advertised a
+            // smaller buffer, downgrade to that — saves the server from
+            // shipping a frame it knows can't fit on its side.
+            const cachedBuf = this._serverBuffers.get(serverIp);
+            const effectiveBuf = cachedBuf !== undefined && cachedBuf < this._udpPayloadSize
+                ? cachedBuf
+                : this._udpPayloadSize;
+            query.additionals.push(EDNS.createResource([], effectiveBuf, this._dnssecEnabled));
         }
 
         const response = await this._sendAndVerify(this._transport, this._port, serverIp, query, sentName, ctx);
@@ -726,6 +747,22 @@ export class RecursiveResolver {
 
         if (this._use0x20 && !Random0x20.matches(sentName, response.questions[0].name)) {
             throw new Error(`RecursiveResolver: 0x20 case-echo mismatch from ${serverIp}`);
+        }
+
+        // RFC 6891 §6.1.2 — when the response carries an OPT, its CLASS
+        // field advertises the responder's UDP reassembly buffer. Cache
+        // it for subsequent queries to the same server so we don't ask
+        // for more than the responder can ship.
+        for (const r of response.additionals) {
+            if (r.packetType.type === PacketTypes.EDNS) {
+                const advertised = r.class;
+
+                if (typeof advertised === 'number' && advertised > 0 && advertised < this._udpPayloadSize) {
+                    this._serverBuffers.set(serverIp, advertised);
+                }
+
+                break;
+            }
         }
 
         return response;

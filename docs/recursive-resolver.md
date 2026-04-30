@@ -224,9 +224,14 @@ validator would otherwise see no signatures and reject every signed
 answer as bogus. The DO bit is cleared automatically when `dnssec` is
 disabled.
 
-The resolver does **not** yet react to the auth's reported buffer size
-(RFC 6891 §6.1.1) — even if a server pins itself to 1232, every
-follow-up query still advertises the configured `udpPayloadSize`.
+When a server's response carries an OPT whose advertised payload size
+(RFC 6891 §6.1.2 — the OPT RR's CLASS field) is *smaller* than the
+configured `udpPayloadSize`, the resolver remembers it per-server and
+downgrades subsequent queries to that server. The buffer is only
+ratcheted *down*, never up — a server claiming 8 KiB will not push
+us past our configured ceiling. This is what RFC 6891 §6.2.3 expects:
+"the requestor MAY assume the responder's maximum payload size in
+follow-up queries".
 
 ## DNSSEC validation (opt-in)
 

@@ -35,6 +35,7 @@ export class RecursiveResolver {
     _tcpPort;
     _tcpTransport;
     _useEdns;
+    _serverBuffers;
     _udpPayloadSize;
     _dnssecEnabled;
     _dnssecValidator;
@@ -52,6 +53,7 @@ export class RecursiveResolver {
         this._tcpTransport = options.tcpTransport ?? defaultTcpTransport;
         this._useEdns = options.useEdns ?? true;
         this._udpPayloadSize = options.udpPayloadSize ?? 4096;
+        this._serverBuffers = new Map();
         const dnssecOpt = options.dnssec;
         this._dnssecEnabled = dnssecOpt !== undefined && dnssecOpt !== false;
         if (this._dnssecEnabled) {
@@ -223,7 +225,11 @@ export class RecursiveResolver {
         query.header.rd = 0;
         query.questions.push(new PacketQuestion(sentName, qtype, qclass));
         if (this._useEdns) {
-            query.additionals.push(EDNS.createResource([], this._udpPayloadSize, this._dnssecEnabled));
+            const cachedBuf = this._serverBuffers.get(serverIp);
+            const effectiveBuf = cachedBuf !== undefined && cachedBuf < this._udpPayloadSize
+                ? cachedBuf
+                : this._udpPayloadSize;
+            query.additionals.push(EDNS.createResource([], effectiveBuf, this._dnssecEnabled));
         }
         const response = await this._sendAndVerify(this._transport, this._port, serverIp, query, sentName, ctx);
         if (response.header.tc === 1 && this._tcpFallback) {
@@ -246,6 +252,15 @@ export class RecursiveResolver {
         }
         if (this._use0x20 && !Random0x20.matches(sentName, response.questions[0].name)) {
             throw new Error(`RecursiveResolver: 0x20 case-echo mismatch from ${serverIp}`);
+        }
+        for (const r of response.additionals) {
+            if (r.packetType.type === PacketTypes.EDNS) {
+                const advertised = r.class;
+                if (typeof advertised === 'number' && advertised > 0 && advertised < this._udpPayloadSize) {
+                    this._serverBuffers.set(serverIp, advertised);
+                }
+                break;
+            }
         }
         return response;
     }

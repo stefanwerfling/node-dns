@@ -59,6 +59,7 @@ export declare class RecursiveResolver {
     protected _tcpPort: number;
     protected _tcpTransport: RecursiveResolverTransport;
     protected _useEdns: boolean;
+    protected _serverBuffers: Map<string, number>;
     protected _udpPayloadSize: number;
     protected _dnssecEnabled: boolean;
     protected _dnssecValidator: DnssecValidator | null;

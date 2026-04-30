@@ -606,4 +606,67 @@ test('RecursiveResolver#DO bit set when DNSSEC validation is enabled', async () 
     assert.ok(opt);
     assert.equal(opt.ttl & 0x00008000, 0x00008000);
 });
+test('RecursiveResolver#smaller server-advertised buffer downgrades the next query', async () => {
+    const seen = [];
+    const transport = new MockTransport();
+    transport.default('10.0.0.1', (q) => {
+        seen.push(q);
+        const r = buildAnswer(q, [aRec('host.test', '198.51.100.1')]);
+        r.additionals.push(EDNS.createResource([], 1232));
+        return r;
+    });
+    const resolver = new RecursiveResolver({
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false,
+        udpPayloadSize: 4096
+    });
+    await resolver.resolve('host.test', PacketTypes.A);
+    let opt = seen[0].additionals.find((r) => r.packetType instanceof EDNS);
+    assert.ok(opt);
+    assert.equal(opt.class, 4096);
+    await resolver.resolve('other.test', PacketTypes.A);
+    opt = seen[1].additionals.find((r) => r.packetType instanceof EDNS);
+    assert.ok(opt);
+    assert.equal(opt.class, 1232, 'second query must respect the server-advertised buffer');
+});
+test('RecursiveResolver#larger server-advertised buffer does NOT upgrade past our default', async () => {
+    const seen = [];
+    const transport = new MockTransport();
+    transport.default('10.0.0.1', (q) => {
+        seen.push(q);
+        const r = buildAnswer(q, [aRec('host.test', '198.51.100.1')]);
+        r.additionals.push(EDNS.createResource([], 8192));
+        return r;
+    });
+    const resolver = new RecursiveResolver({
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false,
+        udpPayloadSize: 4096
+    });
+    await resolver.resolve('host.test', PacketTypes.A);
+    await resolver.resolve('other.test', PacketTypes.A);
+    const opt = seen[1].additionals.find((r) => r.packetType instanceof EDNS);
+    assert.ok(opt);
+    assert.equal(opt.class, 4096);
+});
+test('RecursiveResolver#missing OPT in response leaves our default unchanged', async () => {
+    const seen = [];
+    const transport = new MockTransport();
+    transport.default('10.0.0.1', (q) => {
+        seen.push(q);
+        return buildAnswer(q, [aRec('host.test', '198.51.100.1')]);
+    });
+    const resolver = new RecursiveResolver({
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false
+    });
+    await resolver.resolve('host.test', PacketTypes.A);
+    await resolver.resolve('other.test', PacketTypes.A);
+    const opt = seen[1].additionals.find((r) => r.packetType instanceof EDNS);
+    assert.ok(opt);
+    assert.equal(opt.class, 4096);
+});
 //# sourceMappingURL=recursiveResolver.js.map
