@@ -80,29 +80,46 @@ export class TXT extends PacketType {
     }
 
     /**
-     * Decode the Buffer to TXT Packet
+     * Decode the Buffer to TXT Packet.
+     *
+     * RFC 1035 §3.3.14: TXT RDATA is "one or more <character-string>"
+     * — each prefixed with its 1-byte length. We preserve the
+     * boundary by returning a `string[]`, one entry per
+     * character-string. RFC 6763 §6.3 (DNS-SD) relies on the
+     * boundary to distinguish individual `key=value` entries; the
+     * earlier "concatenate everything into one string" behaviour
+     * silently lost data for any TXT record with more than one
+     * character-string.
+     *
      * @param {BufferReader} reader
      * @param {number} length
      * @return {PacketType}
      */
     public static decode(reader: BufferReader, length: number): PacketType {
-        const parts = [];
+        const strings: string[] = [];
 
         let bytesRead: number = 0;
+
         while (bytesRead < length) {
-            // text length
-            let chunkLength = reader.read(8);
+            const chunkLength = reader.read(8);
             bytesRead++;
 
-            while (chunkLength--) {
-                parts.push(reader.read(8));
+            const bytes: number[] = [];
+
+            for (let i = 0; i < chunkLength; i++) {
+                bytes.push(reader.read(8));
                 bytesRead++;
             }
+
+            strings.push(Buffer.from(bytes).toString('utf8'));
         }
 
         const txt = new TXT();
 
-        txt.data = Buffer.from(parts).toString('utf8');
+        // Single character-string stays a plain string for backwards
+        // compatibility with single-entry TXT consumers; multi-entry
+        // (DNS-SD-style) TXTs land in the array form.
+        txt.data = strings.length === 1 ? strings[0] : strings;
 
         return txt;
     }

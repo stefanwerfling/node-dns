@@ -133,6 +133,6 @@ test('Packet#encode array of character strings', () => {
     packet.header.qr = 1;
     packet.answers.push(new PacketResource('lsong.org', new TXT(dkim), PacketClass.IN, 300));
     const parsed = Packet.parse(packet.toBuffer());
-    assert.equal(parsed.answers[0].packetType.data, dkim.join(''));
+    assert.deepEqual(parsed.answers[0].packetType.data, dkim);
 });
 //# sourceMappingURL=packet.js.map

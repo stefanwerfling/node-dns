@@ -80,18 +80,50 @@ Note that some responders ignore the QU bit and still multicast.
 
 ## Service discovery (DNS-SD, RFC 6763)
 
-`MdnsClient` is the wire-level primitive — it doesn't compose a
-service-discovery walk for you. The DNS-SD pattern stacks four
-queries on top:
+`ServiceDiscovery` is the helper that composes the four DNS-SD
+queries on top of `MdnsClient`:
 
-1. `PTR _http._tcp.local` → list of service instance names.
-2. `SRV instance._http._tcp.local` → host + port of each.
-3. `TXT instance._http._tcp.local` → key/value metadata.
-4. `A`/`AAAA` of the SRV target → IP addresses.
+1. `PTR _<service>._<protocol>.<domain>` → list of instance names
+2. `SRV <instance>` → host + port
+3. `TXT <instance>` → key/value metadata
+4. `A`/`AAAA` of the SRV target → IP addresses
 
-You can compose those with `MdnsClient.request` and collect the
-results across responses. A purpose-built DNS-SD helper is on the
-roadmap.
+```ts
+import {ServiceDiscovery} from 'dns2ts';
+
+const instances = await ServiceDiscovery.browse({
+  serviceType: '_http._tcp',
+  // domain: 'local',         // default
+  // timeoutMs: 1000,          // default
+  // resolveMissing: true,     // issue follow-ups when additionals lack records
+});
+
+for (const inst of instances) {
+  console.log(inst.name, inst.host, inst.port, inst.txt, inst.addresses);
+}
+```
+
+RFC 6763 §12 encourages responders to bundle SRV + TXT + A/AAAA into
+the *additionals* section of the PTR response. `ServiceDiscovery`
+takes that fast path — when records are present a single roundtrip
+is enough — and only issues follow-up queries for the gaps.
+
+If you already know the instance name, skip the PTR walk:
+
+```ts
+const inst = await ServiceDiscovery.resolveInstance(
+  'tv._airplay._tcp.local',
+  {mdns: {timeoutMs: 500}}
+);
+```
+
+TXT entries are decoded per RFC 6763 §6.3:
+
+- `"flag"` (no `=`) → `flag: true`
+- `"key=value"` → `key: 'value'`
+- `"key="` → `key: ''`
+- Empty entries and missing keys are skipped.
+- First occurrence of a duplicated key wins (§6.4).
 
 ## Tests
 

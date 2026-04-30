@@ -145,6 +145,8 @@ export {
     MDNS_CACHE_FLUSH_BIT
 } from './Client/MdnsClient.js';
 export type {MdnsClientOptions, MdnsResponse} from './Client/MdnsClient.js';
+export {ServiceDiscovery} from './Client/ServiceDiscovery.js';
+export type {ServiceDiscoveryOptions, ServiceInstance} from './Client/ServiceDiscovery.js';
 
 // Resolver
 export {DnsCache} from './Resolver/DnsCache.js';

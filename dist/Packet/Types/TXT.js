@@ -38,18 +38,20 @@ export class TXT extends PacketType {
         return twriter.toBuffer();
     }
     static decode(reader, length) {
-        const parts = [];
+        const strings = [];
         let bytesRead = 0;
         while (bytesRead < length) {
-            let chunkLength = reader.read(8);
+            const chunkLength = reader.read(8);
             bytesRead++;
-            while (chunkLength--) {
-                parts.push(reader.read(8));
+            const bytes = [];
+            for (let i = 0; i < chunkLength; i++) {
+                bytes.push(reader.read(8));
                 bytesRead++;
             }
+            strings.push(Buffer.from(bytes).toString('utf8'));
         }
         const txt = new TXT();
-        txt.data = Buffer.from(parts).toString('utf8');
+        txt.data = strings.length === 1 ? strings[0] : strings;
         return txt;
     }
 }

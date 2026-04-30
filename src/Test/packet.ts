@@ -166,5 +166,9 @@ test('Packet#encode array of character strings', () => {
     packet.answers.push(new PacketResource('lsong.org', new TXT(dkim), PacketClass.IN, 300));
 
     const parsed = Packet.parse(packet.toBuffer());
-    assert.equal((parsed.answers[0].packetType as TXT).data, dkim.join(''));
+    // RFC 1035 §3.3.14 — TXT is "one or more <character-string>", and
+    // the per-string boundaries are preserved in the decoded array
+    // so RFC 6763 (DNS-SD) consumers can read each key=value entry
+    // separately.
+    assert.deepEqual((parsed.answers[0].packetType as TXT).data, dkim);
 });
