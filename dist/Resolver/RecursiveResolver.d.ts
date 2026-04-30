@@ -36,6 +36,8 @@ export type RecursiveResolverOptions = {
     tcpFallback?: boolean;
     tcpPort?: number;
     tcpTransport?: RecursiveResolverTransport;
+    useEdns?: boolean;
+    udpPayloadSize?: number;
     dnssec?: boolean | DnssecResolverOptions;
 };
 export type ResolveOptions = {
@@ -57,6 +59,8 @@ export declare class RecursiveResolver {
     protected _tcpFallback: boolean;
     protected _tcpPort: number;
     protected _tcpTransport: RecursiveResolverTransport;
+    protected _useEdns: boolean;
+    protected _udpPayloadSize: number;
     protected _dnssecEnabled: boolean;
     protected _trustAnchors: ReadonlyArray<TrustAnchor>;
     protected _dnssecMode: DnssecMode;

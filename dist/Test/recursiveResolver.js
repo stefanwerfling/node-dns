@@ -7,6 +7,7 @@ import { PacketTypes } from '../Packet/PacketTypes.js';
 import { A } from '../Packet/Types/A.js';
 import { AAAA } from '../Packet/Types/AAAA.js';
 import { CNAME } from '../Packet/Types/CNAME.js';
+import { EDNS } from '../Packet/Types/EDNS.js';
 import { NS } from '../Packet/Types/NS.js';
 import { SOA } from '../Packet/Types/SOA.js';
 import { DnsCache } from '../Resolver/DnsCache.js';
@@ -501,5 +502,73 @@ test('RecursiveResolver#AAAA glue is used when no A is available', async () => {
     const r = await resolver.resolve('only-v6.test', PacketTypes.A);
     assert.equal(r.header.rcode, RCODE.NOERROR);
     assert.equal(transport.count('::1'), 1);
+});
+test('RecursiveResolver#outgoing query carries EDNS OPT with default 4096 buffer', async () => {
+    const seen = [];
+    const transport = new MockTransport();
+    transport.default('10.0.0.1', (q) => {
+        seen.push(q);
+        return buildAnswer(q, [aRec('host.test', '198.51.100.1')]);
+    });
+    const resolver = new RecursiveResolver({
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false
+    });
+    await resolver.resolve('host.test', PacketTypes.A);
+    assert.equal(seen.length, 1);
+    const opt = seen[0].additionals.find((r) => r.packetType instanceof EDNS);
+    assert.ok(opt, 'outgoing query must carry an OPT RR');
+    assert.equal(opt.class, 4096);
+});
+test('RecursiveResolver#udpPayloadSize override flows into the OPT', async () => {
+    const seen = [];
+    const transport = new MockTransport();
+    transport.default('10.0.0.1', (q) => {
+        seen.push(q);
+        return buildAnswer(q, [aRec('host.test', '198.51.100.1')]);
+    });
+    const resolver = new RecursiveResolver({
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false,
+        udpPayloadSize: 1232
+    });
+    await resolver.resolve('host.test', PacketTypes.A);
+    const opt = seen[0].additionals.find((r) => r.packetType instanceof EDNS);
+    assert.ok(opt);
+    assert.equal(opt.class, 1232);
+});
+test('RecursiveResolver#useEdns:false suppresses the OPT RR', async () => {
+    const seen = [];
+    const transport = new MockTransport();
+    transport.default('10.0.0.1', (q) => {
+        seen.push(q);
+        return buildAnswer(q, [aRec('host.test', '198.51.100.1')]);
+    });
+    const resolver = new RecursiveResolver({
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false,
+        useEdns: false
+    });
+    await resolver.resolve('host.test', PacketTypes.A);
+    assert.equal(seen[0].additionals.find((r) => r.packetType instanceof EDNS), undefined);
+});
+test('RecursiveResolver#response OPT is not cached as an RRset', async () => {
+    const transport = new MockTransport();
+    transport.default('10.0.0.1', (q) => {
+        const r = buildAnswer(q, [aRec('host.test', '198.51.100.1')]);
+        r.additionals.push(EDNS.createResource([], 1232));
+        return r;
+    });
+    const resolver = new RecursiveResolver({
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false
+    });
+    await resolver.resolve('host.test', PacketTypes.A);
+    assert.ok(resolver.cache().get('host.test', PacketTypes.A, PacketClass.IN));
+    assert.equal(resolver.cache().get('', PacketTypes.EDNS, PacketClass.IN), null);
 });
 //# sourceMappingURL=recursiveResolver.js.map

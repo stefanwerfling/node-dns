@@ -31,15 +31,23 @@ export class EDNS extends PacketType {
     }
 
     /**
-     * Create EDNS resource record data
+     * Create EDNS resource record data.
+     *
+     * `udpPayloadSize` lands in the OPT RR's CLASS field (RFC 6891
+     * §6.1.2) and advertises the requestor's largest acceptable UDP
+     * response. Default 512 keeps the historic behaviour for callers
+     * that don't care; the recursive resolver overrides this to bump
+     * the buffer (DNS Flag Day 2020 settled on 1232; 4096 is still
+     * widely used and what BIND/Unbound default to internally).
      * @param {EdnsOption[]} rdata
+     * @param {number} udpPayloadSize
      * @return {PacketResource}
      */
-    public static createResource(rdata: EdnsOption[]): PacketResource {
+    public static createResource(rdata: EdnsOption[], udpPayloadSize: number = 512): PacketResource {
         return new PacketResource(
             '',
             new EDNS(rdata),
-            512,
+            udpPayloadSize,
             0
         );
     }

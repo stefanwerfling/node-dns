@@ -8,6 +8,7 @@ import { PacketClass } from '../Packet/PacketClass.js';
 import { PacketQuestion } from '../Packet/PacketQuestion.js';
 import { PacketTypes } from '../Packet/PacketTypes.js';
 import { CNAME } from '../Packet/Types/CNAME.js';
+import { EDNS } from '../Packet/Types/EDNS.js';
 import { DNAME } from '../Packet/Types/DNAME.js';
 import { NS } from '../Packet/Types/NS.js';
 import { SOA } from '../Packet/Types/SOA.js';
@@ -36,6 +37,8 @@ export class RecursiveResolver {
     _tcpFallback;
     _tcpPort;
     _tcpTransport;
+    _useEdns;
+    _udpPayloadSize;
     _dnssecEnabled;
     _trustAnchors;
     _dnssecMode;
@@ -53,6 +56,8 @@ export class RecursiveResolver {
         this._tcpFallback = options.tcpFallback ?? true;
         this._tcpPort = options.tcpPort ?? 53;
         this._tcpTransport = options.tcpTransport ?? RecursiveResolver._defaultTcpTransport;
+        this._useEdns = options.useEdns ?? true;
+        this._udpPayloadSize = options.udpPayloadSize ?? 4096;
         const dnssecOpt = options.dnssec;
         this._dnssecEnabled = dnssecOpt !== undefined && dnssecOpt !== false;
         const dnssecObj = typeof dnssecOpt === 'object' ? dnssecOpt : {};
@@ -211,6 +216,9 @@ export class RecursiveResolver {
         query.header.id = (Math.random() * 0xFFFF) | 0;
         query.header.rd = 0;
         query.questions.push(new PacketQuestion(sentName, qtype, qclass));
+        if (this._useEdns) {
+            query.additionals.push(EDNS.createResource([], this._udpPayloadSize));
+        }
         const response = await this._sendAndVerify(this._transport, this._port, serverIp, query, sentName, ctx);
         if (response.header.tc === 1 && this._tcpFallback) {
             return this._sendAndVerify(this._tcpTransport, this._tcpPort, serverIp, query, sentName, ctx);

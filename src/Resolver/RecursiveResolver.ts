@@ -12,6 +12,7 @@ import {PacketTypes} from '../Packet/PacketTypes.js';
 import {A} from '../Packet/Types/A.js';
 import {AAAA} from '../Packet/Types/AAAA.js';
 import {CNAME} from '../Packet/Types/CNAME.js';
+import {EDNS} from '../Packet/Types/EDNS.js';
 import {DNAME} from '../Packet/Types/DNAME.js';
 import {DS} from '../Packet/Types/DS.js';
 import {NS} from '../Packet/Types/NS.js';
@@ -173,6 +174,26 @@ export type RecursiveResolverOptions = {
     tcpTransport?: RecursiveResolverTransport;
 
     /**
+     * Append an EDNS(0) OPT RR to outgoing queries (RFC 6891). The OPT
+     * advertises `udpPayloadSize` so the upstream may send a larger UDP
+     * response without fragmenting or truncating, cutting roundtrips
+     * for medium-size answers (DNSSEC chains, multi-record RRsets).
+     *
+     * Default: true.
+     */
+    useEdns?: boolean;
+
+    /**
+     * UDP payload size advertised in the EDNS OPT RR (RFC 6891 §6.2.3).
+     * Common settings: 1232 (DNS Flag Day 2020 — fits in PMTU-1500
+     * minus IPv6 + UDP overhead with IPsec headroom), 4096 (legacy
+     * BIND default), 512 (no benefit over non-EDNS).
+     *
+     * Default: 4096.
+     */
+    udpPayloadSize?: number;
+
+    /**
      * Enable DNSSEC validation. `true` uses bundled IANA trust anchors
      * and `permissive` mode; pass an object for finer-grained control.
      * Default: disabled — answers pass through unvalidated.
@@ -208,9 +229,11 @@ export type ResolveOptions = {
  *    upstream replies with the truncation bit set the same question is
  *    reissued over TCP via the configurable `tcpTransport`. Opt out via
  *    `tcpFallback: false`; override the port via `tcpPort`.
- *  - **No EDNS-buffer bumping.** We send queries without an OPT record;
- *    auths reply with the standard 512-byte UDP ceiling and the resolver
- *    relies on the TCP retry path for oversize answers.
+ *  - **EDNS(0) buffer negotiation** is on by default (RFC 6891). Each
+ *    outgoing query carries an OPT RR advertising
+ *    `udpPayloadSize` (default 4096) so upstreams can reply with
+ *    larger UDP messages and avoid the TCP retry. Opt out via
+ *    `useEdns: false`.
  *  - **No prefetch or stale-while-revalidate.** Cache entries simply
  *    expire and the next query re-resolves from scratch.
  *
@@ -281,6 +304,16 @@ export class RecursiveResolver {
     /**
      * @protected
      */
+    protected _useEdns: boolean;
+
+    /**
+     * @protected
+     */
+    protected _udpPayloadSize: number;
+
+    /**
+     * @protected
+     */
     protected _dnssecEnabled: boolean;
 
     /**
@@ -321,6 +354,8 @@ export class RecursiveResolver {
         this._tcpFallback = options.tcpFallback ?? true;
         this._tcpPort = options.tcpPort ?? 53;
         this._tcpTransport = options.tcpTransport ?? RecursiveResolver._defaultTcpTransport;
+        this._useEdns = options.useEdns ?? true;
+        this._udpPayloadSize = options.udpPayloadSize ?? 4096;
 
         const dnssecOpt = options.dnssec;
         this._dnssecEnabled = dnssecOpt !== undefined && dnssecOpt !== false;
@@ -629,6 +664,15 @@ export class RecursiveResolver {
         query.header.id = (Math.random() * 0xFFFF) | 0;
         query.header.rd = 0; // We're iterating ourselves.
         query.questions.push(new PacketQuestion(sentName, qtype, qclass));
+
+        if (this._useEdns) {
+            // RFC 6891 §6.2.3 — advertise the UDP buffer the resolver
+            // can reassemble. The TCP retry path doesn't need it (TCP
+            // streams aren't size-bounded the same way) but sending the
+            // OPT through TCP too is harmless and matches what real
+            // recursors do.
+            query.additionals.push(EDNS.createResource([], this._udpPayloadSize));
+        }
 
         const response = await this._sendAndVerify(this._transport, this._port, serverIp, query, sentName, ctx);
 

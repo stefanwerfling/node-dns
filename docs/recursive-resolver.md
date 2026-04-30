@@ -103,6 +103,10 @@ new RecursiveResolver({
   tcpFallback: true,          // retry over TCP on TC=1 (default true)
   tcpPort: 53,                // upstream TCP port
   tcpTransport: myTcp,        // injectable, default = Node `net` one-shot
+
+  // RFC 6891 EDNS(0) — see "EDNS buffer negotiation" below
+  useEdns: true,              // append OPT to outgoing queries (default true)
+  udpPayloadSize: 4096,       // advertised buffer (default 4096)
 });
 ```
 
@@ -160,8 +164,6 @@ in `Lib/` provide:
 
 What the resolver does **not** do (yet):
 
-- **EDNS-buffer negotiation.** No OPT record is sent on outgoing
-  queries.
 - **Stale-while-revalidate / prefetch.** Entries simply expire and are
   re-resolved.
 
@@ -190,6 +192,34 @@ new RecursiveResolver({tcpFallback: false});
 Failures of the TCP retry (timeout, connection refused, parse error)
 propagate up and surface as `SERVFAIL` to the caller. There is no
 TCP-side connection pooling in v1 — every retry opens a fresh socket.
+
+## EDNS buffer negotiation (RFC 6891)
+
+By default each outgoing query carries an EDNS(0) `OPT` RR advertising
+the resolver's UDP buffer size (default 4096). Most authoritative
+servers honour the advertised size and reply over UDP without
+truncation, cutting one TCP roundtrip for medium-size answers (DNSSEC
+chains, multi-record A/AAAA RRsets).
+
+```ts
+new RecursiveResolver({
+  useEdns: true,             // default
+  udpPayloadSize: 4096,      // common BIND/Unbound default
+
+  // The DNS Flag Day 2020 recommendation — fits IPv6+UDP+IPsec
+  // headroom inside a 1500-byte PMTU. Use this if you suspect
+  // PMTU-blackhole networks between you and authoritative auths.
+  // udpPayloadSize: 1232,
+});
+
+// Suppress the OPT entirely (some firewalls eat EDNS) — auths fall
+// back to the legacy 512-byte UDP ceiling and the resolver leans on
+// the TCP retry path.
+new RecursiveResolver({useEdns: false});
+```
+
+The resolver does **not** yet enable DNSSEC OK (DO=1) on the OPT or
+react to the auth's reported buffer size — both are future hardening.
 
 ## DNSSEC validation (opt-in)
 

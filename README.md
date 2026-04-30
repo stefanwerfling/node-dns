@@ -116,8 +116,9 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   `RecursiveResolver` with `DnsCache` (TTL + RFC 2308 negative caching) and
   bundled `RootHints`. NS chasing, glueless delegation, CNAME chains,
   bailiwick filtering, 0x20 case randomization, configurable budgets.
-  RFC 7766 §5 TCP fallback on TC=1, opt-in DNSSEC validation. Injectable
-  UDP and TCP transports for testing and forwarding setups.
+  RFC 7766 §5 TCP fallback on TC=1, RFC 6891 EDNS(0) buffer negotiation,
+  opt-in DNSSEC validation. Injectable UDP and TCP transports for
+  testing and forwarding setups.
 
 ### DNS Client (default UDP)
 
