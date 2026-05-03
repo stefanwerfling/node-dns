@@ -113,13 +113,17 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   4034/4035 algorithms 8/10/13/14/15, DS digest types 1/2/4. Stateless —
   no resolver, no cache; chain-of-trust walking is the caller's job.
 - **[Stub resolver + `/etc/hosts` + failover](docs/stub-resolver.md)**
-  — `StubResolver` adds resolver(5) / glibc-style search-path +
-  `ndots` expansion on top of any backend (UDP/TCP/DoT/DoH/recursive).
-  `FailoverBackend.combine` / `.fromConfig` retries multiple
-  nameservers per resolver(5) `options.timeout`/`attempts`/`rotate`.
-  `HostsFile` parses `/etc/hosts` and exposes
-  `asResolverBackend(fallback)` so files-first lookup ↦ DNS fallback
-  matches glibc's `nsswitch.conf` `hosts: files dns`.
+
+- — `SystemResolver.system()` is the one-line setup that reads
+  `/etc/resolv.conf` + `/etc/hosts` and bundles the full pipeline.
+  Underneath: `StubResolver` adds resolver(5) / glibc-style search-
+  path + `ndots` expansion on top of any backend
+  (UDP/TCP/DoT/DoH/recursive); `FailoverBackend.combine` /
+  `.fromConfig` retries multiple nameservers per resolver(5)
+  `options.timeout`/`attempts`/`rotate`; `HostsFile` parses
+  `/etc/hosts` and exposes `asResolverBackend(fallback)` so files-
+  first lookup ↦ DNS fallback matches glibc's `nsswitch.conf`
+  `hosts: files dns`.
 - **[Recursive resolver](docs/recursive-resolver.md)** — iterative
   `RecursiveResolver` with `DnsCache` (TTL + RFC 2308 negative caching) and
   bundled `RootHints`. NS chasing, glueless delegation, CNAME chains,

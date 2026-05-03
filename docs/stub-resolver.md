@@ -10,6 +10,56 @@ file". A user typing `ssh server` expects `server.corp.local` to be
 tried via the configured search domains; `StubResolver` is the piece
 that makes that happen.
 
+## One-line setup — `SystemResolver`
+
+For the common case — read `/etc/resolv.conf` + `/etc/hosts`, build
+the full pipeline, return a resolver — `SystemResolver.system()` is
+a single call:
+
+```ts
+import {SystemResolver, PacketTypes} from 'dns2ts';
+
+const resolver = SystemResolver.system();
+const response = await resolver.resolve('host', PacketTypes.A);
+```
+
+The pipeline it assembles, top to bottom:
+
+1. **`StubResolver`** — search-path / `ndots` expansion
+2. **`HostsFile`** — `/etc/hosts` first; NODATA halts, miss falls through
+3. **`FailoverBackend`** — multi-nameserver retry / rotation per
+   `options.timeout` / `options.attempts` / `options.rotate`
+4. **`UDPClient`** per nameserver — RFC 7766 §8 TC fallback baked in
+
+Override the per-server transport via the `backend` option (the same
+`FailoverBackendBuilder` shape used by `FailoverBackend.fromConfig`):
+
+```ts
+import {SystemResolver, TCPClient, ClientOptionsProtocol} from 'dns2ts';
+
+const resolver = SystemResolver.system({
+  backend: ({host, port}) => TCPClient.request({
+    dns: host,
+    port: port ?? 853,
+    protocol: ClientOptionsProtocol.tls,
+  }),
+});
+```
+
+Other knobs:
+- `resolvConfPath` / `hostsPath` for non-standard locations
+- `skipHosts: true` to bypass the hosts-file layer entirely
+- `shouldFailover` to override the BIND/glibc default failover predicate
+- `SystemResolver.hasSystemFiles({...})` reports which files exist
+  before you call `system()`
+
+`resolver.stub` exposes the wrapped `StubResolver` so callers can
+inspect `expand()`, `search`, `ndots` without unwrapping the layers.
+
+The rest of this doc covers the lower-level pieces — useful when you
+want to compose them by hand, swap in a recursive resolver,
+DoT/DoH transport, in-memory caching, etc.
+
 ## Quick start
 
 ```ts
