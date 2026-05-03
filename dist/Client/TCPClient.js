@@ -66,10 +66,22 @@ export class TCPClient extends AClient {
             const sentName = option.use0x20 === true ? Random0x20.scramble(name) : name;
             const message = TCPClient.makeQuery(sentName, type, cls, clientIp, recursive);
             const [host] = option.dns.split(':');
-            const client = TCPClient.getClient(protocol, host, port);
-            TCPClient.sendQuery(client, message);
-            const data = await SocketReader.readStream(client);
-            client.end();
+            let data;
+            if (option.pool !== undefined) {
+                const target = {
+                    protocol: protocol === ClientOptionsProtocol.tls ? 'tls' : 'tcp',
+                    host: host,
+                    port: port,
+                    tlsOptions: option.poolDefaults?.tlsOptions
+                };
+                data = await option.pool.send(target, message);
+            }
+            else {
+                const client = TCPClient.getClient(protocol, host, port);
+                TCPClient.sendQuery(client, message);
+                data = await SocketReader.readStream(client);
+                client.end();
+            }
             if (!data.length) {
                 throw new Error('Empty response');
             }

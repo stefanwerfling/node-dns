@@ -1,3 +1,5 @@
+import type {TcpConnectionPool, TcpConnectionPoolTransportDefaults} from './TcpConnectionPool.js';
+
 export enum ClientOptionsProtocol {
     udp,
     tcp,
@@ -10,6 +12,22 @@ export type ClientOptions = {
     dns: string;
     protocol?: ClientOptionsProtocol;
     port?: number;
+
+    /**
+     * TCP/TLS connection pool to route every query through. When
+     * provided, the client opens no fresh socket per request — RFC
+     * 7766 §6.2 connection reuse with ID-based response correlation.
+     * The pool's own `tlsOptions` defaults can be supplemented per
+     * client via `poolTlsOptions`.
+     */
+    pool?: TcpConnectionPool;
+
+    /**
+     * Per-call defaults handed to `pool.asResolverTransport()`-style
+     * routing. Currently only `tlsOptions` is consulted — the client
+     * already knows `protocol` from `option.protocol`.
+     */
+    poolDefaults?: Pick<TcpConnectionPoolTransportDefaults, 'tlsOptions'>;
 
     /**
      * UDPClient only. When the DNS server sets the TC (truncation) bit in

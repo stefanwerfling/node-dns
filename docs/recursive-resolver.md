@@ -166,9 +166,8 @@ in `Lib/` provide:
 
 What the resolver does **not** do (yet):
 
-- **Connection pooling** for TCP/TLS. Every TC=1 retry opens a fresh
-  socket. Hot-key prefetch + serve-stale already cover most of the
-  latency wins; pooling matters for high-QPS forwarding setups.
+- mDNS-style multicast probing on the server side. Use `MdnsServer`
+  with application-driven name claims for now.
 
 ## Truncation (RFC 7766 §5)
 
@@ -193,8 +192,35 @@ new RecursiveResolver({tcpFallback: false});
 ```
 
 Failures of the TCP retry (timeout, connection refused, parse error)
-propagate up and surface as `SERVFAIL` to the caller. There is no
-TCP-side connection pooling in v1 — every retry opens a fresh socket.
+propagate up and surface as `SERVFAIL` to the caller.
+
+### Pooling the TCP retries
+
+For high-QPS forwarding setups the per-retry socket open is wasted
+work. Build a `TcpConnectionPool` once and hand its
+`asResolverTransport()` adapter to the resolver — TC=1 retries then
+reuse a single persistent connection per upstream IP, with pipelined
+ID-based response correlation:
+
+```ts
+import {RecursiveResolver, TcpConnectionPool} from 'dns2ts';
+
+const tcpPool = new TcpConnectionPool({idleTimeoutMs: 30_000});
+
+const resolver = new RecursiveResolver({
+  tcpFallback: true,
+  tcpTransport: tcpPool.asResolverTransport(),  // 'tcp' by default
+});
+
+// shutdown:
+tcpPool.close();
+```
+
+The pool keeps separate connections per `(protocol, host, port)` —
+distinct upstream auths don't share sockets, but every retry to the
+same auth piggy-backs on a live connection. AXFR and IXFR-fallback
+keep using one-shot sockets (their termination signal is the socket
+close, which is incompatible with multiplexing).
 
 ## EDNS buffer negotiation (RFC 6891)
 

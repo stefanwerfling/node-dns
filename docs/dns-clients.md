@@ -85,6 +85,57 @@ manually with `tls.connect({rejectUnauthorized: false, ...})` and parse the
 length-prefixed frame yourself, or set `NODE_TLS_REJECT_UNAUTHORIZED=0` for
 local testing.
 
+### Connection pooling (RFC 7766 §6.2)
+
+By default `TCPClient` opens a fresh socket per query and tears it down
+after the response. For high-throughput callers — DoT, recursive
+TC=1 fallback, anything that reuses the same upstream — pass a
+`TcpConnectionPool` to reuse one persistent connection per
+`(protocol, host, port)` target with pipelined ID-based response
+correlation.
+
+```ts
+import {
+  TCPClient, TcpConnectionPool, ClientOptionsProtocol,
+  PacketTypes, PacketClass,
+} from 'dns2ts';
+
+const pool = new TcpConnectionPool({
+  idleTimeoutMs: 30_000,        // close after 30s of no in-flight queries
+  queryTimeoutMs: 5_000,        // reject any single query after 5s
+  connectTimeoutMs: 5_000,      // reject TCP/TLS handshake after 5s
+  maxQueriesPerConnection: 0,   // 0 = no rotation; positive = force rotate
+});
+
+const dot = TCPClient.request({
+  dns: 'dns.google',
+  protocol: ClientOptionsProtocol.tls,
+  port: 853,
+  pool: pool,
+  // poolDefaults.tlsOptions are forwarded to tls.connect for self-signed
+  // testbeds: poolDefaults: {tlsOptions: {rejectUnauthorized: false}}
+});
+
+await dot('a.example', PacketTypes.A, PacketClass.IN);   // opens + handshakes
+await dot('b.example', PacketTypes.A, PacketClass.IN);   // reuses same socket
+
+pool.close();   // tear down all live sockets when shutting down
+```
+
+Inside the pool, every query is rewritten to a unique pool-internal
+DNS header ID before being framed onto the wire and restored to the
+caller-supplied ID on response — so callers can pipeline freely
+without coordinating IDs themselves. Out-of-order responses (RFC
+7766 §6.2.1.1) dispatch correctly.
+
+The same pool instance can be passed to many `TCPClient.request()`
+calls and to `RecursiveResolver({tcpTransport: pool.asResolverTransport()})`
+for the TC=1 fallback path.
+
+**Out of scope:** AXFR / IXFR-fallback-to-AXFR keep using one-shot
+sockets — they rely on socket-end as the SOA-bracketed termination
+signal, which is incompatible with multiplexing.
+
 ## DohClient
 
 Resolves over DNS-over-HTTPS (RFC 8484) using POST with

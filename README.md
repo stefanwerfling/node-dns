@@ -186,6 +186,31 @@ try {
 }
 ```
 
+### Connection pooling (RFC 7766 §6.2)
+
+For high-throughput TCP/DoT or for the resolver's TC=1 retry path, pool
+the upstream connections instead of opening one socket per query.
+`TcpConnectionPool` keeps one persistent connection per
+`(protocol, host, port)` and pipelines queries with ID-based response
+correlation.
+
+```ts
+import {TCPClient, TcpConnectionPool} from 'dns2ts';
+
+const pool = new TcpConnectionPool({idleTimeoutMs: 30_000});
+
+const resolve = TCPClient.request({dns: '1.1.1.1', pool: pool});
+await resolve('a.example', PacketTypes.A, PacketClass.IN);
+await resolve('b.example', PacketTypes.A, PacketClass.IN);   // reuses socket
+
+pool.close();
+```
+
+The same pool plugs into the recursive resolver via
+`tcpTransport: pool.asResolverTransport()` to pool every TC=1
+fallback retry. AXFR and IXFR-fallback keep using one-shot sockets
+(they need socket-end as the termination signal).
+
 ### DNS Client (DNS over HTTPS)
 
 ```ts

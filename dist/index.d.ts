@@ -90,6 +90,8 @@ export { ClientRequestOptions, ClientRequest } from './Client/ClientRequest.js';
 export { ClientCreateResolver } from './Client/ClientCreateResolver.js';
 export { TCPClient } from './Client/TCPClient.js';
 export { UDPClient } from './Client/UDPClient.js';
+export { TcpConnectionPool } from './Client/TcpConnectionPool.js';
+export type { TcpConnectionPoolOptions, TcpConnectionPoolProtocol, TcpConnectionPoolTarget, TcpConnectionPoolTransportDefaults } from './Client/TcpConnectionPool.js';
 export { AxfrClient } from './Client/AxfrClient.js';
 export type { AxfrClientOptions, AxfrResult } from './Client/AxfrClient.js';
 export { IxfrClient } from './Client/IxfrClient.js';

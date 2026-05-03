@@ -27,3 +27,4 @@ import './recursiveResolverDnssec.js';
 import './serverDoh.js';
 import './serverIntegration.js';
 import './serverTls.js';
+import './tcpConnectionPool.js';

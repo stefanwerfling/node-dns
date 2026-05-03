@@ -10,6 +10,7 @@ import {EDNS, EdnsECS} from '../Packet/Types/EDNS.js';
 import {AClient} from './AClient.js';
 import {ClientOptions, ClientOptionsProtocol} from './ClientOptions.js';
 import {ClientRequest} from './ClientRequest.js';
+import {TcpConnectionPool, TcpConnectionPoolTarget} from './TcpConnectionPool.js';
 
 /**
  * TCPClient
@@ -102,11 +103,23 @@ export class TCPClient extends AClient {
 
             const message = TCPClient.makeQuery(sentName, type, cls, clientIp, recursive);
             const [ host ] = option.dns.split(':');
-            const client = TCPClient.getClient(protocol, host, port);
 
-            TCPClient.sendQuery(client, message);
-            const data = await SocketReader.readStream(client);
-            client.end();
+            let data: Buffer;
+
+            if (option.pool !== undefined) {
+                const target: TcpConnectionPoolTarget = {
+                    protocol: protocol === ClientOptionsProtocol.tls ? 'tls' : 'tcp',
+                    host: host,
+                    port: port,
+                    tlsOptions: option.poolDefaults?.tlsOptions
+                };
+                data = await option.pool.send(target, message);
+            } else {
+                const client = TCPClient.getClient(protocol, host, port);
+                TCPClient.sendQuery(client, message);
+                data = await SocketReader.readStream(client);
+                client.end();
+            }
 
             if (!data.length) {
                 throw new Error('Empty response');
