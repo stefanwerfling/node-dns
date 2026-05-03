@@ -182,6 +182,8 @@ export type {TrustAnchor} from './Resolver/TrustAnchor.js';
 export {DnssecChain} from './Resolver/DnssecChain.js';
 export type {DnssecValidity, DnssecValidationResult} from './Resolver/DnssecChain.js';
 export {NegativeProof} from './Resolver/NegativeProof.js';
+export {StubResolver} from './Resolver/StubResolver.js';
+export type {StubResolverOptions, StubResolverBackend} from './Resolver/StubResolver.js';
 
 // DNS
 export {DNSOptions, DNS} from './DNS.js';

@@ -13,6 +13,7 @@ import './update.js';
 import './security.js';
 import './rrl.js';
 import './resolvConf.js';
+import './stubResolver.js';
 import './mdns.js';
 import './serviceDiscovery.js';
 import './mdnsServer.js';
