@@ -119,11 +119,12 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   RFC 7766 §5 TCP fallback on TC=1, RFC 6891 EDNS(0) buffer negotiation,
   opt-in DNSSEC validation. Injectable UDP and TCP transports for
   testing and forwarding setups.
-- **[mDNS client](docs/mdns.md)** — `MdnsClient` for RFC 6762
-  multicast DNS. Send a query to `224.0.0.251:5353`, collect responses
-  from every device on the segment within a configurable timeout. QU
-  bit, cache-flush bit constants, IPv4 + IPv6 multicast groups
-  exposed. Unicast loopback supported for tests.
+- **[mDNS client + server + probing](docs/mdns.md)** — `MdnsClient`
+  for RFC 6762 multicast DNS, `MdnsServer` for the responder side,
+  and `MdnsProbe` for §8 probe/announce (3 probes, 250ms apart, with
+  §8.2 lexicographic tiebreak on simultaneous probes; 2 announcements
+  with cache-flush bit on success). `ServiceDiscovery` (RFC 6763) on
+  top for DNS-SD browse + resolve.
 
 ### DNS Client (default UDP)
 

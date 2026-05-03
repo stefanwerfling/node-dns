@@ -16,6 +16,7 @@ import './resolvConf.js';
 import './mdns.js';
 import './serviceDiscovery.js';
 import './mdnsServer.js';
+import './mdnsProbe.js';
 import './dnssec.js';
 import './dnsCache.js';
 import './rootHints.js';

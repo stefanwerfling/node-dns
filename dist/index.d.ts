@@ -84,6 +84,8 @@ export { UDPServer } from './Server/UDPServer.js';
 export { DohServer } from './Server/DohServer.js';
 export { MdnsServer } from './Server/MdnsServer.js';
 export type { MdnsServerOptions, MdnsRequestListener, MdnsSendable, MdnsResponseTarget } from './Server/MdnsServer.js';
+export { MdnsProbe } from './Server/MdnsProbe.js';
+export type { MdnsProbeOptions, MdnsProbeResult } from './Server/MdnsProbe.js';
 export { AClient } from './Client/AClient.js';
 export { ClientOptionsProtocol, ClientOptions } from './Client/ClientOptions.js';
 export { ClientRequestOptions, ClientRequest } from './Client/ClientRequest.js';

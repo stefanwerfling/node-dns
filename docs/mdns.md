@@ -180,13 +180,75 @@ await server.listen();
 silently filtered before reaching the handler — the multicast group
 sees a lot of unrelated chatter.
 
+### Probing — `MdnsProbe`
+
+Before a host can claim a name on the link it must verify that no
+other responder is using it. RFC 6762 §8 describes the probe / announce
+dance: send three queries 250 ms apart for the tentative name with the
+proposed records in the AUTHORITY section, watch for conflicting
+answers, run a lexicographic tiebreak when another host probes the
+same name simultaneously (§8.2), and on success multicast at least
+two announcements 1 s apart with the cache-flush bit set.
+
+`MdnsProbe.claim()` runs that dance:
+
+```ts
+import {
+  MdnsProbe, PacketResource, PacketClass, A,
+} from 'dns2ts';
+
+const records = [
+  new PacketResource('host.local', new A('192.168.1.42'),
+                     PacketClass.IN, 120)
+];
+
+const result = await MdnsProbe.claim({
+  records: records,
+  // multicastAddr: '224.0.0.251',  // default
+  // port: 5353,                    // default
+  // probeAttempts: 3,              // RFC 6762 §8.1 — 3 probes 250ms apart
+  // probeIntervalMs: 250,
+  // initialJitterMs: 250,          // §8.1 — 0..250ms before first probe
+  // announceAttempts: 2,           // §8.3 — 2 announcements
+  // announceIntervalMs: 1000,
+});
+
+if (result.result === 'claimed') {
+  // Start serving the name with MdnsServer.
+} else {
+  // result.conflictRecord — what someone else asserted; rename + retry.
+}
+```
+
+All tentative records must share one owner name — the helper probes a
+single name at a time. Multiple types (`A` + `AAAA` + `TXT` + …) for
+the same name go into one `claim()` call.
+
+The probe phase listens for two conflict shapes:
+
+- **Response (qr=1)** carrying records for our name with rdata not in
+  our tentative set → conflict. Caller renames.
+- **Query (qr=0)** for our name carrying authority records — another
+  host is also probing. Run §8.2 lexicographic tiebreak: the host
+  whose record set sorts *later* (canonical type / class / RDATA byte
+  comparison, name excluded per §8.2.1, cache-flush bit stripped)
+  wins. The losing side returns `'conflict'`.
+
+`MdnsProbe.canonicalRecordKey(record)` and
+`MdnsProbe.compareRecordSets(a, b)` are exposed for callers that want
+to reason about tiebreak outcomes outside of an actual probe.
+
+`bindPort` lets tests bind to a port other than the destination
+`port` so a peer dgram socket can occupy `port` directly. In
+production both default to 5353 (RFC 6762 §15 expects source port
+5353 too).
+
 ### Out of scope (for now)
 
-- **Probing / conflict resolution** (RFC 6762 §8) — a real-world
-  responder must probe before claiming a name and re-probe on
-  conflict; that depends on what records you're announcing, so it's
-  left to application code. The server gives you the wire primitives.
 - **Goodbye / TTL=0 announcements** (§10.1) — the handler can
   construct and send these via `send()`; the server doesn't
   synthesize them.
 - **Continuous announcements** — same.
+- **Re-probing** on conflict — `MdnsProbe.claim()` returns
+  `'conflict'` and the caller decides how to rename + retry; the
+  helper doesn't loop on its own.

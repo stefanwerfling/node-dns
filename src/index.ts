@@ -124,6 +124,8 @@ export type {
     MdnsSendable,
     MdnsResponseTarget
 } from './Server/MdnsServer.js';
+export {MdnsProbe} from './Server/MdnsProbe.js';
+export type {MdnsProbeOptions, MdnsProbeResult} from './Server/MdnsProbe.js';
 
 // Client
 export {AClient} from './Client/AClient.js';
