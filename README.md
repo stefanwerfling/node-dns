@@ -112,10 +112,13 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   `Dnssec.verifyDs`, `Dnssec.computeKeyTag`, `Dnssec.computeDsDigest`. RFC
   4034/4035 algorithms 8/10/13/14/15, DS digest types 1/2/4. Stateless —
   no resolver, no cache; chain-of-trust walking is the caller's job.
-- **[Stub resolver](docs/stub-resolver.md)** — `StubResolver` adds
-  resolver(5) / glibc-style search-path + `ndots` expansion on top of
-  any backend (UDP/TCP/DoT/DoH/recursive). `StubResolver.fromConfig`
-  wires it up from a parsed `/etc/resolv.conf`.
+- **[Stub resolver + `/etc/hosts`](docs/stub-resolver.md)** —
+  `StubResolver` adds resolver(5) / glibc-style search-path + `ndots`
+  expansion on top of any backend (UDP/TCP/DoT/DoH/recursive).
+  `StubResolver.fromConfig` wires it up from a parsed
+  `/etc/resolv.conf`. `HostsFile` parses `/etc/hosts` and exposes
+  `asResolverBackend(fallback)` so files-first lookup ↦ DNS fallback
+  matches glibc's `nsswitch.conf` `hosts: files dns`.
 - **[Recursive resolver](docs/recursive-resolver.md)** — iterative
   `RecursiveResolver` with `DnsCache` (TTL + RFC 2308 negative caching) and
   bundled `RootHints`. NS chasing, glueless delegation, CNAME chains,

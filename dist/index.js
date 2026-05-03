@@ -6,6 +6,7 @@ export { Random0x20 } from './Lib/Random0x20.js';
 export { Bailiwick } from './Lib/Bailiwick.js';
 export { Rrl } from './Lib/Rrl.js';
 export { ResolvConf } from './Lib/ResolvConf.js';
+export { HostsFile } from './Lib/HostsFile.js';
 export { Dnssec, DnssecAlgorithm, DnssecDigest } from './Lib/Dnssec.js';
 export { IP } from './Packet/IP.js';
 export { Packet } from './Packet/Packet.js';

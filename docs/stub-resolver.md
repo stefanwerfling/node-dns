@@ -136,6 +136,60 @@ single-entry search list (matching resolver(5) §2 fallback).
 - **Caching** — every `resolve()` call invokes the backend for each
   candidate. Use `DnsCache` (or any cache the backend already
   provides) when latency matters.
-- **`/etc/hosts` lookup** — host-file resolution is glibc's job, not
-  the DNS layer. A separate helper could be added if there's
-  demand.
+- **Round-robin** of equal-priority candidates within one search
+  level — the stub tries each suffix in declaration order; if you
+  need shuffling, randomize the search list before passing it in.
+
+## `/etc/hosts` integration — `HostsFile`
+
+`HostsFile` (`Lib/HostsFile`) parses `/etc/hosts`-format tables and
+ships an `asResolverBackend(fallback)` adapter that fits the
+`StubResolverBackend` shape directly. Hosts-first behaviour matches
+glibc's `nsswitch.conf` `hosts: files dns` line:
+
+```ts
+import {
+  HostsFile, ResolvConf, StubResolver, UDPClient, PacketTypes,
+} from 'dns2ts';
+
+const hosts = HostsFile.fromFile();           // /etc/hosts
+const conf = ResolvConf.fromFile();           // /etc/resolv.conf
+const dns = UDPClient.request({dns: conf.nameservers[0]});
+
+const stub = new StubResolver({
+  resolver: hosts.asResolverBackend(dns),     // hosts → DNS fallback
+  search: conf.search,
+  ndots: conf.options.ndots,
+});
+
+await stub.resolve('printer.local', PacketTypes.A);   // hits /etc/hosts
+await stub.resolve('cloudflare.com', PacketTypes.A);  // misses → DNS
+```
+
+`HostsFile.lookup(name, type)` returns one of three shapes:
+
+- `{kind: 'match', records}` — name + type both present.
+- `{kind: 'nodata'}` — name in file, no record of the requested type.
+  The adapter synthesizes a NOERROR response with empty answers and
+  *does not* fall through (RFC 1034 §4.3.2 NODATA shape, glibc
+  strict-files semantics).
+- `{kind: 'miss'}` — name not in file. The adapter calls the
+  fallback.
+
+`HostsFile.merge(other)` stacks tables — handy for combining the
+system file with a project-local override:
+
+```ts
+const merged = HostsFile.fromFile()
+  .merge(HostsFile.fromFile('./hosts.local'));
+```
+
+**Out of scope for the hosts file:**
+
+- The TTL stamp on synthesized records defaults to `0` (matches
+  glibc — `/etc/hosts` is consulted on every call). Override via
+  `HostsFile.parse(content, {ttl: 600})` if you want caching to bite.
+- `/etc/networks`, `/etc/aliases`, etc. — only the `host(5)` format is
+  parsed.
+- File-watching / live reload — to pick up changes, build a new
+  `HostsFile`.
