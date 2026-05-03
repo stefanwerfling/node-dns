@@ -128,17 +128,94 @@ stub.ndots;    // current ndots threshold
 when `parsed.search` is empty, `[parsed.domain]` is used as a
 single-entry search list (matching resolver(5) §2 fallback).
 
+## Multi-nameserver failover — `FailoverBackend`
+
+`FailoverBackend.combine(backends, options)` composes N backends into
+one with the resolver(5) retry / rotation semantics. Designed to slot
+between the per-server transport (`UDPClient`, `TCPClient`, …) and
+the search-path layer above it:
+
+```ts
+import {
+  ResolvConf, StubResolver, FailoverBackend, UDPClient, PacketTypes,
+} from 'dns2ts';
+
+const conf = ResolvConf.fromFile();
+
+const backend = FailoverBackend.fromConfig(conf, ({host, port}) =>
+  UDPClient.request({dns: host, port: port}));
+
+if (backend === null) {
+  throw new Error('no nameservers configured');
+}
+
+const stub = StubResolver.fromConfig(conf, backend);
+await stub.resolve('host', PacketTypes.A);
+```
+
+`FailoverBackend.fromConfig` reads from the parsed resolv.conf:
+
+| resolv.conf option | Meaning                                       |
+| ------------------ | --------------------------------------------- |
+| `nameserver` lines | One backend each, in declaration order        |
+| `options.timeout`  | Per-attempt timeout (seconds → ms)            |
+| `options.attempts` | Retries per backend before moving on          |
+| `options.rotate`   | Round-robin the starting backend across calls |
+
+It returns `null` when `parsed.nameservers` is empty — the caller
+decides what to do (fall back to public DNS, throw, etc.).
+
+### Failover predicate
+
+The default predicate matches glibc / BIND:
+
+- **Thrown error** (timeout, ECONNREFUSED, parse failure) → fail over
+- **`SERVFAIL`** → fail over
+- **`NXDOMAIN` / `NOERROR` / `REFUSED` / `FORMERR` / `NOTIMP`** →
+  return verbatim, don't retry
+
+Override via `options.shouldFailover` — a typical BIND-behind-ACL
+setup also fails over on `REFUSED`:
+
+```ts
+import {FailoverBackend, RCODE} from 'dns2ts';
+
+const backend = FailoverBackend.combine(backends, {
+  attempts: 3,
+  shouldFailover: (r) => {
+    if (r instanceof Error) return true;
+    return r.header.rcode === RCODE.SERVFAIL ||
+           r.header.rcode === RCODE.REFUSED;
+  },
+});
+```
+
+### Order of retry
+
+For each call, the wrapper walks `(server × attempt)` tuples until
+one returns a non-failover outcome:
+
+1. server[start], attempt 1 → 2 → … → N
+2. server[start+1], attempt 1 → …
+3. …through every backend
+
+`start` is `0` by default; with `rotate: true` it advances per call
+(mod backend count). If every tuple fails over, the **last** outcome
+surfaces — so a final SERVFAIL or thrown error reaches the caller and
+`StubResolver` halts the search list as it would on any single-backend
+SERVFAIL.
+
 ## Out of scope
 
-- **Nameserver rotation / failover** — the stub doesn't iterate over
-  `parsed.nameservers`. Wire that into your backend if you need it
-  (the existing `DNS` class already does parallel-try across servers).
+- **Parallel fan-out** of upstreams (every backend simultaneously,
+  first non-failover wins). resolver(5) is sequential by design; build
+  fan-out on top of `StubResolverBackend` if you need it.
+- **Per-server health tracking** — every call starts fresh, no
+  circuit breakers. A consistently failing backend just costs the
+  configured timeout per call.
 - **Caching** — every `resolve()` call invokes the backend for each
   candidate. Use `DnsCache` (or any cache the backend already
   provides) when latency matters.
-- **Round-robin** of equal-priority candidates within one search
-  level — the stub tries each suffix in declaration order; if you
-  need shuffling, randomize the search list before passing it in.
 
 ## `/etc/hosts` integration — `HostsFile`
 

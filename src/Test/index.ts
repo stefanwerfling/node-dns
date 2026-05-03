@@ -15,6 +15,7 @@ import './rrl.js';
 import './resolvConf.js';
 import './stubResolver.js';
 import './hostsFile.js';
+import './failoverBackend.js';
 import './mdns.js';
 import './serviceDiscovery.js';
 import './mdnsServer.js';

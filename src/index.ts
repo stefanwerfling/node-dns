@@ -186,6 +186,8 @@ export type {DnssecValidity, DnssecValidationResult} from './Resolver/DnssecChai
 export {NegativeProof} from './Resolver/NegativeProof.js';
 export {StubResolver} from './Resolver/StubResolver.js';
 export type {StubResolverOptions, StubResolverBackend} from './Resolver/StubResolver.js';
+export {FailoverBackend} from './Resolver/FailoverBackend.js';
+export type {FailoverOptions, FailoverPredicate, FailoverBackendBuilder} from './Resolver/FailoverBackend.js';
 
 // DNS
 export {DNSOptions, DNS} from './DNS.js';
