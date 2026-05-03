@@ -165,4 +165,110 @@ test('MdnsServer#rawRequest matches the wire bytes (TSIG-friendly)', async () =>
     sender.close();
     server.close();
 });
+test('MdnsServer#announce multicasts a NOERROR response with cache-flush bit set', async () => {
+    const server = new MdnsServer({
+        multicastAddr: '127.0.0.1',
+        port: 0,
+        interfaceAddress: '127.0.0.1'
+    });
+    await server.listen();
+    const port = server.address().port;
+    const observer = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+    const observed = [];
+    observer.on('message', (msg) => {
+        try {
+            observed.push(Packet.parse(msg));
+        }
+        catch {
+        }
+    });
+    await new Promise((r) => observer.bind(port, '127.0.0.1', () => r()));
+    try {
+        await server.announce([aRec('host.local', '10.0.0.1')]);
+        await new Promise((r) => setTimeout(r, 50));
+        assert.strictEqual(observed.length, 1);
+        const pkt = observed[0];
+        assert.strictEqual(pkt.header.qr, 1, 'announcement is a response');
+        assert.strictEqual(pkt.header.aa, 1, 'authoritative');
+        assert.strictEqual(pkt.questions.length, 0, 'unsolicited — no question section');
+        assert.strictEqual(pkt.answers.length, 1);
+        assert.notStrictEqual(pkt.answers[0].class & 0x8000, 0, 'cache-flush bit set');
+        assert.strictEqual(pkt.answers[0].ttl, 120, 'TTL preserved on announcement');
+    }
+    finally {
+        observer.close();
+        server.close();
+    }
+});
+test('MdnsServer#goodbye stamps TTL=0 on every record (RFC 6762 §10.1)', async () => {
+    const server = new MdnsServer({
+        multicastAddr: '127.0.0.1',
+        port: 0,
+        interfaceAddress: '127.0.0.1'
+    });
+    await server.listen();
+    const port = server.address().port;
+    const observer = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+    const observed = [];
+    observer.on('message', (msg) => {
+        try {
+            observed.push(Packet.parse(msg));
+        }
+        catch {
+        }
+    });
+    await new Promise((r) => observer.bind(port, '127.0.0.1', () => r()));
+    try {
+        await server.goodbye([
+            aRec('host.local', '10.0.0.1'),
+            aRec('host.local', '10.0.0.2')
+        ]);
+        await new Promise((r) => setTimeout(r, 50));
+        assert.strictEqual(observed.length, 1);
+        const pkt = observed[0];
+        assert.strictEqual(pkt.answers.length, 2);
+        for (const r of pkt.answers) {
+            assert.strictEqual(r.ttl, 0, 'goodbye TTL must be zero');
+            assert.notStrictEqual(r.class & 0x8000, 0, 'cache-flush bit set on goodbye too');
+        }
+    }
+    finally {
+        observer.close();
+        server.close();
+    }
+});
+test('MdnsServer#announce does not mutate caller-supplied records', async () => {
+    const server = new MdnsServer({
+        multicastAddr: '127.0.0.1',
+        port: 0,
+        interfaceAddress: '127.0.0.1'
+    });
+    await server.listen();
+    try {
+        const original = aRec('host.local', '10.0.0.1');
+        const beforeClass = original.class;
+        const beforeTtl = original.ttl;
+        await server.goodbye([original]);
+        assert.strictEqual(original.class, beforeClass, 'caller class must be untouched');
+        assert.strictEqual(original.ttl, beforeTtl, 'caller TTL must be untouched');
+    }
+    finally {
+        server.close();
+    }
+});
+test('MdnsServer#goodbye on empty record list is a no-op', async () => {
+    const server = new MdnsServer({
+        multicastAddr: '127.0.0.1',
+        port: 0,
+        interfaceAddress: '127.0.0.1'
+    });
+    await server.listen();
+    try {
+        await server.goodbye([]);
+        await server.announce([]);
+    }
+    finally {
+        server.close();
+    }
+});
 //# sourceMappingURL=mdnsServer.js.map

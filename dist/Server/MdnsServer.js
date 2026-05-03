@@ -1,6 +1,7 @@
 import dgram from 'dgram';
-import { MDNS_MULTICAST_IPV4, MDNS_MULTICAST_IPV6, MDNS_PORT, MDNS_QU_BIT } from '../Client/MdnsClient.js';
+import { MDNS_CACHE_FLUSH_BIT, MDNS_MULTICAST_IPV4, MDNS_MULTICAST_IPV6, MDNS_PORT, MDNS_QU_BIT } from '../Client/MdnsClient.js';
 import { Packet } from '../Packet/Packet.js';
+import { PacketResource } from '../Packet/PacketResource.js';
 export class MdnsServer {
     _socket;
     _multicastAddr;
@@ -58,6 +59,12 @@ export class MdnsServer {
             });
         });
     }
+    announce(records) {
+        return this._sendUnsolicited(records, false);
+    }
+    goodbye(records) {
+        return this._sendUnsolicited(records, true);
+    }
     close(callback) {
         this._socket.close(callback);
     }
@@ -98,6 +105,33 @@ export class MdnsServer {
                 });
             });
         };
+    }
+    _sendUnsolicited(records, goodbye) {
+        if (records.length === 0) {
+            return Promise.resolve();
+        }
+        const packet = new Packet();
+        packet.header.id = 0;
+        packet.header.qr = 1;
+        packet.header.aa = 1;
+        packet.header.rd = 0;
+        packet.answers = records.map((r) => {
+            const flushClass = r.class | MDNS_CACHE_FLUSH_BIT;
+            const ttl = goodbye ? 0 : r.ttl;
+            return new PacketResource(r.name, r.packetType, flushClass, ttl);
+        });
+        const buf = packet.toBuffer();
+        const destPort = this._socket.address().port || this._port;
+        return new Promise((resolve, reject) => {
+            this._socket.send(buf, destPort, this._multicastAddr, (err) => {
+                if (err) {
+                    reject(err);
+                }
+                else {
+                    resolve();
+                }
+            });
+        });
     }
     static _anyQuestionHasQu(packet) {
         for (const q of packet.questions) {

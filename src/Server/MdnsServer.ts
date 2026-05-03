@@ -2,12 +2,14 @@ import {Buffer} from 'buffer';
 import dgram from 'dgram';
 import {AddressInfo} from 'net';
 import {
+    MDNS_CACHE_FLUSH_BIT,
     MDNS_MULTICAST_IPV4,
     MDNS_MULTICAST_IPV6,
     MDNS_PORT,
     MDNS_QU_BIT
 } from '../Client/MdnsClient.js';
 import {Packet} from '../Packet/Packet.js';
+import {PacketResource} from '../Packet/PacketResource.js';
 
 /**
  * `send` payload accepted by the mDNS request handler. mDNS responses
@@ -261,6 +263,45 @@ export class MdnsServer {
     }
 
     /**
+     * Send an unsolicited announcement (RFC 6762 §8.3 / §10) for the
+     * given records. Each record's class gets the cache-flush bit set
+     * so peers replace any previously cached entries for the same
+     * (name, type) pair atomically when this packet arrives. The
+     * server must already be `listen()`-ed; otherwise the underlying
+     * socket has no bound port to send from.
+     *
+     * Goes to the configured multicast group + port. Use this from
+     * application code that wants to schedule periodic re-
+     * announcements (RFC 6762 §10 mentions "decreasing intervals" —
+     * e.g. 1s, 2s, 4s, 8s … capped) — the server keeps no schedule of
+     * its own.
+     *
+     * @param {PacketResource[]} records
+     * @return {Promise<void>}
+     */
+    public announce(records: PacketResource[]): Promise<void> {
+        return this._sendUnsolicited(records, false);
+    }
+
+    /**
+     * Send a "goodbye" announcement (RFC 6762 §10.1): same shape as
+     * `announce` but every record's TTL is forced to 0, telling peers
+     * to flush the entry from their caches. Call this just before
+     * `close()` on shutdown so the segment doesn't carry stale entries
+     * for our records until natural TTL expiry.
+     *
+     * RFC 6762 §10.1 recommends sending the goodbye twice with a few
+     * seconds between transmissions; this method sends once — the
+     * caller controls the schedule.
+     *
+     * @param {PacketResource[]} records
+     * @return {Promise<void>}
+     */
+    public goodbye(records: PacketResource[]): Promise<void> {
+        return this._sendUnsolicited(records, true);
+    }
+
+    /**
      * close
      * @param {() => void} callback
      */
@@ -337,6 +378,58 @@ export class MdnsServer {
                 });
             });
         };
+    }
+
+    /**
+     * Synthesize and multicast an unsolicited response. Internal
+     * helper for `announce` / `goodbye` — both differ only in the TTL
+     * stamp.
+     *
+     * @param {PacketResource[]} records
+     * @param {boolean} goodbye when true, every record TTL is forced to 0
+     * @return {Promise<void>}
+     * @protected
+     */
+    protected _sendUnsolicited(records: PacketResource[], goodbye: boolean): Promise<void> {
+        if (records.length === 0) {
+            // No-op so app code can safely call `goodbye([])` when it
+            // hasn't claimed anything yet — saves a defensive check on
+            // every shutdown path.
+            return Promise.resolve();
+        }
+
+        const packet = new Packet();
+        packet.header.id = 0;
+        packet.header.qr = 1;
+        packet.header.aa = 1;
+        packet.header.rd = 0;
+
+        // Don't mutate caller-provided records — copy with cache-flush
+        // bit applied to the class and (for goodbye) TTL=0 stamped on.
+        packet.answers = records.map((r) => {
+            // eslint-disable-next-line no-bitwise
+            const flushClass = r.class | MDNS_CACHE_FLUSH_BIT;
+            const ttl = goodbye ? 0 : r.ttl;
+            return new PacketResource(r.name, r.packetType, flushClass, ttl);
+        });
+
+        const buf = packet.toBuffer();
+
+        // Use the actually-bound port — when the server is created
+        // with `port: 0` (test setups) the configured `this._port` is
+        // 0 but we still need a real destination. In production both
+        // values are 5353.
+        const destPort = (this._socket.address() as AddressInfo).port || this._port;
+
+        return new Promise((resolve, reject) => {
+            this._socket.send(buf, destPort, this._multicastAddr, (err) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve();
+                }
+            });
+        });
     }
 
     /**

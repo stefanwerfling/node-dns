@@ -243,12 +243,72 @@ to reason about tiebreak outcomes outside of an actual probe.
 production both default to 5353 (RFC 6762 §15 expects source port
 5353 too).
 
+### Announce + goodbye — `MdnsServer.announce` / `goodbye`
+
+After a successful probe (and during normal lifetime, periodically),
+the responder multicasts unsolicited responses so peer caches stay
+fresh. RFC 6762 §10.1 also asks the responder to send a "goodbye"
+just before shutdown — same shape but with TTL=0 — so peers flush
+the entries immediately instead of waiting for natural expiry.
+
+The server exposes both as one-shot primitives. Scheduling is up to
+application code:
+
+```ts
+import {MdnsServer, PacketResource, PacketClass, A} from 'dns2ts';
+
+const server = new MdnsServer();
+await server.listen();
+
+const records = [
+  new PacketResource('host.local', new A('192.168.1.42'),
+                     PacketClass.IN, 120),
+];
+
+// Initial announce (post-probe, post-listen).
+await server.announce(records);
+
+// Periodic re-announce — RFC 6762 §10 mentions a back-off schedule
+// (1s, 2s, 4s, 8s, …) so reassessing fresh nodes happens cheaply.
+const intervals = [1000, 2000, 4000, 8000, 16000];
+let i = 0;
+const tick = (): void => {
+  if (i >= intervals.length) {
+    return;
+  }
+  setTimeout(async () => {
+    await server.announce(records);
+    i++;
+    tick();
+  }, intervals[i]);
+};
+tick();
+
+// Shutdown — broadcast TTL=0 announcements so peers flush their
+// caches, then close the socket. RFC 6762 §10.1 recommends sending
+// the goodbye twice with a brief delay; the caller controls that.
+await server.goodbye(records);
+await new Promise(r => setTimeout(r, 250));
+await server.goodbye(records);
+server.close();
+```
+
+Both methods take an explicit record list (the server keeps no
+record store) and apply:
+
+- the cache-flush bit (RFC 6762 §10.2 — top bit of CLASS) on every
+  record, signalling "this RRset replaces any previously cached
+  records for the same name+type",
+- TTL=0 on goodbye, TTL preserved on announce.
+
+The records you pass in are never mutated — copies are made before
+the wire packet is built.
+
 ### Out of scope (for now)
 
-- **Goodbye / TTL=0 announcements** (§10.1) — the handler can
-  construct and send these via `send()`; the server doesn't
-  synthesize them.
-- **Continuous announcements** — same.
+- **Continuous-announcement schedule** — provided as primitives, not
+  as a built-in scheduler. Wire up `setTimeout` / a small helper
+  yourself if you need automatic decreasing-interval re-announces.
 - **Re-probing** on conflict — `MdnsProbe.claim()` returns
   `'conflict'` and the caller decides how to rename + retry; the
   helper doesn't loop on its own.

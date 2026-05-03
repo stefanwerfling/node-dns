@@ -127,11 +127,12 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   opt-in DNSSEC validation. Injectable UDP and TCP transports for
   testing and forwarding setups.
 - **[mDNS client + server + probing](docs/mdns.md)** — `MdnsClient`
-  for RFC 6762 multicast DNS, `MdnsServer` for the responder side,
-  and `MdnsProbe` for §8 probe/announce (3 probes, 250ms apart, with
-  §8.2 lexicographic tiebreak on simultaneous probes; 2 announcements
-  with cache-flush bit on success). `ServiceDiscovery` (RFC 6763) on
-  top for DNS-SD browse + resolve.
+  for RFC 6762 multicast DNS, `MdnsServer` for the responder side
+  (with `announce` / `goodbye` §10 primitives), and `MdnsProbe` for
+  §8 probe/announce (3 probes, 250ms apart, with §8.2 lexicographic
+  tiebreak on simultaneous probes; 2 announcements with cache-flush
+  bit on success). `ServiceDiscovery` (RFC 6763) on top for DNS-SD
+  browse + resolve.
 
 ### DNS Client (default UDP)
 
