@@ -128,6 +128,8 @@ export type {
 } from './Server/MdnsServer.js';
 export {MdnsProbe} from './Server/MdnsProbe.js';
 export type {MdnsProbeOptions, MdnsProbeResult} from './Server/MdnsProbe.js';
+export {MdnsAnnouncer} from './Server/MdnsAnnouncer.js';
+export type {MdnsAnnouncerOptions} from './Server/MdnsAnnouncer.js';
 
 // Client
 export {AClient} from './Client/AClient.js';

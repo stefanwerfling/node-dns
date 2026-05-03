@@ -415,13 +415,25 @@ export class MdnsServer {
 
         const buf = packet.toBuffer();
 
-        // Use the actually-bound port — when the server is created
-        // with `port: 0` (test setups) the configured `this._port` is
-        // 0 but we still need a real destination. In production both
-        // values are 5353.
-        const destPort = (this._socket.address() as AddressInfo).port || this._port;
-
         return new Promise((resolve, reject) => {
+            // Use the actually-bound port — when the server is
+            // created with `port: 0` (test setups) the configured
+            // `this._port` is 0 but we still need a real destination.
+            // In production both values are 5353.
+            //
+            // `socket.address()` throws synchronously after `close()`
+            // (`ERR_SOCKET_DGRAM_NOT_RUNNING`), so wrap the lookup in
+            // the promise body to surface the failure as a rejection
+            // — that's what callers like `MdnsAnnouncer` expect.
+            let destPort: number;
+
+            try {
+                destPort = (this._socket.address() as AddressInfo).port || this._port;
+            } catch (err) {
+                reject(err instanceof Error ? err : new Error(String(err)));
+                return;
+            }
+
             this._socket.send(buf, destPort, this._multicastAddr, (err) => {
                 if (err) {
                     reject(err);

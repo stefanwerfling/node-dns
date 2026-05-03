@@ -121,8 +121,15 @@ export class MdnsServer {
             return new PacketResource(r.name, r.packetType, flushClass, ttl);
         });
         const buf = packet.toBuffer();
-        const destPort = this._socket.address().port || this._port;
         return new Promise((resolve, reject) => {
+            let destPort;
+            try {
+                destPort = this._socket.address().port || this._port;
+            }
+            catch (err) {
+                reject(err instanceof Error ? err : new Error(String(err)));
+                return;
+            }
             this._socket.send(buf, destPort, this._multicastAddr, (err) => {
                 if (err) {
                     reject(err);

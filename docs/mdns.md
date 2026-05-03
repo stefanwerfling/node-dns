@@ -243,6 +243,58 @@ to reason about tiebreak outcomes outside of an actual probe.
 production both default to 5353 (RFC 6762 §15 expects source port
 5353 too).
 
+### Continuous announcements — `MdnsAnnouncer`
+
+`MdnsServer.announce` is a one-shot primitive. For the typical
+post-probe lifecycle — re-announce on the Apple-style back-off
+schedule, send a goodbye on shutdown — `MdnsAnnouncer` wraps the
+schedule + cleanup as a small handle:
+
+```ts
+import {
+  MdnsServer, MdnsProbe, MdnsAnnouncer,
+  PacketResource, PacketClass, A,
+} from 'dns2ts';
+
+const records = [
+  new PacketResource('host.local', new A('192.168.1.42'),
+                     PacketClass.IN, 120),
+];
+
+const result = await MdnsProbe.claim({records, announceAttempts: 2});
+
+if (result.result === 'claimed') {
+  const server = new MdnsServer();
+  await server.listen();
+  server.on('request', /* ... */);
+
+  // Default schedule [1s, 2s, 4s, 8s] picks up where MdnsProbe left
+  // off. After the back-off completes, the announcer goes quiet
+  // unless `steadyStateMs` is set.
+  const announcer = new MdnsAnnouncer(server, records).start();
+
+  // ... app runs ...
+
+  await announcer.stop();   // sends TTL=0 goodbye, cancels timers
+  server.close();
+}
+```
+
+Options:
+
+| Option            | Default                       | Meaning                                   |
+| ----------------- | ----------------------------- | ----------------------------------------- |
+| `schedule`        | `[1000, 2000, 4000, 8000]` ms | Delays between consecutive announcements  |
+| `steadyStateMs`   | `0`                           | Re-announce every N ms after the schedule |
+| `initialAnnounce` | `false`                       | Fire one announcement immediately on start |
+| `goodbyeOnStop`   | `true`                        | Send TTL=0 in `stop()`                    |
+
+`start()` and `stop()` are idempotent. Errors raised inside
+`server.announce()` (e.g. socket already closed mid-tick) bubble
+through `announcer.on('error', listener)` if a listener is
+registered, otherwise are swallowed so a transient send failure
+doesn't take the whole schedule down.
+
 ### Announce + goodbye — `MdnsServer.announce` / `goodbye`
 
 After a successful probe (and during normal lifetime, periodically),

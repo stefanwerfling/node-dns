@@ -69,6 +69,7 @@ export { UDPServer } from './Server/UDPServer.js';
 export { DohServer } from './Server/DohServer.js';
 export { MdnsServer } from './Server/MdnsServer.js';
 export { MdnsProbe } from './Server/MdnsProbe.js';
+export { MdnsAnnouncer } from './Server/MdnsAnnouncer.js';
 export { AClient } from './Client/AClient.js';
 export { ClientOptionsProtocol } from './Client/ClientOptions.js';
 export { TCPClient } from './Client/TCPClient.js';
