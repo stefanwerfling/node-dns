@@ -5,8 +5,26 @@ import {UDPClient} from '../Client/UDPClient.js';
 import {Packet} from '../Packet/Packet.js';
 import {PacketClass} from '../Packet/PacketClass.js';
 import {PacketTypes} from '../Packet/PacketTypes.js';
+import {CachedStubBackend} from './CachedStubBackend.js';
+import {DnsCache, DnsCacheOptions} from './DnsCache.js';
 import {FailoverBackend, FailoverBackendBuilder, FailoverPredicate} from './FailoverBackend.js';
 import {StubResolver, StubResolverBackend} from './StubResolver.js';
+
+/**
+ * Cache configuration:
+ *
+ *   - `false` / omitted — no cache (the default; matches a typical
+ *     stub resolver that just forwards every query).
+ *   - `true` — wrap the upstream with a `CachedStubBackend` using
+ *     `DnsCache` defaults (10k entries, 1-day max TTL, RFC 2308
+ *     negative caching).
+ *   - `DnsCache` instance — share an external cache across multiple
+ *     `SystemResolver`s, or pre-populate it.
+ *   - `DnsCacheOptions` object — build a fresh `DnsCache` with the
+ *     given knobs (`maxEntries`, `min/maxTtlSeconds`,
+ *     `maxStaleSeconds` for RFC 8767, `prefetchThreshold`, …).
+ */
+export type SystemResolverCache = boolean | DnsCache | DnsCacheOptions;
 
 export type SystemResolverOptions = {
     /**
@@ -40,6 +58,17 @@ export type SystemResolverOptions = {
      * — see `FailoverBackend.defaultShouldFailover`.
      */
     shouldFailover?: FailoverPredicate;
+
+    /**
+     * Optional response cache between the StubResolver and the
+     * upstream (FailoverBackend) layer. Disabled by default. See
+     * `SystemResolverCache` for the accepted shapes.
+     *
+     * The cache sits *under* the hosts-file layer — local-only names
+     * are still served from `/etc/hosts` first and never consume
+     * cache slots. Only real network answers are cached.
+     */
+    cache?: SystemResolverCache;
 };
 
 /**
@@ -93,9 +122,11 @@ const defaultBackend: FailoverBackendBuilder = ({host, port}) => UDPClient.reque
 export class SystemResolver {
 
     protected _stub: StubResolver;
+    protected _cache: DnsCache | null;
 
-    public constructor(stub: StubResolver) {
+    public constructor(stub: StubResolver, cache: DnsCache | null = null) {
         this._stub = stub;
+        this._cache = cache;
     }
 
     /**
@@ -132,7 +163,8 @@ export class SystemResolver {
         return SystemResolver.fromConfig(conf, {
             hostsFile: hosts ?? undefined,
             backend: options.backend,
-            shouldFailover: options.shouldFailover
+            shouldFailover: options.shouldFailover,
+            cache: options.cache
         });
     }
 
@@ -148,6 +180,7 @@ export class SystemResolver {
             hostsFile?: HostsFile;
             backend?: FailoverBackendBuilder;
             shouldFailover?: FailoverPredicate;
+            cache?: SystemResolverCache;
         } = {}
     ): SystemResolver {
         const failover = FailoverBackend.fromConfig(conf, options.backend ?? defaultBackend, {
@@ -158,13 +191,45 @@ export class SystemResolver {
             throw new Error('SystemResolver: resolv.conf carries no `nameserver` entries');
         }
 
-        const backend: StubResolverBackend = options.hostsFile !== undefined
-            ? options.hostsFile.asResolverBackend(failover)
+        // Cache wraps the upstream (failover) before hosts — so /etc/hosts
+        // stays authoritative for local names and only network answers
+        // consume cache slots.
+        const cacheInstance = SystemResolver._resolveCacheOption(options.cache);
+        const cachedUpstream: StubResolverBackend = cacheInstance !== null
+            ? new CachedStubBackend(failover, {cache: cacheInstance}).resolve
             : failover;
+
+        const backend: StubResolverBackend = options.hostsFile !== undefined
+            ? options.hostsFile.asResolverBackend(cachedUpstream)
+            : cachedUpstream;
 
         const stub = StubResolver.fromConfig(conf, backend);
 
-        return new SystemResolver(stub);
+        return new SystemResolver(stub, cacheInstance);
+    }
+
+    /**
+     * Map a `SystemResolverCache` option to a concrete `DnsCache` (or
+     * `null` for the no-cache default).
+     *
+     * @param {SystemResolverCache|undefined} option
+     * @return {DnsCache|null}
+     * @protected
+     */
+    protected static _resolveCacheOption(option: SystemResolverCache | undefined): DnsCache | null {
+        if (option === undefined || option === false) {
+            return null;
+        }
+
+        if (option === true) {
+            return new DnsCache();
+        }
+
+        if (option instanceof DnsCache) {
+            return option;
+        }
+
+        return new DnsCache(option);
     }
 
     /**
@@ -187,6 +252,16 @@ export class SystemResolver {
      */
     public get stub(): StubResolver {
         return this._stub;
+    }
+
+    /**
+     * The active `DnsCache` instance, or `null` when caching was not
+     * enabled at construction. Exposed so callers can call `.clear()`
+     * on config reload, `.size()` for instrumentation, or pre-populate
+     * with entries.
+     */
+    public get cache(): DnsCache | null {
+        return this._cache;
     }
 
     /**

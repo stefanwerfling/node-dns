@@ -92,5 +92,6 @@ export { NegativeProof } from './Resolver/NegativeProof.js';
 export { StubResolver } from './Resolver/StubResolver.js';
 export { FailoverBackend } from './Resolver/FailoverBackend.js';
 export { SystemResolver } from './Resolver/SystemResolver.js';
+export { CachedStubBackend } from './Resolver/CachedStubBackend.js';
 export { DNS } from './DNS.js';
 //# sourceMappingURL=index.js.map

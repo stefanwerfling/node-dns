@@ -17,6 +17,7 @@ import './stubResolver.js';
 import './hostsFile.js';
 import './failoverBackend.js';
 import './systemResolver.js';
+import './cachedStubBackend.js';
 import './mdns.js';
 import './serviceDiscovery.js';
 import './mdnsServer.js';

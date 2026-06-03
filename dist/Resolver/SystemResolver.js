@@ -3,6 +3,8 @@ import { HostsFile } from '../Lib/HostsFile.js';
 import { ResolvConf } from '../Lib/ResolvConf.js';
 import { UDPClient } from '../Client/UDPClient.js';
 import { PacketClass } from '../Packet/PacketClass.js';
+import { CachedStubBackend } from './CachedStubBackend.js';
+import { DnsCache } from './DnsCache.js';
 import { FailoverBackend } from './FailoverBackend.js';
 import { StubResolver } from './StubResolver.js';
 const DEFAULT_NAMESERVER_PORT = 53;
@@ -12,8 +14,10 @@ const defaultBackend = ({ host, port }) => UDPClient.request({
 });
 export class SystemResolver {
     _stub;
-    constructor(stub) {
+    _cache;
+    constructor(stub, cache = null) {
         this._stub = stub;
+        this._cache = cache;
     }
     static system(options = {}) {
         const conf = ResolvConf.fromFile(options.resolvConfPath ?? ResolvConf.DEFAULT_PATH);
@@ -33,7 +37,8 @@ export class SystemResolver {
         return SystemResolver.fromConfig(conf, {
             hostsFile: hosts ?? undefined,
             backend: options.backend,
-            shouldFailover: options.shouldFailover
+            shouldFailover: options.shouldFailover,
+            cache: options.cache
         });
     }
     static fromConfig(conf, options = {}) {
@@ -43,17 +48,36 @@ export class SystemResolver {
         if (failover === null) {
             throw new Error('SystemResolver: resolv.conf carries no `nameserver` entries');
         }
-        const backend = options.hostsFile !== undefined
-            ? options.hostsFile.asResolverBackend(failover)
+        const cacheInstance = SystemResolver._resolveCacheOption(options.cache);
+        const cachedUpstream = cacheInstance !== null
+            ? new CachedStubBackend(failover, { cache: cacheInstance }).resolve
             : failover;
+        const backend = options.hostsFile !== undefined
+            ? options.hostsFile.asResolverBackend(cachedUpstream)
+            : cachedUpstream;
         const stub = StubResolver.fromConfig(conf, backend);
-        return new SystemResolver(stub);
+        return new SystemResolver(stub, cacheInstance);
+    }
+    static _resolveCacheOption(option) {
+        if (option === undefined || option === false) {
+            return null;
+        }
+        if (option === true) {
+            return new DnsCache();
+        }
+        if (option instanceof DnsCache) {
+            return option;
+        }
+        return new DnsCache(option);
     }
     resolve(name, type, cls = PacketClass.IN) {
         return this._stub.resolve(name, type, cls);
     }
     get stub() {
         return this._stub;
+    }
+    get cache() {
+        return this._cache;
     }
     static hasSystemFiles(options = {}) {
         return {

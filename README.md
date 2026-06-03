@@ -123,7 +123,11 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   `options.timeout`/`attempts`/`rotate`; `HostsFile` parses
   `/etc/hosts` and exposes `asResolverBackend(fallback)` so files-
   first lookup ↦ DNS fallback matches glibc's `nsswitch.conf`
-  `hosts: files dns`.
+  `hosts: files dns`. Opt-in response caching via `cache: true |
+  DnsCache | DnsCacheOptions` — `CachedStubBackend` wraps the
+  upstream BEFORE hosts so local names stay authoritative and only
+  network answers consume cache slots; honours RFC 2308 negative
+  caching, RFC 8767 serve-stale, and BIND-style prefetch.
 - **[Recursive resolver](docs/recursive-resolver.md)** — iterative
   `RecursiveResolver` with `DnsCache` (TTL + RFC 2308 negative caching) and
   bundled `RootHints`. NS chasing, glueless delegation, CNAME chains,

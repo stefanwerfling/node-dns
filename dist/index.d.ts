@@ -129,5 +129,7 @@ export type { StubResolverOptions, StubResolverBackend } from './Resolver/StubRe
 export { FailoverBackend } from './Resolver/FailoverBackend.js';
 export type { FailoverOptions, FailoverPredicate, FailoverBackendBuilder } from './Resolver/FailoverBackend.js';
 export { SystemResolver } from './Resolver/SystemResolver.js';
-export type { SystemResolverOptions } from './Resolver/SystemResolver.js';
+export type { SystemResolverOptions, SystemResolverCache } from './Resolver/SystemResolver.js';
+export { CachedStubBackend } from './Resolver/CachedStubBackend.js';
+export type { CachedStubBackendOptions } from './Resolver/CachedStubBackend.js';
 export { DNSOptions, DNS } from './DNS.js';

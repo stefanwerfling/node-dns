@@ -50,11 +50,92 @@ Other knobs:
 - `resolvConfPath` / `hostsPath` for non-standard locations
 - `skipHosts: true` to bypass the hosts-file layer entirely
 - `shouldFailover` to override the BIND/glibc default failover predicate
+- `cache` to enable an in-memory response cache between the stub and
+  the upstream — see [Response caching](#response-caching) below
 - `SystemResolver.hasSystemFiles({...})` reports which files exist
   before you call `system()`
 
 `resolver.stub` exposes the wrapped `StubResolver` so callers can
-inspect `expand()`, `search`, `ndots` without unwrapping the layers.
+inspect `expand()`, `search`, `ndots` without unwrapping the layers;
+`resolver.cache` returns the `DnsCache` instance (or `null` when
+caching is disabled) for instrumentation, `clear()` on config reload,
+or pre-population.
+
+## Response caching
+
+By default `SystemResolver` is a pure forwarder — every query goes to
+the network. For latency-sensitive workloads or `dig`-style scripts
+that re-query the same names, opt in to caching by setting `cache`:
+
+```ts
+import {SystemResolver, PacketTypes} from 'dns2ts';
+
+// Defaults: 10000 entries, 1-day max TTL, RFC 2308 negative caching.
+const resolver = SystemResolver.system({cache: true});
+```
+
+The cache sits *between* the hosts-file layer and the upstream — so
+`/etc/hosts` stays authoritative for local names (and never consumes
+cache slots), and only real network answers are cached.
+
+Tune via `DnsCacheOptions`:
+
+```ts
+const resolver = SystemResolver.system({
+  cache: {
+    maxEntries: 5000,
+    maxTtlSeconds: 600,        // cap upstream TTLs at 10 min
+    minTtlSeconds: 5,          // pin sub-5s TTLs to 5s
+    maxStaleSeconds: 3600,     // RFC 8767 serve-stale window
+    prefetchThreshold: 0.1,    // BIND-style prefetch at 10% TTL left
+  },
+});
+```
+
+Pass an external `DnsCache` instance to share state across multiple
+resolvers (e.g. a per-service stub and a per-host stub backed by the
+same hot cache):
+
+```ts
+import {DnsCache, SystemResolver} from 'dns2ts';
+
+const shared = new DnsCache({maxEntries: 50_000});
+const resolverA = SystemResolver.system({cache: shared});
+const resolverB = SystemResolver.system({cache: shared, /* different backend */});
+```
+
+What gets cached:
+
+- **`NOERROR`** with answers → positive cache, TTL = min TTL across
+  the answer section (RFC 1035 §3.7)
+- **`NXDOMAIN`** → negative cache, TTL = `min(SOA.MINIMUM, SOA.TTL)`
+  from the authority section (RFC 2308 §5)
+- **`NOERROR`** with empty answers (NODATA) → same negative-caching
+  shape as NXDOMAIN
+- **`SERVFAIL` / `REFUSED` / `FORMERR` / `NOTIMP`** are **not** cached
+  — pinning a transient failure would mask recovery. Override via the
+  lower-level `CachedStubBackend({isCacheable})` if your upstream's
+  failure semantics are sticky.
+
+Stale-while-revalidate (RFC 8767) and BIND-style prefetch are
+inherited from the underlying `DnsCache` — pass `maxStaleSeconds` and
+`prefetchThreshold` and the wrapper will return the cached answer
+immediately while firing an asynchronous refresh in the background
+(deduped per `(qname, qtype, qclass)`).
+
+The same wrapper is exposed standalone as `CachedStubBackend` for
+hand-composed pipelines:
+
+```ts
+import {CachedStubBackend, StubResolver, UDPClient, ResolvConf} from 'dns2ts';
+
+const conf = ResolvConf.fromFile();
+const upstream = UDPClient.request({dns: conf.nameservers[0]});
+const cached = new CachedStubBackend(upstream, {
+  cacheOptions: {maxEntries: 5000, maxStaleSeconds: 3600},
+});
+const stub = StubResolver.fromConfig(conf, cached.resolve);
+```
 
 The rest of this doc covers the lower-level pieces — useful when you
 want to compose them by hand, swap in a recursive resolver,
