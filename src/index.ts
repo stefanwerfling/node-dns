@@ -10,8 +10,8 @@ export {Rrl} from './Lib/Rrl.js';
 export type {RrlOptions, RrlDecision} from './Lib/Rrl.js';
 export {ResolvConf} from './Lib/ResolvConf.js';
 export type {ParsedResolvConf, ResolvConfOptions} from './Lib/ResolvConf.js';
-export {HostsFile} from './Lib/HostsFile.js';
-export type {HostsEntry, HostsLookupResult, HostsFileOptions} from './Lib/HostsFile.js';
+export {HostsFile, HostsFileWatchHandle} from './Lib/HostsFile.js';
+export type {HostsEntry, HostsLookupResult, HostsFileOptions, HostsFileWatchOptions} from './Lib/HostsFile.js';
 export {Dnssec, DnssecAlgorithm, DnssecDigest} from './Lib/Dnssec.js';
 export type {
     DnssecVerifyOptions,

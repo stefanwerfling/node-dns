@@ -15,6 +15,7 @@ import './rrl.js';
 import './resolvConf.js';
 import './stubResolver.js';
 import './hostsFile.js';
+import './hostsFileWatch.js';
 import './failoverBackend.js';
 import './systemResolver.js';
 import './cachedStubBackend.js';

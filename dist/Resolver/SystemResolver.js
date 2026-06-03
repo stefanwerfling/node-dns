@@ -15,9 +15,11 @@ const defaultBackend = ({ host, port }) => UDPClient.request({
 export class SystemResolver {
     _stub;
     _cache;
-    constructor(stub, cache = null) {
+    _hostsWatch;
+    constructor(stub, cache = null, hostsWatch = null) {
         this._stub = stub;
         this._cache = cache;
+        this._hostsWatch = hostsWatch;
     }
     static system(options = {}) {
         const conf = ResolvConf.fromFile(options.resolvConfPath ?? ResolvConf.DEFAULT_PATH);
@@ -38,7 +40,8 @@ export class SystemResolver {
             hostsFile: hosts ?? undefined,
             backend: options.backend,
             shouldFailover: options.shouldFailover,
-            cache: options.cache
+            cache: options.cache,
+            watchHosts: options.watchHosts
         });
     }
     static fromConfig(conf, options = {}) {
@@ -56,7 +59,14 @@ export class SystemResolver {
             ? options.hostsFile.asResolverBackend(cachedUpstream)
             : cachedUpstream;
         const stub = StubResolver.fromConfig(conf, backend);
-        return new SystemResolver(stub, cacheInstance);
+        let hostsWatch = null;
+        if (options.watchHosts !== undefined && options.watchHosts !== false && options.hostsFile !== undefined) {
+            const watchOpts = options.watchHosts === true
+                ? {}
+                : options.watchHosts;
+            hostsWatch = options.hostsFile.watch(watchOpts);
+        }
+        return new SystemResolver(stub, cacheInstance, hostsWatch);
     }
     static _resolveCacheOption(option) {
         if (option === undefined || option === false) {
@@ -78,6 +88,14 @@ export class SystemResolver {
     }
     get cache() {
         return this._cache;
+    }
+    get hostsWatch() {
+        return this._hostsWatch;
+    }
+    close() {
+        if (this._hostsWatch !== null) {
+            this._hostsWatch.close();
+        }
     }
     static hasSystemFiles(options = {}) {
         return {

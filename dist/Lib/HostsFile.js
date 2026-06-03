@@ -6,15 +6,124 @@ import { PacketResource } from '../Packet/PacketResource.js';
 import { PacketTypes } from '../Packet/PacketTypes.js';
 import { A } from '../Packet/Types/A.js';
 import { AAAA } from '../Packet/Types/AAAA.js';
+export class HostsFileWatchHandle {
+    _hostsFile;
+    _path;
+    _debounceMs;
+    _onReload;
+    _onError;
+    _watcher;
+    _debounceTimer;
+    _closed;
+    constructor(hostsFile, path, options) {
+        this._hostsFile = hostsFile;
+        this._path = path;
+        this._debounceMs = options.debounceMs ?? 100;
+        this._onReload = options.onReload;
+        this._onError = options.onError;
+        this._watcher = null;
+        this._debounceTimer = null;
+        this._closed = false;
+        this._openWatcher();
+    }
+    get path() {
+        return this._path;
+    }
+    get closed() {
+        return this._closed;
+    }
+    reloadNow() {
+        if (this._debounceTimer !== null) {
+            clearTimeout(this._debounceTimer);
+            this._debounceTimer = null;
+        }
+        this._performReload();
+    }
+    close() {
+        if (this._closed) {
+            return;
+        }
+        this._closed = true;
+        if (this._debounceTimer !== null) {
+            clearTimeout(this._debounceTimer);
+            this._debounceTimer = null;
+        }
+        if (this._watcher !== null) {
+            this._watcher.close();
+            this._watcher = null;
+        }
+    }
+    _openWatcher() {
+        if (this._closed) {
+            return;
+        }
+        try {
+            this._watcher = fs.watch(this._path, (eventType) => {
+                this._scheduleReload(eventType);
+            });
+            this._watcher.on('error', (err) => {
+                this._reportError(err);
+            });
+        }
+        catch (err) {
+            this._reportError(err);
+        }
+    }
+    _scheduleReload(eventType) {
+        if (this._closed) {
+            return;
+        }
+        if (this._debounceTimer !== null) {
+            clearTimeout(this._debounceTimer);
+        }
+        this._debounceTimer = setTimeout(() => {
+            this._debounceTimer = null;
+            this._performReload();
+            if (eventType === 'rename') {
+                if (this._watcher !== null) {
+                    this._watcher.close();
+                    this._watcher = null;
+                }
+                this._openWatcher();
+            }
+        }, this._debounceMs);
+        if (typeof this._debounceTimer.unref === 'function') {
+            this._debounceTimer.unref();
+        }
+    }
+    _performReload() {
+        try {
+            this._hostsFile.reload(this._path);
+            if (this._onReload !== undefined) {
+                this._onReload(this._hostsFile);
+            }
+        }
+        catch (err) {
+            this._reportError(err);
+        }
+    }
+    _reportError(err) {
+        if (this._onError !== undefined) {
+            this._onError(err);
+            return;
+        }
+        if (err.code === 'ENOENT' || err.code === 'EACCES' || err.code === 'EPERM') {
+            return;
+        }
+        process.emitWarning(`HostsFile.watch: ${err.message}`, 'HostsFileWatchWarning');
+    }
+}
 export class HostsFile {
     static DEFAULT_PATH = '/etc/hosts';
     _entries;
     _byName;
     _ttl;
+    _sourcePath;
     constructor(entries = [], options = {}) {
         this._entries = entries;
         this._ttl = Math.max(0, options.ttl ?? 0);
         this._byName = HostsFile._index(entries);
+        this._sourcePath = null;
     }
     static parse(content, options = {}) {
         const entries = [];
@@ -42,7 +151,23 @@ export class HostsFile {
     }
     static fromFile(path = HostsFile.DEFAULT_PATH, options = {}) {
         const content = fs.readFileSync(path, 'utf8');
-        return HostsFile.parse(content, options);
+        const file = HostsFile.parse(content, options);
+        file._sourcePath = path;
+        return file;
+    }
+    get sourcePath() {
+        return this._sourcePath;
+    }
+    reload(path) {
+        const target = path ?? this._sourcePath;
+        if (target === null || target === undefined) {
+            throw new Error('HostsFile.reload: no source path — pass `path` or construct via fromFile()');
+        }
+        const content = fs.readFileSync(target, 'utf8');
+        const parsed = HostsFile.parse(content, { ttl: this._ttl });
+        this._entries = parsed._entries;
+        this._byName = parsed._byName;
+        this._sourcePath = target;
     }
     get entries() {
         return this._entries.slice();
@@ -86,6 +211,13 @@ export class HostsFile {
     }
     merge(other) {
         return new HostsFile([...this._entries, ...other._entries], { ttl: this._ttl });
+    }
+    watch(options = {}) {
+        const target = options.path ?? this._sourcePath;
+        if (target === null || target === undefined) {
+            throw new Error('HostsFile.watch: no path — pass `options.path` or construct via fromFile()');
+        }
+        return new HostsFileWatchHandle(this, target, options);
     }
     static _index(entries) {
         const index = new Map();

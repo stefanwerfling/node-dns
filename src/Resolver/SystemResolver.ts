@@ -1,5 +1,5 @@
 import fs from 'fs';
-import {HostsFile} from '../Lib/HostsFile.js';
+import {HostsFile, HostsFileWatchHandle, HostsFileWatchOptions} from '../Lib/HostsFile.js';
 import {ParsedResolvConf, ResolvConf} from '../Lib/ResolvConf.js';
 import {UDPClient} from '../Client/UDPClient.js';
 import {Packet} from '../Packet/Packet.js';
@@ -69,6 +69,22 @@ export type SystemResolverOptions = {
      * cache slots. Only real network answers are cached.
      */
     cache?: SystemResolverCache;
+
+    /**
+     * Watch the hosts file for changes and reload it in place when it
+     * changes. Disabled by default. Pass `true` for the defaults or
+     * `HostsFileWatchOptions` to customize (debounce window, error
+     * handling, reload callback).
+     *
+     * No-op when `skipHosts: true` is set or `/etc/hosts` is missing
+     * — there's nothing to watch in either case.
+     *
+     * The watch handle is exposed via `resolver.hostsWatch` so the
+     * caller can `close()` it on shutdown. The internal debounce
+     * timer is already `unref`'d, so the watcher won't block process
+     * exit on its own.
+     */
+    watchHosts?: boolean | HostsFileWatchOptions;
 };
 
 /**
@@ -123,10 +139,16 @@ export class SystemResolver {
 
     protected _stub: StubResolver;
     protected _cache: DnsCache | null;
+    protected _hostsWatch: HostsFileWatchHandle | null;
 
-    public constructor(stub: StubResolver, cache: DnsCache | null = null) {
+    public constructor(
+        stub: StubResolver,
+        cache: DnsCache | null = null,
+        hostsWatch: HostsFileWatchHandle | null = null
+    ) {
         this._stub = stub;
         this._cache = cache;
+        this._hostsWatch = hostsWatch;
     }
 
     /**
@@ -164,7 +186,8 @@ export class SystemResolver {
             hostsFile: hosts ?? undefined,
             backend: options.backend,
             shouldFailover: options.shouldFailover,
-            cache: options.cache
+            cache: options.cache,
+            watchHosts: options.watchHosts
         });
     }
 
@@ -181,6 +204,7 @@ export class SystemResolver {
             backend?: FailoverBackendBuilder;
             shouldFailover?: FailoverPredicate;
             cache?: SystemResolverCache;
+            watchHosts?: boolean | HostsFileWatchOptions;
         } = {}
     ): SystemResolver {
         const failover = FailoverBackend.fromConfig(conf, options.backend ?? defaultBackend, {
@@ -205,7 +229,19 @@ export class SystemResolver {
 
         const stub = StubResolver.fromConfig(conf, backend);
 
-        return new SystemResolver(stub, cacheInstance);
+        // Install a hosts-file watch when requested. No-op without a
+        // hosts file — there's nothing to watch.
+        let hostsWatch: HostsFileWatchHandle | null = null;
+
+        if (options.watchHosts !== undefined && options.watchHosts !== false && options.hostsFile !== undefined) {
+            const watchOpts: HostsFileWatchOptions = options.watchHosts === true
+                ? {}
+                : options.watchHosts;
+
+            hostsWatch = options.hostsFile.watch(watchOpts);
+        }
+
+        return new SystemResolver(stub, cacheInstance, hostsWatch);
     }
 
     /**
@@ -262,6 +298,26 @@ export class SystemResolver {
      */
     public get cache(): DnsCache | null {
         return this._cache;
+    }
+
+    /**
+     * The active hosts-file watch handle, or `null` when watching was
+     * not requested. Call `.close()` on shutdown so the underlying
+     * `fs.watch` releases its OS handle.
+     */
+    public get hostsWatch(): HostsFileWatchHandle | null {
+        return this._hostsWatch;
+    }
+
+    /**
+     * Close any owned resources (the hosts-file watcher right now;
+     * cache is left to the caller since they may want to keep it
+     * across SystemResolver lifetimes). Idempotent.
+     */
+    public close(): void {
+        if (this._hostsWatch !== null) {
+            this._hostsWatch.close();
+        }
     }
 
     /**

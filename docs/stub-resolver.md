@@ -137,6 +137,69 @@ const cached = new CachedStubBackend(upstream, {
 const stub = StubResolver.fromConfig(conf, cached.resolve);
 ```
 
+## Watching `/etc/hosts` for changes
+
+Long-running resolvers — DNS forwarders, dev tools, sidecars — usually
+want `/etc/hosts` edits to take effect immediately without restarting.
+Opt in with `watchHosts`:
+
+```ts
+import {SystemResolver} from 'dns2ts';
+
+const resolver = SystemResolver.system({watchHosts: true});
+
+// /etc/hosts edits are now picked up automatically.
+
+// On shutdown:
+resolver.close();          // releases the fs.watch handle
+```
+
+`watchHosts` accepts the full `HostsFileWatchOptions` shape:
+
+```ts
+const resolver = SystemResolver.system({
+  watchHosts: {
+    debounceMs: 200,                     // coalesce rapid edits
+    onReload: (file) => console.log(`reloaded — ${file.entries.length} entries`),
+    onError: (err) => console.warn('hosts reload failed', err),
+  },
+});
+```
+
+What's handled out of the box:
+
+- **Editor write-and-rename** (vim, emacs): the watcher is
+  re-established after `rename` events so it doesn't get stuck on a
+  vanished inode.
+- **Rapid-fire saves**: events within the debounce window collapse
+  into one reload (default 100ms).
+- **Transient errors** (`ENOENT` / `EACCES` / `EPERM`): silently
+  swallowed — matches glibc, which tolerates a missing hosts file.
+  Anything else surfaces via `process.emitWarning` unless `onError`
+  is provided.
+- **Closures stay valid**: the watcher mutates the existing
+  `HostsFile` instance in place, so a closure returned by
+  `asResolverBackend()` automatically sees the new entries — no need
+  to re-wire the resolver.
+
+The same primitives are available standalone on `HostsFile`:
+
+```ts
+import {HostsFile} from 'dns2ts';
+
+const hosts = HostsFile.fromFile();      // /etc/hosts
+const handle = hosts.watch({debounceMs: 50});
+
+// Force an immediate reload (bypasses the debounce):
+handle.reloadNow();
+
+// Stop watching:
+handle.close();
+
+// Or just reload once on demand:
+hosts.reload();
+```
+
 The rest of this doc covers the lower-level pieces — useful when you
 want to compose them by hand, swap in a recursive resolver,
 DoT/DoH transport, in-memory caching, etc.

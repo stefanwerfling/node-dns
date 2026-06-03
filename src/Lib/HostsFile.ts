@@ -19,6 +19,230 @@ export type HostsEntry = {
 };
 
 /**
+ * Options for `HostsFile.watch()`.
+ */
+export type HostsFileWatchOptions = {
+    /**
+     * File path to watch. Defaults to whatever was passed to the
+     * `fromFile()` call that produced this instance (or its
+     * `sourcePath`). Required when neither is set.
+     */
+    path?: string;
+
+    /**
+     * Coalesce filesystem events that arrive within this window into a
+     * single reload. Editors typically emit a flurry of events when
+     * saving (write-truncate-rename); coalescing avoids parsing the
+     * half-written file. Default: 100ms.
+     */
+    debounceMs?: number;
+
+    /**
+     * Fired after each successful reload with the (re-loaded) instance.
+     * The instance is `this` — the same one the caller already holds —
+     * so any closure that captured it (e.g. via `asResolverBackend()`)
+     * already sees the new entries by the time `onReload` runs.
+     */
+    onReload?: (file: HostsFile) => void;
+
+    /**
+     * Fired on reload errors. Default: silently swallow `ENOENT` /
+     * `EACCES` / `EPERM` (matching glibc's tolerance), and re-throw
+     * via `process.emitWarning` for anything else. Pass a callback to
+     * surface errors yourself.
+     */
+    onError?: (err: NodeJS.ErrnoException) => void;
+};
+
+/**
+ * Handle returned by `HostsFile.watch()`. Owns the underlying
+ * `fs.FSWatcher` and any pending debounce timer.
+ */
+export class HostsFileWatchHandle {
+
+    protected _hostsFile: HostsFile;
+    protected _path: string;
+    protected _debounceMs: number;
+    protected _onReload?: (file: HostsFile) => void;
+    protected _onError?: (err: NodeJS.ErrnoException) => void;
+    protected _watcher: fs.FSWatcher | null;
+    protected _debounceTimer: NodeJS.Timeout | null;
+    protected _closed: boolean;
+
+    public constructor(
+        hostsFile: HostsFile,
+        path: string,
+        options: HostsFileWatchOptions
+    ) {
+        this._hostsFile = hostsFile;
+        this._path = path;
+        this._debounceMs = options.debounceMs ?? 100;
+        this._onReload = options.onReload;
+        this._onError = options.onError;
+        this._watcher = null;
+        this._debounceTimer = null;
+        this._closed = false;
+        this._openWatcher();
+    }
+
+    /**
+     * The path being watched.
+     */
+    public get path(): string {
+        return this._path;
+    }
+
+    /**
+     * `true` once `close()` has been called.
+     */
+    public get closed(): boolean {
+        return this._closed;
+    }
+
+    /**
+     * Force an immediate reload, bypassing the debounce. Useful when a
+     * caller knows the file just changed (e.g. they just wrote it) and
+     * wants the new entries visible synchronously.
+     */
+    public reloadNow(): void {
+        if (this._debounceTimer !== null) {
+            clearTimeout(this._debounceTimer);
+            this._debounceTimer = null;
+        }
+
+        this._performReload();
+    }
+
+    /**
+     * Stop watching. Cancels any pending debounce timer. Idempotent.
+     */
+    public close(): void {
+        if (this._closed) {
+            return;
+        }
+
+        this._closed = true;
+
+        if (this._debounceTimer !== null) {
+            clearTimeout(this._debounceTimer);
+            this._debounceTimer = null;
+        }
+
+        if (this._watcher !== null) {
+            this._watcher.close();
+            this._watcher = null;
+        }
+    }
+
+    /**
+     * Open (or re-open) the underlying `fs.watch`. Re-opening is
+     * necessary after editors that write-to-temp-and-rename (vim,
+     * emacs) — the original inode disappears and `fs.watch` keeps
+     * polling a vanished file forever otherwise.
+     *
+     * @protected
+     */
+    protected _openWatcher(): void {
+        if (this._closed) {
+            return;
+        }
+
+        try {
+            this._watcher = fs.watch(this._path, (eventType): void => {
+                this._scheduleReload(eventType);
+            });
+
+            this._watcher.on('error', (err): void => {
+                this._reportError(err as NodeJS.ErrnoException);
+            });
+        } catch (err) {
+            // `fs.watch` throws synchronously when the target doesn't
+            // exist on some platforms. Route it through the same error
+            // path as runtime errors.
+            this._reportError(err as NodeJS.ErrnoException);
+        }
+    }
+
+    /**
+     * Schedule a reload after `debounceMs` of quiet. Renames also
+     * trigger a watcher re-open since the original inode is now stale.
+     *
+     * @param {string} eventType
+     * @protected
+     */
+    protected _scheduleReload(eventType: string): void {
+        if (this._closed) {
+            return;
+        }
+
+        if (this._debounceTimer !== null) {
+            clearTimeout(this._debounceTimer);
+        }
+
+        this._debounceTimer = setTimeout((): void => {
+            this._debounceTimer = null;
+            this._performReload();
+
+            // After a rename, the original inode is gone — `fs.watch`
+            // is still attached to the dead inode and will never fire
+            // again. Re-establish the watcher against the new file.
+            if (eventType === 'rename') {
+                if (this._watcher !== null) {
+                    this._watcher.close();
+                    this._watcher = null;
+                }
+                this._openWatcher();
+            }
+        }, this._debounceMs);
+
+        // Don't keep the event loop alive just for this timer — a
+        // resolver in a long-running server typically wants this, but
+        // a short-lived script shouldn't hang on a debounce timer.
+        if (typeof this._debounceTimer.unref === 'function') {
+            this._debounceTimer.unref();
+        }
+    }
+
+    /**
+     * Run the reload + fire `onReload`. Errors routed to `onError`.
+     *
+     * @protected
+     */
+    protected _performReload(): void {
+        try {
+            this._hostsFile.reload(this._path);
+
+            if (this._onReload !== undefined) {
+                this._onReload(this._hostsFile);
+            }
+        } catch (err) {
+            this._reportError(err as NodeJS.ErrnoException);
+        }
+    }
+
+    /**
+     * @param {NodeJS.ErrnoException} err
+     * @protected
+     */
+    protected _reportError(err: NodeJS.ErrnoException): void {
+        if (this._onError !== undefined) {
+            this._onError(err);
+            return;
+        }
+
+        // Default: silently swallow the same errno codes that
+        // `SystemResolver.system()` tolerates on initial read. Anything
+        // else becomes a process warning so the developer notices.
+        if (err.code === 'ENOENT' || err.code === 'EACCES' || err.code === 'EPERM') {
+            return;
+        }
+
+        process.emitWarning(`HostsFile.watch: ${err.message}`, 'HostsFileWatchWarning');
+    }
+
+}
+
+/**
  * Result of `lookup()`. Mirrors the way a recursive resolver would
  * report a hit/miss/NODATA so callers can synthesize a response.
  *
@@ -88,11 +312,13 @@ export class HostsFile {
     protected _entries: HostsEntry[];
     protected _byName: Map<string, HostsEntry[]>;
     protected _ttl: number;
+    protected _sourcePath: string | null;
 
     public constructor(entries: HostsEntry[] = [], options: HostsFileOptions = {}) {
         this._entries = entries;
         this._ttl = Math.max(0, options.ttl ?? 0);
         this._byName = HostsFile._index(entries);
+        this._sourcePath = null;
     }
 
     /**
@@ -140,10 +366,55 @@ export class HostsFile {
      * Read and parse a hosts file from disk. Defaults to
      * `/etc/hosts`. Throws if the file cannot be read — callers that
      * want to tolerate a missing file should wrap in try/catch.
+     *
+     * The source path is remembered so subsequent `reload()` and
+     * `watch()` calls don't need to be passed it again.
      */
     public static fromFile(path: string = HostsFile.DEFAULT_PATH, options: HostsFileOptions = {}): HostsFile {
         const content = fs.readFileSync(path, 'utf8');
-        return HostsFile.parse(content, options);
+        const file = HostsFile.parse(content, options);
+        file._sourcePath = path;
+        return file;
+    }
+
+    /**
+     * The file path this instance was loaded from via `fromFile()`, or
+     * `null` when it was constructed via `parse()` or a direct
+     * `new HostsFile([...])` call. Used by `reload()` / `watch()` as
+     * the default target.
+     */
+    public get sourcePath(): string | null {
+        return this._sourcePath;
+    }
+
+    /**
+     * Re-read the source file and atomically swap the parsed entries.
+     * Closures returned by `asResolverBackend()` continue to work —
+     * they capture `this` and read fresh state on every lookup.
+     *
+     * `path` defaults to whatever `fromFile()` was called with (or the
+     * `_sourcePath` set by a prior `reload(explicitPath)`). Throws
+     * when no path is known.
+     *
+     * Throws on I/O errors. Callers that want glibc-style tolerance
+     * (silent skip on missing file) should wrap in try/catch or use
+     * `watch({onError})`, which routes reload errors to a callback.
+     */
+    public reload(path?: string): void {
+        const target = path ?? this._sourcePath;
+
+        if (target === null || target === undefined) {
+            throw new Error('HostsFile.reload: no source path — pass `path` or construct via fromFile()');
+        }
+
+        const content = fs.readFileSync(target, 'utf8');
+        const parsed = HostsFile.parse(content, {ttl: this._ttl});
+
+        // Atomic swap — readers between lines see either the old or
+        // the new state, never a half-built index.
+        this._entries = parsed._entries;
+        this._byName = parsed._byName;
+        this._sourcePath = target;
     }
 
     /**
@@ -229,6 +500,32 @@ export class HostsFile {
      */
     public merge(other: HostsFile): HostsFile {
         return new HostsFile([...this._entries, ...other._entries], {ttl: this._ttl});
+    }
+
+    /**
+     * Watch the source file for changes and reload this instance in
+     * place when it changes. Closures returned by
+     * `asResolverBackend()` automatically see the new entries — they
+     * capture `this`, not a snapshot of `_byName`.
+     *
+     * Backed by `fs.watch`. Editor write-and-rename patterns (vim,
+     * emacs) are handled by re-establishing the watcher on `rename`
+     * events. Rapid-fire events from the same logical save are
+     * coalesced through a debounce window (default 100ms).
+     *
+     * The returned `HostsFileWatchHandle` owns the underlying watcher
+     * — call `handle.close()` on shutdown so the process can exit.
+     * The handle's debounce timer is `unref`'d so it doesn't block
+     * shutdown on its own.
+     */
+    public watch(options: HostsFileWatchOptions = {}): HostsFileWatchHandle {
+        const target = options.path ?? this._sourcePath;
+
+        if (target === null || target === undefined) {
+            throw new Error('HostsFile.watch: no path — pass `options.path` or construct via fromFile()');
+        }
+
+        return new HostsFileWatchHandle(this, target, options);
     }
 
     private static _index(entries: HostsEntry[]): Map<string, HostsEntry[]> {

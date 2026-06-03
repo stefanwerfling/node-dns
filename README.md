@@ -127,7 +127,12 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   DnsCache | DnsCacheOptions` — `CachedStubBackend` wraps the
   upstream BEFORE hosts so local names stay authoritative and only
   network answers consume cache slots; honours RFC 2308 negative
-  caching, RFC 8767 serve-stale, and BIND-style prefetch.
+  caching, RFC 8767 serve-stale, and BIND-style prefetch. Opt-in
+  hot-reload via `watchHosts: true | HostsFileWatchOptions` —
+  `HostsFile.watch()` debounces rapid edits, handles editor write-
+  and-rename, and mutates the file in place so the already-wired
+  `asResolverBackend` closure picks up the new entries
+  automatically.
 - **[Recursive resolver](docs/recursive-resolver.md)** — iterative
   `RecursiveResolver` with `DnsCache` (TTL + RFC 2308 negative caching) and
   bundled `RootHints`. NS chasing, glueless delegation, CNAME chains,
