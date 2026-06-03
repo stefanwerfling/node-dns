@@ -1,4 +1,5 @@
 import {Buffer} from 'buffer';
+import {IpBytes} from './IpBytes.js';
 
 /**
  * Decision returned by `Rrl.check` for one query:
@@ -214,12 +215,12 @@ export class Rrl {
      */
     protected _prefixKey(ip: string): string {
         if (ip.includes(':')) {
-            const bytes = Rrl._parseIPv6(ip);
+            const bytes = IpBytes.parseIPv6(ip);
             Rrl._maskInPlace(bytes, this.prefixV6Bits);
             return `6:${bytes.toString('hex')}`;
         }
 
-        const bytes = Rrl._parseIPv4(ip);
+        const bytes = IpBytes.parseIPv4(ip);
         Rrl._maskInPlace(bytes, this.prefixV4Bits);
         return `4:${bytes.toString('hex')}`;
     }
@@ -241,92 +242,6 @@ export class Rrl {
                 buf[i] = 0;
             }
         }
-    }
-
-    /**
-     * Parse an IPv4 dotted-quad into 4 bytes. Throws on malformed input.
-     * @protected
-     */
-    protected static _parseIPv4(ip: string): Buffer {
-        const parts = ip.split('.');
-
-        if (parts.length !== 4) {
-            throw new Error(`Rrl: invalid IPv4 address "${ip}"`);
-        }
-
-        const out = Buffer.alloc(4);
-
-        for (let i = 0; i < 4; i++) {
-            const n = parseInt(parts[i], 10);
-
-            if (!Number.isInteger(n) || n < 0 || n > 255 || !/^\d+$/u.test(parts[i])) {
-                throw new Error(`Rrl: invalid IPv4 address "${ip}"`);
-            }
-
-            out[i] = n;
-        }
-
-        return out;
-    }
-
-    /**
-     * Parse an IPv6 address (RFC 4291 textual form, including `::`
-     * zero-compression and the IPv4-tail form `::ffff:1.2.3.4`) into
-     * 16 bytes. Throws on malformed input.
-     * @protected
-     */
-    protected static _parseIPv6(ip: string): Buffer {
-        let work = ip;
-        let v4Suffix: Buffer|null = null;
-
-        const lastColon = work.lastIndexOf(':');
-
-        if (lastColon >= 0 && work.slice(lastColon + 1).includes('.')) {
-            v4Suffix = Rrl._parseIPv4(work.slice(lastColon + 1));
-            work = work.slice(0, lastColon + 1) + '0:0';
-        }
-
-        const parts = work.split('::');
-
-        if (parts.length > 2) {
-            throw new Error(`Rrl: invalid IPv6 address "${ip}"`);
-        }
-
-        const splitGroups = (s: string): number[] => {
-            if (s.length === 0) {
-                return [];
-            }
-
-            return s.split(':').map((g) => {
-                if (!/^[0-9a-fA-F]{1,4}$/u.test(g)) {
-                    throw new Error(`Rrl: invalid IPv6 address "${ip}"`);
-                }
-
-                return parseInt(g, 16);
-            });
-        };
-
-        const head = splitGroups(parts[0]);
-        const tail = parts.length === 2 ? splitGroups(parts[1]) : [];
-        const total = head.length + tail.length;
-
-        if (parts.length === 1 ? total !== 8 : total > 8) {
-            throw new Error(`Rrl: invalid IPv6 address "${ip}"`);
-        }
-
-        const padding = parts.length === 2 ? new Array(8 - total).fill(0) : [];
-        const groups = [...head, ...padding, ...tail];
-        const out = Buffer.alloc(16);
-
-        for (let i = 0; i < 8; i++) {
-            out.writeUInt16BE(groups[i], i * 2);
-        }
-
-        if (v4Suffix !== null) {
-            v4Suffix.copy(out, 12);
-        }
-
-        return out;
     }
 
 }

@@ -27,7 +27,5 @@ export declare class Rrl {
     reset(): void;
     protected _prefixKey(ip: string): string;
     protected static _maskInPlace(buf: Buffer, prefixBits: number): void;
-    protected static _parseIPv4(ip: string): Buffer;
-    protected static _parseIPv6(ip: string): Buffer;
 }
 export {};

@@ -10,10 +10,17 @@ import { DohServerUseCors } from './DohServer.js';
 import { ServerPreConnection } from './ServerPreConnection.js';
 import { ServerPreRequest } from './ServerPreRequest.js';
 export type ServerRequestHandler = (request: Packet, send: (response: Packet | Buffer | Array<Packet | Buffer>) => void, client: unknown, rawRequest: Buffer) => void;
+export type ServerCookieOptions = {
+    secret: Buffer;
+    mode?: 'lenient' | 'strict';
+    maxAgeSeconds?: number;
+    udpPayloadSize?: number;
+};
 export type ServerUdpOptions = {
     type?: 'udp4' | 'udp6';
     preRequest?: ServerPreRequest<dgram.RemoteInfo>;
     rrl?: Rrl;
+    cookies?: ServerCookieOptions;
 };
 export type ServerTcpOptions = {
     preRequest?: ServerPreRequest<tcp.Socket>;

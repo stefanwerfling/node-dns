@@ -8,6 +8,7 @@ export {Random0x20} from './Lib/Random0x20.js';
 export {Bailiwick} from './Lib/Bailiwick.js';
 export {Rrl} from './Lib/Rrl.js';
 export type {RrlOptions, RrlDecision} from './Lib/Rrl.js';
+export {IpBytes} from './Lib/IpBytes.js';
 export {ResolvConf} from './Lib/ResolvConf.js';
 export type {ParsedResolvConf, ResolvConfOptions} from './Lib/ResolvConf.js';
 export {HostsFile, HostsFileWatchHandle} from './Lib/HostsFile.js';
@@ -104,7 +105,8 @@ export type {
     ServerUdpOptions,
     ServerTcpOptions,
     ServerTlsOptions,
-    ServerDohOptions
+    ServerDohOptions,
+    ServerCookieOptions
 } from './Server/ServerOptions.js';
 export type {ServerPreRequest, ServerPreRequestResult} from './Server/ServerPreRequest.js';
 export type {ServerPreConnection, ServerPreConnectionResult} from './Server/ServerPreConnection.js';
@@ -132,6 +134,7 @@ export type {DnsServerAddresses, DnsServerListenOptions} from './Server/DnsServe
 export {TCPServerEvents, TCPServer} from './Server/TCPServer.js';
 export {TLSServer} from './Server/TLSServer.js';
 export {UDPServer} from './Server/UDPServer.js';
+export type {CookieRejectionReason} from './Server/UDPServer.js';
 export {DohServer} from './Server/DohServer.js';
 export {MdnsServer} from './Server/MdnsServer.js';
 export type {
