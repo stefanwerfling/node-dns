@@ -13,6 +13,20 @@ export type {ParsedResolvConf, ResolvConfOptions} from './Lib/ResolvConf.js';
 export {HostsFile, HostsFileWatchHandle} from './Lib/HostsFile.js';
 export type {HostsEntry, HostsLookupResult, HostsFileOptions, HostsFileWatchOptions} from './Lib/HostsFile.js';
 export {Dnssec, DnssecAlgorithm, DnssecDigest} from './Lib/Dnssec.js';
+export {
+    DSO_UNILATERAL_MESSAGE_ID,
+    DsoMessage,
+    DsoTlvType,
+    EncryptionPaddingTlv,
+    KeepaliveTlv,
+    PushTlv,
+    ReconfirmTlv,
+    RetryDelayTlv,
+    SubscribeTlv,
+    UnknownDsoTlv,
+    UnsubscribeTlv
+} from './Lib/Dso.js';
+export type {DsoTlv} from './Lib/Dso.js';
 export type {
     DnssecVerifyOptions,
     DnssecSignOptions,
@@ -130,6 +144,8 @@ export {MdnsProbe} from './Server/MdnsProbe.js';
 export type {MdnsProbeOptions, MdnsProbeResult} from './Server/MdnsProbe.js';
 export {MdnsAnnouncer} from './Server/MdnsAnnouncer.js';
 export type {MdnsAnnouncerOptions} from './Server/MdnsAnnouncer.js';
+export {PushServer} from './Server/PushServer.js';
+export type {PushServerOptions, PushSession} from './Server/PushServer.js';
 
 // Client
 export {AClient} from './Client/AClient.js';
@@ -167,6 +183,8 @@ export {
 export type {MdnsClientOptions, MdnsResponse} from './Client/MdnsClient.js';
 export {ServiceDiscovery} from './Client/ServiceDiscovery.js';
 export type {ServiceDiscoveryOptions, ServiceInstance} from './Client/ServiceDiscovery.js';
+export {PushClient, PushSubscription} from './Client/PushClient.js';
+export type {PushClientOptions} from './Client/PushClient.js';
 
 // Resolver
 export {DnsCache} from './Resolver/DnsCache.js';

@@ -147,6 +147,15 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   2 announcements on success), and `MdnsAnnouncer` as the schedule
   wrapper for the post-probe back-off + shutdown goodbye.
   `ServiceDiscovery` (RFC 6763) on top for DNS-SD browse + resolve.
+- **[DNS Push Notifications](docs/push.md)** — RFC 8765 long-lived
+  TLS subscriptions on top of RFC 8490 DSO. `PushClient` opens a TLS
+  session and multiplexes SUBSCRIBE / UNSUBSCRIBE / KEEPALIVE TLVs;
+  `PushServer` accepts connections, tracks per-session subscriptions,
+  and `notify(records)` fans out unilateral PUSH messages to every
+  session whose `(name, type, class)` matches. Subscriptions match
+  case-insensitively; `qtype = 255` (ANY) acts as a wildcard.
+  Underlying DSO wire format is exposed in `Lib/Dso` as typed TLV
+  classes plus `DsoMessage`.
 
 ### DNS Client (default UDP)
 
