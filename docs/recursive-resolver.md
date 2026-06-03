@@ -169,6 +169,57 @@ What the resolver does **not** do (yet):
 - mDNS-style multicast probing on the server side. Use `MdnsServer`
   with application-driven name claims for now.
 
+## QNAME minimization (RFC 9156)
+
+By default the resolver minimizes the QNAME sent to each intermediate
+auth so roots / TLDs / parent zones see only the labels they need
+to make a delegation decision — not the full qname. Only the
+authoritative server for the leaf zone receives `(qname, qtype)`
+in the clear.
+
+For `host.app.example.com A`, a vanilla iterative resolver leaks the
+full qname to the root, to `.com`, and to `example.com` before the
+auth answers. With minimization on:
+
+| Hop                | Probe                | qtype     |
+| ------------------ | -------------------- | --------- |
+| root               | `com`                | `NS`      |
+| `.com` server      | `example.com`        | `NS`      |
+| `example.com` auth | `app.example.com`    | `NS`      |
+| `app.example.com`  | `host.app.example.com` | `A` (real) |
+
+The number of hops is the same — only the leaked label count changes.
+Each probe asks `NS` rather than the real qtype, which prevents spurious
+NXDOMAIN responses for valid-but-NS-less intermediate names (RFC 9156
+§2.3).
+
+Knobs:
+
+- `qnameMinimization: true | false` (default `true`) — RFC 9156 SHOULD.
+- `qnameMinimizationLabelsPerStep: N` (default `1`) — step `N` labels
+  per probe. Higher values trade some leakage for fewer roundtrips
+  (RFC 9156 §3.3 permits this); lower is the strictest privacy.
+
+Special cases the implementation handles:
+
+- **Permissive fast path**: if an in-bailiwick auth folds the actual
+  answer for the original qname into its response to the probe
+  (RFC 1034 §4.3.4 allows this), the resolver short-circuits and
+  uses the answer instead of issuing a second roundtrip.
+- **NXDOMAIN at an ancestor**: an auth NXDOMAIN at the minimized
+  probe is propagated to the original qname (RFC 8020 / RFC 9156
+  §2.3) and written to the cache so a follow-up query short-circuits.
+- **NODATA at an ancestor**: the probe falls back to the full qname
+  on the next iteration to the same server — needed for zones that
+  don't sub-delegate but do hold deeper records (the common case).
+- **Auth-chain queries** (DNSSEC DNSKEY/DS lookups): minimization is
+  skipped — they already target the precise name the chain needs.
+
+You can opt out per resolver instance if a particular test or
+deployment doesn't model intermediate probes — `qnameMinimization:
+false` reverts to sending the full qname at every hop, the
+pre-RFC-9156 default behaviour.
+
 ## Truncation (RFC 7766 §5)
 
 When an upstream replies with `TC=1` (response too large for UDP) the

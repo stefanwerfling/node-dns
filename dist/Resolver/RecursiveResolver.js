@@ -13,7 +13,7 @@ import { DnssecValidator } from './DnssecValidator.js';
 import { RootHints } from './RootHints.js';
 import { defaultTcpTransport, defaultUdpTransport } from './Transports.js';
 import { TrustAnchors } from './TrustAnchor.js';
-import { extractSoa, isStrictlyDeeper, labels as labelsOf, minTtl, nameEquals, negativeTtl, withTimeout } from './utils.js';
+import { extractSoa, isStrictlyDeeper, labels as labelsOf, minTtl, minimizeQname, nameEquals, negativeTtl, withTimeout } from './utils.js';
 export const RCODE = Object.freeze({
     NOERROR: 0,
     FORMERR: 1,
@@ -40,6 +40,8 @@ export class RecursiveResolver {
     _udpPayloadSize;
     _dnssecEnabled;
     _dnssecValidator;
+    _qnameMinimization;
+    _qnameMinimizationLabelsPerStep;
     constructor(options = {}) {
         this._cache = options.cache ?? new DnsCache();
         this._transport = options.transport ?? defaultUdpTransport;
@@ -56,6 +58,8 @@ export class RecursiveResolver {
         this._udpPayloadSize = options.udpPayloadSize ?? 4096;
         this._serverBuffers = new Map();
         this._refreshInFlight = new Set();
+        this._qnameMinimization = options.qnameMinimization ?? true;
+        this._qnameMinimizationLabelsPerStep = Math.max(1, options.qnameMinimizationLabelsPerStep ?? 1);
         const dnssecOpt = options.dnssec;
         this._dnssecEnabled = dnssecOpt !== undefined && dnssecOpt !== false;
         if (this._dnssecEnabled) {
@@ -116,9 +120,10 @@ export class RecursiveResolver {
                 }
             }
         }
-        let currentName = qname;
-        let currentType = qtype;
+        const currentName = qname;
+        const currentType = qtype;
         let lastResponse = null;
+        let minimizationDisabled = false;
         for (let safety = 0; safety < ctx.maxQueries; safety++) {
             this._guardBudget(ctx);
             const nsZone = this._findClosestNs(currentName, qclass);
@@ -129,14 +134,52 @@ export class RecursiveResolver {
             if (nsAddr === null) {
                 throw new Error(`RecursiveResolver: no usable address for any NS of ${nsZone.zone}`);
             }
-            const visitKey = `${nsAddr}|${currentName}|${currentType}|${qclass}`;
+            let sendName = currentName;
+            let sendType = currentType;
+            let isMinimized = false;
+            if (this._qnameMinimization && !minimizationDisabled && ctx.inAuthChain !== true) {
+                const probe = minimizeQname(qname, nsZone.zone, this._qnameMinimizationLabelsPerStep);
+                if (probe !== null && !nameEquals(probe, qname)) {
+                    sendName = probe;
+                    sendType = PacketTypes.NS;
+                    isMinimized = true;
+                }
+            }
+            const visitKey = `${nsAddr}|${sendName}|${sendType}|${qclass}`;
             if (ctx.visited.has(visitKey)) {
-                throw new Error(`RecursiveResolver: query loop detected at ${nsAddr} for ${currentName}/${currentType}`);
+                throw new Error(`RecursiveResolver: query loop detected at ${nsAddr} for ${sendName}/${sendType}`);
             }
             ctx.visited.add(visitKey);
-            const response = await this._queryServer(nsAddr, currentName, currentType, qclass, ctx);
+            const response = await this._queryServer(nsAddr, sendName, sendType, qclass, ctx);
             lastResponse = response;
             this._cacheResponse(response, nsZone.zone);
+            if (isMinimized) {
+                if (response.header.aa === 1 && response.header.rcode === RCODE.NOERROR) {
+                    const direct = response.answers.some((r) => nameEquals(r.name, qname) && r.packetType.type === qtype);
+                    if (direct) {
+                        const handled = await this._handleAnswer(response, qname, qtype, qclass, ctx);
+                        return this._dnssecValidator !== null
+                            ? this._dnssecValidator.finalize(handled, response, nsZone.zone, ctx)
+                            : handled;
+                    }
+                }
+                if (response.header.aa === 1 && response.header.rcode === RCODE.NXDOMAIN) {
+                    this._cache.setNegative(qname, qtype, qclass, 'NXDOMAIN', negativeTtl(extractSoa(response)));
+                    const built = RecursiveResolver._buildResponse(ctx, RCODE.NXDOMAIN, ctx.chain, extractSoa(response));
+                    return this._dnssecValidator !== null
+                        ? this._dnssecValidator.finalize(built, response, nsZone.zone, ctx)
+                        : built;
+                }
+                const referralZoneMin = this._referralZone(response, nsZone.zone);
+                if (referralZoneMin !== null) {
+                    if (!isStrictlyDeeper(referralZoneMin, nsZone.zone)) {
+                        throw new Error(`RecursiveResolver: non-progressing referral ${nsZone.zone} → ${referralZoneMin}`);
+                    }
+                    continue;
+                }
+                minimizationDisabled = true;
+                continue;
+            }
             if (response.header.aa === 1 && response.answers.length > 0) {
                 const handled = await this._handleAnswer(response, currentName, currentType, qclass, ctx);
                 return this._dnssecValidator !== null

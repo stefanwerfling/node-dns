@@ -9,4 +9,5 @@ export declare const isStrictlyDeeper: (child: string, parent: string) => boolea
 export declare const minTtl: (records: PacketResource[]) => number;
 export declare const negativeTtl: (soa: PacketResource[]) => number;
 export declare const extractSoa: (packet: Packet) => PacketResource[];
+export declare const minimizeQname: (qname: string, zone: string, labelsPerStep?: number) => string | null;
 export declare const withTimeout: <T>(promise: Promise<T>, ms: number, label: string) => Promise<T>;

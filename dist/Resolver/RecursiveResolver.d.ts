@@ -38,6 +38,8 @@ export type RecursiveResolverOptions = {
     useEdns?: boolean;
     udpPayloadSize?: number;
     dnssec?: boolean | DnssecResolverOptions;
+    qnameMinimization?: boolean;
+    qnameMinimizationLabelsPerStep?: number;
 };
 export type ResolveOptions = {
     qclass?: PacketClass;
@@ -64,6 +66,8 @@ export declare class RecursiveResolver {
     protected _udpPayloadSize: number;
     protected _dnssecEnabled: boolean;
     protected _dnssecValidator: DnssecValidator | null;
+    protected _qnameMinimization: boolean;
+    protected _qnameMinimizationLabelsPerStep: number;
     constructor(options?: RecursiveResolverOptions);
     cache(): DnsCache;
     resolve(qname: string, qtype: number | PacketTypes, options?: ResolveOptions): Promise<Packet>;

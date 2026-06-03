@@ -138,8 +138,10 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   bundled `RootHints`. NS chasing, glueless delegation, CNAME chains,
   bailiwick filtering, 0x20 case randomization, configurable budgets.
   RFC 7766 §5 TCP fallback on TC=1, RFC 6891 EDNS(0) buffer negotiation,
-  opt-in DNSSEC validation. Injectable UDP and TCP transports for
-  testing and forwarding setups.
+  RFC 9156 QNAME minimization (default on — root sees only the TLD,
+  TLD sees only the SLD, full qname only to the auth), opt-in DNSSEC
+  validation. Injectable UDP and TCP transports for testing and
+  forwarding setups.
 - **[mDNS client + server + probing](docs/mdns.md)** — `MdnsClient`
   for RFC 6762 multicast DNS, `MdnsServer` for the responder side
   (with `announce` / `goodbye` §10 primitives), `MdnsProbe` for §8

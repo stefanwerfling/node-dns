@@ -22,6 +22,7 @@ import {
     isStrictlyDeeper,
     labels as labelsOf,
     minTtl,
+    minimizeQname,
     nameEquals,
     negativeTtl,
     withTimeout
@@ -198,6 +199,25 @@ export type RecursiveResolverOptions = {
      * Default: disabled — answers pass through unvalidated.
      */
     dnssec?: boolean | DnssecResolverOptions;
+
+    /**
+     * QNAME minimization (RFC 9156). At each delegation step, send a
+     * truncated QNAME (one label deeper than the cached zone) with
+     * `qtype = NS` instead of the full qname with the real qtype.
+     * Roots / TLDs / intermediates therefore see only the portion of
+     * the qname they actually need to delegate on. The full qname +
+     * real qtype is sent only to the authoritative server for the
+     * leaf zone. Default: `true` (RFC 9156 says SHOULD).
+     */
+    qnameMinimization?: boolean;
+
+    /**
+     * Number of labels to add per minimization step (RFC 9156 §3.3
+     * permits more than one for fewer roundtrips, at the cost of
+     * leaking more of the qname to intermediates). Default: 1, the
+     * strictest privacy setting.
+     */
+    qnameMinimizationLabelsPerStep?: number;
 };
 
 /**
@@ -347,6 +367,19 @@ export class RecursiveResolver {
     protected _dnssecValidator: DnssecValidator | null;
 
     /**
+     * RFC 9156 QNAME minimization toggle. When `true`, the resolver
+     * sends truncated qnames to intermediate nameservers.
+     * @protected
+     */
+    protected _qnameMinimization: boolean;
+
+    /**
+     * Number of labels added per minimization step.
+     * @protected
+     */
+    protected _qnameMinimizationLabelsPerStep: number;
+
+    /**
      * @param {RecursiveResolverOptions} options
      */
     public constructor(options: RecursiveResolverOptions = {}) {
@@ -365,6 +398,9 @@ export class RecursiveResolver {
         this._udpPayloadSize = options.udpPayloadSize ?? 4096;
         this._serverBuffers = new Map();
         this._refreshInFlight = new Set();
+
+        this._qnameMinimization = options.qnameMinimization ?? true;
+        this._qnameMinimizationLabelsPerStep = Math.max(1, options.qnameMinimizationLabelsPerStep ?? 1);
 
         const dnssecOpt = options.dnssec;
         this._dnssecEnabled = dnssecOpt !== undefined && dnssecOpt !== false;
@@ -487,9 +523,15 @@ export class RecursiveResolver {
         }
 
         // Iterative resolution loop.
-        let currentName = qname;
-        let currentType = qtype;
+        const currentName = qname;
+        const currentType = qtype;
         let lastResponse: Packet | null = null;
+
+        // RFC 9156 §3 fallback flag — toggled when an intermediate server
+        // mishandles the minimized probe (e.g. returns SERVFAIL on
+        // (parent.zone, NS)). Local to this resolution; CNAME chase
+        // sub-resolutions reset to their own decision.
+        let minimizationDisabled = false;
 
         // outer loop: each iteration walks one delegation step closer to the answer.
         for (let safety = 0; safety < ctx.maxQueries; safety++) {
@@ -508,17 +550,96 @@ export class RecursiveResolver {
                 throw new Error(`RecursiveResolver: no usable address for any NS of ${nsZone.zone}`);
             }
 
-            const visitKey = `${nsAddr}|${currentName}|${currentType}|${qclass}`;
+            // Decide what to actually send to this server: a minimized
+            // probe (RFC 9156) or the real (qname, qtype) pair. Skip
+            // minimization on auth-chain queries since DNSKEY/DS lookups
+            // already target the exact name they need.
+            let sendName: string = currentName;
+            let sendType: number | PacketTypes = currentType;
+            let isMinimized = false;
+
+            if (this._qnameMinimization && !minimizationDisabled && ctx.inAuthChain !== true) {
+                const probe = minimizeQname(qname, nsZone.zone, this._qnameMinimizationLabelsPerStep);
+
+                if (probe !== null && !nameEquals(probe, qname)) {
+                    sendName = probe;
+                    sendType = PacketTypes.NS;
+                    isMinimized = true;
+                }
+            }
+
+            const visitKey = `${nsAddr}|${sendName}|${sendType}|${qclass}`;
 
             if (ctx.visited.has(visitKey)) {
-                throw new Error(`RecursiveResolver: query loop detected at ${nsAddr} for ${currentName}/${currentType}`);
+                throw new Error(`RecursiveResolver: query loop detected at ${nsAddr} for ${sendName}/${sendType}`);
             }
 
             ctx.visited.add(visitKey);
 
-            const response = await this._queryServer(nsAddr, currentName, currentType, qclass, ctx);
+            const response = await this._queryServer(nsAddr, sendName, sendType, qclass, ctx);
             lastResponse = response;
             this._cacheResponse(response, nsZone.zone);
+
+            if (isMinimized) {
+                // Minimized-query response handling per RFC 9156 §2.3.
+
+                // Permissive fast path: an authoritative server is
+                // allowed to fold extra data into the answer section
+                // (RFC 1034 §4.3.4). If the response already contains
+                // records that match the original (qname, qtype) — and
+                // we asked an in-bailiwick parent — treat it as the
+                // final answer. Saves a roundtrip and accommodates
+                // auths that don't differentiate by what was asked.
+                if (response.header.aa === 1 && response.header.rcode === RCODE.NOERROR) {
+                    const direct = response.answers.some((r) =>
+                        nameEquals(r.name, qname) && r.packetType.type === qtype
+                    );
+
+                    if (direct) {
+                        const handled = await this._handleAnswer(response, qname, qtype, qclass, ctx);
+                        return this._dnssecValidator !== null
+                            ? this._dnssecValidator.finalize(handled, response, nsZone.zone, ctx)
+                            : handled;
+                    }
+                }
+
+                if (response.header.aa === 1 && response.header.rcode === RCODE.NXDOMAIN) {
+                    // The probe name doesn't exist in the parent zone.
+                    // Since the probe is an ancestor of qname, qname
+                    // cannot exist either (RFC 8020 / RFC 9156 §2.3).
+                    // Mirror the NXDOMAIN to the original qname so the
+                    // caller and cache see the right shape.
+                    this._cache.setNegative(qname, qtype, qclass, 'NXDOMAIN', negativeTtl(extractSoa(response)));
+                    const built = RecursiveResolver._buildResponse(ctx, RCODE.NXDOMAIN, ctx.chain, extractSoa(response));
+                    return this._dnssecValidator !== null
+                        ? this._dnssecValidator.finalize(built, response, nsZone.zone, ctx)
+                        : built;
+                }
+
+                // Referral wins over auth-NODATA — a server that knows
+                // a delegation deeper than its own zone should still be
+                // honoured even when the answer section is empty.
+                const referralZoneMin = this._referralZone(response, nsZone.zone);
+
+                if (referralZoneMin !== null) {
+                    if (!isStrictlyDeeper(referralZoneMin, nsZone.zone)) {
+                        throw new Error(`RecursiveResolver: non-progressing referral ${nsZone.zone} → ${referralZoneMin}`);
+                    }
+                    continue;
+                }
+
+                // No referral and no NXDOMAIN — the parent zone owns
+                // this name and there's no delegation cut at the probe.
+                // RFC 9156 §2.3: drop minimization for the next round
+                // so we send the full (qname, qtype) to the same NS.
+                //
+                // Also covers the SERVFAIL / REFUSED fallback path (RFC
+                // 9156 §3): some old auths reject NS probes outright;
+                // dropping minimization and retrying with the full
+                // query usually works.
+                minimizationDisabled = true;
+                continue;
+            }
 
             // Authoritative answer with records.
             if (response.header.aa === 1 && response.answers.length > 0) {

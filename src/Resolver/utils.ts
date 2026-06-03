@@ -187,6 +187,35 @@ export const extractSoa = (packet: Packet): PacketResource[] => {
 };
 
 /**
+ * RFC 9156 §2.3 — compute the next "QNAME minimization" probe name for
+ * a given zone cut. Returns the deepest suffix of `qname` that is
+ * exactly `labelsPerStep` labels deeper than `zone`. Returns `null`
+ * when `qname` is already at or above that depth — caller should fall
+ * back to querying with the full qname.
+ *
+ * Examples (labelsPerStep = 1):
+ *   qname `a.b.example.com`, zone `.`            → `com`
+ *   qname `a.b.example.com`, zone `com`          → `example.com`
+ *   qname `a.b.example.com`, zone `example.com`  → `b.example.com`
+ *   qname `a.b.example.com`, zone `b.example.com`→ null (full qname)
+ *
+ * @param {string} qname
+ * @param {string} zone
+ * @param {number} labelsPerStep
+ * @return {string|null}
+ */
+export const minimizeQname = (qname: string, zone: string, labelsPerStep: number = 1): string | null => {
+    const qLabels = labels(qname);
+    const zLabels = labels(zone);
+
+    if (qLabels.length <= zLabels.length + labelsPerStep) {
+        return null;
+    }
+
+    return qLabels.slice(qLabels.length - zLabels.length - labelsPerStep).join('.');
+};
+
+/**
  * Race a promise against a timeout — used to cap individual query
  * waits.
  *

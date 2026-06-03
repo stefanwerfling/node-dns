@@ -80,6 +80,14 @@ export const negativeTtl = (soa) => {
 export const extractSoa = (packet) => {
     return packet.authorities.filter((r) => r.packetType instanceof SOA);
 };
+export const minimizeQname = (qname, zone, labelsPerStep = 1) => {
+    const qLabels = labels(qname);
+    const zLabels = labels(zone);
+    if (qLabels.length <= zLabels.length + labelsPerStep) {
+        return null;
+    }
+    return qLabels.slice(qLabels.length - zLabels.length - labelsPerStep).join('.');
+};
 export const withTimeout = (promise, ms, label) => {
     return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {

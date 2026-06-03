@@ -492,7 +492,15 @@ test('RecursiveResolver#glueless out-of-bailiwick NS triggers sub-resolution', a
     const resolver = new RecursiveResolver({
         transport: transport.asTransport(),
         rootHints: TEST_ROOTS,
-        use0x20: false
+        use0x20: false,
+        // The mock root collapses the whole `.com` and `.test` chains
+        // into a single "everything → example.com" referral; with
+        // QNAME minimization the resolver would probe (com, NS) at
+        // root and the mock would conflate that with the example.com
+        // delegation, producing a non-progressing referral. Disable
+        // minimization to exercise the glueless-NS path on its own
+        // terms.
+        qnameMinimization: false
     });
 
     const r = await resolver.resolve('www.example.com', PacketTypes.A);
@@ -703,7 +711,10 @@ test('RecursiveResolver#AAAA glue is used when no A is available', async() => {
     const resolver = new RecursiveResolver({
         transport: transport.asTransport(),
         rootHints: [{name: 'r.test.', ipv4: '0.0.0.0', ipv6: '::1'}],
-        use0x20: false
+        use0x20: false,
+        // Single-server mock with a permissive `default` answer — not
+        // a realistic delegation graph for QNAME minimization probes.
+        qnameMinimization: false
     });
 
     // Force the resolver to use AAAA: pre-empt by deleting the seeded A glue.
@@ -1139,4 +1150,243 @@ test('RecursiveResolver#stale-while-revalidate disabled by default — expired e
     // The expired entry was discarded — caller waits on a fresh resolution.
     assert.equal((r.answers[0].packetType as A).address, '192.0.2.99');
     assert.equal(upstreamCalls, 1);
+});
+
+/* QNAME minimization (RFC 9156) ----------------------------------------- */
+
+/**
+ * Records every outgoing question — used by the QNAME-min tests to
+ * assert the actual qname/qtype sent at each hop.
+ */
+type SentQuery = {server: string; qname: string; qtype: number;};
+
+const recordingTransport = (sent: SentQuery[], inner: RecursiveResolverTransport): RecursiveResolverTransport =>
+    async(serverIp, port, query): Promise<Packet> => {
+        sent.push({
+            server: serverIp,
+            qname: query.questions[0].name,
+            qtype: query.questions[0].type
+        });
+        return inner(serverIp, port, query);
+    };
+
+test('RecursiveResolver#qname minimization sends NS probes to root + TLD, full qname only to auth', async() => {
+    const sent: SentQuery[] = [];
+    const transport = new MockTransport();
+
+    // Root knows about `.com` and `.test` chains.
+    transport.on('10.0.0.1', 'com', (q) => buildReferral(q, 'com.', ['a.gtld.com.'],
+        [aRec('a.gtld.com.', '10.0.0.2')]));
+
+    // .com only delegates `example.com` — it must not see `www`.
+    transport.on('10.0.0.2', 'example.com', (q) => buildReferral(q, 'example.com.', ['ns.example.com.'],
+        [aRec('ns.example.com.', '10.0.0.3')]));
+
+    // Auth answers for the leaf.
+    transport.on('10.0.0.3', 'www.example.com', (q) => buildAnswer(q, [
+        aRec('www.example.com', '198.51.100.42')
+    ]));
+
+    const resolver = new RecursiveResolver({
+        transport: recordingTransport(sent, transport.asTransport()),
+        rootHints: TEST_ROOTS,
+        use0x20: false,
+        qnameMinimization: true
+    });
+
+    const r = await resolver.resolve('www.example.com', PacketTypes.A);
+    assert.equal(r.header.rcode, RCODE.NOERROR);
+    assert.equal((r.answers[0].packetType as A).address, '198.51.100.42');
+
+    assert.equal(sent.length, 3, 'three hops: root, com, auth');
+
+    // Root sees only the TLD label.
+    assert.equal(sent[0].server, '10.0.0.1');
+    assert.equal(sent[0].qname.toLowerCase().replace(/\.$/, ''), 'com');
+    assert.equal(sent[0].qtype, PacketTypes.NS);
+
+    // .com sees only the SLD.
+    assert.equal(sent[1].server, '10.0.0.2');
+    assert.equal(sent[1].qname.toLowerCase().replace(/\.$/, ''), 'example.com');
+    assert.equal(sent[1].qtype, PacketTypes.NS);
+
+    // The auth gets the full qname + real qtype.
+    assert.equal(sent[2].server, '10.0.0.3');
+    assert.equal(sent[2].qname.toLowerCase().replace(/\.$/, ''), 'www.example.com');
+    assert.equal(sent[2].qtype, PacketTypes.A);
+});
+
+test('RecursiveResolver#qname minimization disabled sends full qname to every hop', async() => {
+    const sent: SentQuery[] = [];
+    const transport = new MockTransport();
+
+    transport.default('10.0.0.1', (q) => buildReferral(q, 'com.', ['a.gtld.com.'],
+        [aRec('a.gtld.com.', '10.0.0.2')]));
+    transport.default('10.0.0.2', (q) => buildReferral(q, 'example.com.', ['ns.example.com.'],
+        [aRec('ns.example.com.', '10.0.0.3')]));
+    transport.on('10.0.0.3', 'www.example.com', (q) => buildAnswer(q, [
+        aRec('www.example.com', '198.51.100.42')
+    ]));
+
+    const resolver = new RecursiveResolver({
+        transport: recordingTransport(sent, transport.asTransport()),
+        rootHints: TEST_ROOTS,
+        use0x20: false,
+        qnameMinimization: false
+    });
+
+    await resolver.resolve('www.example.com', PacketTypes.A);
+
+    assert.equal(sent.length, 3);
+    for (const s of sent) {
+        assert.equal(s.qname.toLowerCase().replace(/\.$/, ''), 'www.example.com');
+        assert.equal(s.qtype, PacketTypes.A);
+    }
+});
+
+test('RecursiveResolver#qname minimization NXDOMAIN at intermediate prefix terminates with NXDOMAIN', async() => {
+    const sent: SentQuery[] = [];
+    const transport = new MockTransport();
+
+    // Root delegates .com normally.
+    transport.on('10.0.0.1', 'com', (q) => buildReferral(q, 'com.', ['a.gtld.com.'],
+        [aRec('a.gtld.com.', '10.0.0.2')]));
+
+    // .com says "absent.com" doesn't exist — therefore "anything.absent.com"
+    // also doesn't exist (RFC 8020 / RFC 9156 §2.3).
+    transport.on('10.0.0.2', 'absent.com', (q) => buildAnswer(q, [], {
+        rcode: RCODE.NXDOMAIN,
+        authorities: [soaRec('com', 3600, 60)]
+    }));
+
+    const resolver = new RecursiveResolver({
+        transport: recordingTransport(sent, transport.asTransport()),
+        rootHints: TEST_ROOTS,
+        use0x20: false,
+        qnameMinimization: true
+    });
+
+    const r = await resolver.resolve('host.sub.absent.com', PacketTypes.A);
+    assert.equal(r.header.rcode, RCODE.NXDOMAIN);
+
+    // Only root + com — we never reach further because NXDOMAIN at
+    // 'absent.com' terminates the resolution.
+    assert.equal(sent.length, 2);
+    assert.equal(sent[1].qname.toLowerCase().replace(/\.$/, ''), 'absent.com');
+});
+
+test('RecursiveResolver#qname minimization caches NXDOMAIN for the original qname too', async() => {
+    const transport = new MockTransport();
+
+    transport.on('10.0.0.1', 'com', (q) => buildReferral(q, 'com.', ['a.gtld.com.'],
+        [aRec('a.gtld.com.', '10.0.0.2')]));
+    transport.on('10.0.0.2', 'absent.com', (q) => buildAnswer(q, [], {
+        rcode: RCODE.NXDOMAIN,
+        authorities: [soaRec('com', 3600, 60)]
+    }));
+
+    const resolver = new RecursiveResolver({
+        transport: transport.asTransport(),
+        rootHints: TEST_ROOTS,
+        use0x20: false,
+        qnameMinimization: true
+    });
+
+    await resolver.resolve('host.absent.com', PacketTypes.A);
+
+    // The negative entry is keyed on the original (qname, qtype) so a
+    // repeated query hits the cache instead of re-walking.
+    const cached = resolver.cache().get('host.absent.com', PacketTypes.A, PacketClass.IN);
+    assert.ok(cached !== null);
+    assert.equal(cached!.rcode, 'NXDOMAIN');
+});
+
+test('RecursiveResolver#qname minimization falls back to full qname when probe gets NODATA', async() => {
+    const sent: SentQuery[] = [];
+    const transport = new MockTransport();
+
+    // Root → com delegation.
+    transport.on('10.0.0.1', 'com', (q) => buildReferral(q, 'com.', ['a.gtld.com.'],
+        [aRec('a.gtld.com.', '10.0.0.2')]));
+
+    // .com is itself the authoritative server for example.com — no
+    // child delegation. (example.com NS == .com server.) Probing
+    // (example.com, NS) returns NS records as the actual answer.
+    transport.on('10.0.0.2', 'example.com', (q) => buildAnswer(q, [
+        nsRec('example.com', 'a.gtld.com.')
+    ], {authorities: [soaRec('example.com', 3600, 60)]}));
+
+    // The leaf record lives in the same zone too.
+    transport.on('10.0.0.2', 'host.example.com', (q) => buildAnswer(q, [
+        aRec('host.example.com', '203.0.113.5')
+    ]));
+
+    const resolver = new RecursiveResolver({
+        transport: recordingTransport(sent, transport.asTransport()),
+        rootHints: TEST_ROOTS,
+        use0x20: false,
+        qnameMinimization: true
+    });
+
+    const r = await resolver.resolve('host.example.com', PacketTypes.A);
+    assert.equal((r.answers[0].packetType as A).address, '203.0.113.5');
+
+    // We probed (com, NS) → referral, then asked the .com server about
+    // (example.com, NS) — got an in-zone answer, not a delegation —
+    // then re-queried the same server with the full qname.
+    assert.equal(sent.length, 3);
+    assert.equal(sent[2].qname.toLowerCase().replace(/\.$/, ''), 'host.example.com');
+    assert.equal(sent[2].qtype, PacketTypes.A);
+});
+
+test('RecursiveResolver#qnameMinimizationLabelsPerStep:2 collapses two-label TLDs', async() => {
+    const sent: SentQuery[] = [];
+    const transport = new MockTransport();
+
+    transport.on('10.0.0.1', 'example.com', (q) => buildReferral(q, 'example.com.', ['ns.example.com.'],
+        [aRec('ns.example.com.', '10.0.0.3')]));
+    transport.on('10.0.0.3', 'host.example.com', (q) => buildAnswer(q, [
+        aRec('host.example.com', '203.0.113.8')
+    ]));
+
+    const resolver = new RecursiveResolver({
+        transport: recordingTransport(sent, transport.asTransport()),
+        rootHints: TEST_ROOTS,
+        use0x20: false,
+        qnameMinimization: true,
+        qnameMinimizationLabelsPerStep: 2
+    });
+
+    const r = await resolver.resolve('host.example.com', PacketTypes.A);
+    assert.equal((r.answers[0].packetType as A).address, '203.0.113.8');
+
+    // Two-label step: root probe is `example.com` (skips the `com` hop).
+    assert.equal(sent[0].qname.toLowerCase().replace(/\.$/, ''), 'example.com');
+    assert.equal(sent[0].qtype, PacketTypes.NS);
+});
+
+test('RecursiveResolver#qname min permissive fast path: in-bailiwick answer at the probe wins', async() => {
+    const sent: SentQuery[] = [];
+    const transport = new MockTransport();
+
+    // Root happens to be authoritative for everything in this test
+    // setup — returns the actual answer regardless of the probe shape.
+    // RFC 1034 §4.3.4 allows an auth to fold extra records in; the
+    // resolver should pick them up rather than walk a fake delegation.
+    transport.default('10.0.0.1', (q) => buildAnswer(q, [
+        aRec('host.test', '198.51.100.1')
+    ]));
+
+    const resolver = new RecursiveResolver({
+        transport: recordingTransport(sent, transport.asTransport()),
+        rootHints: TEST_ROOTS,
+        use0x20: false,
+        qnameMinimization: true
+    });
+
+    const r = await resolver.resolve('host.test', PacketTypes.A);
+    assert.equal((r.answers[0].packetType as A).address, '198.51.100.1');
+
+    // Single roundtrip — the probe doubled as the final query.
+    assert.equal(sent.length, 1);
 });
