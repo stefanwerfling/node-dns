@@ -24,13 +24,14 @@ declare class PushSession extends EventEmitter {
     protected _closed: boolean;
     constructor(server: PushServer, socket: tls.TLSSocket);
     sendMessage(message: DsoMessage): void;
+    sendRetryDelay(retryDelayMs: number, closeAfter?: boolean): void;
     close(): void;
     get closed(): boolean;
     protected _drainFrames(): void;
     protected _handleFrame(frame: Buffer): void;
     protected _handleSubscribe(messageId: number, tlv: SubscribeTlv): void;
     protected _handleUnsubscribe(tlv: UnsubscribeTlv): void;
-    protected _handleKeepalive(messageId: number, _tlv: KeepaliveTlv): void;
+    protected _handleKeepalive(messageId: number, tlv: KeepaliveTlv): void;
     protected _teardown(err?: Error): void;
 }
 export declare class PushServer extends EventEmitter {

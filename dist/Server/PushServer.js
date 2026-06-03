@@ -1,7 +1,7 @@
 import { Buffer } from 'buffer';
 import { EventEmitter } from 'events';
 import tls from 'tls';
-import { DsoMessage, KeepaliveTlv, PushTlv, ReconfirmTlv, SubscribeTlv, UnsubscribeTlv } from '../Lib/Dso.js';
+import { DsoMessage, KeepaliveTlv, PushTlv, ReconfirmTlv, RetryDelayTlv, SubscribeTlv, UnsubscribeTlv } from '../Lib/Dso.js';
 class PushSession extends EventEmitter {
     socket;
     subscriptions;
@@ -37,6 +37,13 @@ class PushSession extends EventEmitter {
         frame.writeUInt16BE(body.length, 0);
         body.copy(frame, 2);
         this.socket.write(frame);
+    }
+    sendRetryDelay(retryDelayMs, closeAfter = false) {
+        const message = DsoMessage.unilateral(new RetryDelayTlv(retryDelayMs));
+        this.sendMessage(message);
+        if (closeAfter) {
+            setImmediate(() => this._teardown());
+        }
     }
     close() {
         this._teardown();
@@ -103,9 +110,10 @@ class PushSession extends EventEmitter {
         this._server._registerSubscription(this);
         this._server.emit('unsubscribe', tlv, this);
     }
-    _handleKeepalive(messageId, _tlv) {
+    _handleKeepalive(messageId, tlv) {
         const reply = new KeepaliveTlv(this._server.inactivityMs, this._server.keepaliveMs);
         this.sendMessage(DsoMessage.response(messageId, 0, [reply]));
+        this._server.emit('keepalive', tlv, this);
     }
     _teardown(err) {
         if (this._closed) {

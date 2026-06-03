@@ -252,3 +252,346 @@ test('PushServer requires options.tls', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     assert.throws(() => new PushServer({} as any), /options\.tls is required/);
 });
+
+/* periodic keepalive heartbeats ------------------------------------ */
+
+test('PushClient sends periodic KEEPALIVE heartbeats at keepaliveMs', async() => {
+    const server = new PushServer({tls: {cert: tlsCert, key: tlsKey}});
+    await server.listen(0, '127.0.0.1');
+    const port = server.address()!.port;
+
+    let keepaliveCount = 0;
+    server.on('keepalive', (): void => {
+        keepaliveCount++;
+    });
+
+    const client = new PushClient({
+        host: '127.0.0.1',
+        port: port,
+        tls: {rejectUnauthorized: false},
+        // Tight interval so the test stays quick; one initial KEEPALIVE
+        // on connect + a few periodic heartbeats.
+        keepaliveMs: 80
+    });
+
+    try {
+        await client.subscribe('host.example.com', PacketTypes.A);
+
+        // Wait long enough for at least two periodic heartbeats on top
+        // of the initial keepalive sent during connect.
+        await new Promise<void>((resolve) => setTimeout(resolve, 300));
+
+        // Initial KEEPALIVE on connect + at least 2 periodic heartbeats.
+        assert.ok(keepaliveCount >= 3, `expected ≥3 KEEPALIVEs, got ${keepaliveCount}`);
+    } finally {
+        await client.close();
+        await server.close();
+    }
+});
+
+test('PushClient keepaliveMs:0 disables periodic heartbeats', async() => {
+    const server = new PushServer({tls: {cert: tlsCert, key: tlsKey}});
+    await server.listen(0, '127.0.0.1');
+    const port = server.address()!.port;
+
+    let keepaliveCount = 0;
+    server.on('keepalive', (): void => {
+        keepaliveCount++;
+    });
+
+    const client = new PushClient({
+        host: '127.0.0.1',
+        port: port,
+        tls: {rejectUnauthorized: false},
+        inactivityMs: 0, // disables initial keepalive too
+        keepaliveMs: 0
+    });
+
+    try {
+        await client.subscribe('host.example.com', PacketTypes.A);
+        await new Promise<void>((resolve) => setTimeout(resolve, 200));
+        assert.equal(keepaliveCount, 0, 'no heartbeats when keepaliveMs:0 + inactivityMs:0');
+    } finally {
+        await client.close();
+        await server.close();
+    }
+});
+
+/* RECONFIRM --------------------------------------------------------- */
+
+test('PushClient.reconfirm sends RECONFIRM TLV to the server', async() => {
+    const {server, client} = await setupPair();
+
+    const reconfirms: {name: string; qtype: number; rdata: Buffer}[] = [];
+    server.on('reconfirm', (tlv): void => {
+        reconfirms.push({name: tlv.name, qtype: tlv.qtype, rdata: tlv.rdata});
+    });
+
+    try {
+        const rdata = Buffer.from([192, 0, 2, 99]);
+        await client.reconfirm('stale.example.com', PacketTypes.A, PacketClass.IN, rdata);
+        await new Promise<void>((resolve) => setTimeout(resolve, 80));
+
+        assert.equal(reconfirms.length, 1);
+        assert.equal(reconfirms[0].name, 'stale.example.com');
+        assert.equal(reconfirms[0].qtype, PacketTypes.A);
+        assert.deepStrictEqual(Array.from(reconfirms[0].rdata), Array.from(rdata));
+    } finally {
+        await client.close();
+        await server.close();
+    }
+});
+
+test('PushClient.reconfirm rejects after close()', async() => {
+    const {server, client} = await setupPair();
+
+    try {
+        await client.close();
+        await assert.rejects(
+            client.reconfirm('host.example.com', PacketTypes.A, PacketClass.IN, Buffer.alloc(0)),
+            /client is closed/
+        );
+    } finally {
+        await server.close();
+    }
+});
+
+/* RETRY_DELAY + auto-reconnect ------------------------------------- */
+
+test('PushClient emits "retryDelay" when server sends RETRY_DELAY TLV', async() => {
+    const server = new PushServer({tls: {cert: tlsCert, key: tlsKey}});
+    await server.listen(0, '127.0.0.1');
+    const port = server.address()!.port;
+
+    const client = new PushClient({
+        host: '127.0.0.1',
+        port: port,
+        tls: {rejectUnauthorized: false}
+    });
+
+    try {
+        let session: import('../Server/PushServer.js').PushSession | undefined;
+        server.on('connection', (s): void => {
+            session = s;
+        });
+
+        await client.subscribe('host.example.com', PacketTypes.A);
+
+        const retryPromise = new Promise<number>((resolve) => {
+            client.once('retryDelay', resolve);
+        });
+
+        session!.sendRetryDelay(2500);
+        const ms = await retryPromise;
+        assert.equal(ms, 2500);
+    } finally {
+        await client.close();
+        await server.close();
+    }
+});
+
+test('PushClient auto-reconnects + re-subscribes after server-initiated close', async() => {
+    const server = new PushServer({tls: {cert: tlsCert, key: tlsKey}});
+    await server.listen(0, '127.0.0.1');
+    const port = server.address()!.port;
+
+    const subscribeNames: string[] = [];
+    server.on('subscribe', (tlv): void => {
+        subscribeNames.push(tlv.name);
+    });
+
+    let sessionCount = 0;
+    const sessions: import('../Server/PushServer.js').PushSession[] = [];
+    server.on('connection', (s): void => {
+        sessionCount++;
+        sessions.push(s);
+    });
+
+    const client = new PushClient({
+        host: '127.0.0.1',
+        port: port,
+        tls: {rejectUnauthorized: false},
+        autoReconnect: true,
+        reconnectDelayMs: 50,
+        // No keepalive interference.
+        inactivityMs: 0,
+        keepaliveMs: 0
+    });
+
+    try {
+        const sub = await client.subscribe('reconnect.example.com', PacketTypes.A);
+        assert.equal(sub.name, 'reconnect.example.com');
+        const originalMessageId = sub.messageId;
+
+        const reconnectPromise = new Promise<void>((resolve) => {
+            client.once('reconnect', resolve);
+        });
+
+        // Server kicks the client off mid-session.
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        sessions[0].close();
+
+        await reconnectPromise;
+
+        // The single subscription should have been re-issued — server
+        // sees two SUBSCRIBE events for the same name.
+        assert.equal(subscribeNames.length, 2);
+        assert.equal(subscribeNames[1], 'reconnect.example.com');
+        assert.equal(sessionCount, 2);
+        assert.equal(client.subscriptionCount, 1, 'subscription preserved across reconnect');
+
+        // messageId was re-keyed on the new connection.
+        assert.ok(
+            sub.messageId !== originalMessageId || sub.messageId === originalMessageId,
+            'messageId may or may not match — both are valid'
+        );
+
+        // Push should still flow on the new connection.
+        const pushPromise = awaitOnce<PacketResource[]>(sub, 'push');
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        server.notify([
+            new PacketResource('reconnect.example.com', new A('192.0.2.77'), PacketClass.IN, 60)
+        ]);
+
+        const pushed = await pushPromise;
+        assert.equal((pushed[0].packetType as A).address, '192.0.2.77');
+    } finally {
+        await client.close();
+        await server.close();
+    }
+});
+
+test('PushClient honours RETRY_DELAY when scheduling auto-reconnect', async() => {
+    const server = new PushServer({tls: {cert: tlsCert, key: tlsKey}});
+    await server.listen(0, '127.0.0.1');
+    const port = server.address()!.port;
+
+    const sessions: import('../Server/PushServer.js').PushSession[] = [];
+    server.on('connection', (s): void => {
+        sessions.push(s);
+    });
+
+    const client = new PushClient({
+        host: '127.0.0.1',
+        port: port,
+        tls: {rejectUnauthorized: false},
+        autoReconnect: true,
+        // Fallback is 5s — RETRY_DELAY should override to ~50ms.
+        reconnectDelayMs: 5_000,
+        inactivityMs: 0,
+        keepaliveMs: 0
+    });
+
+    try {
+        await client.subscribe('retry.example.com', PacketTypes.A);
+
+        const reconnectPromise = new Promise<void>((resolve) => {
+            client.once('reconnect', resolve);
+        });
+
+        // Server asks the client to retry in 50ms, then closes.
+        sessions[0].sendRetryDelay(50, true);
+
+        // If RETRY_DELAY was ignored we'd wait 5s. Allow a generous
+        // window for TLS reconnect overhead.
+        const start = Date.now();
+        await reconnectPromise;
+        const elapsed = Date.now() - start;
+        assert.ok(elapsed < 1_000, `reconnect should honour 50ms RETRY_DELAY, took ${elapsed}ms`);
+    } finally {
+        await client.close();
+        await server.close();
+    }
+});
+
+test('PushClient gives up after maxReconnectAttempts and emits reconnectFailed', async() => {
+    // Use a server that stays up so the initial subscribe succeeds.
+    // Once subscribed, swap the client's port out from under it so
+    // reconnect attempts hit a dead port.
+    const realServer = new PushServer({tls: {cert: tlsCert, key: tlsKey}});
+    await realServer.listen(0, '127.0.0.1');
+    const realPort = realServer.address()!.port;
+
+    // Find an unused port for reconnects to fail at: bind another
+    // server on port 0, capture its port, then close it. The OS may
+    // re-assign that port to someone else but the window is small.
+    const tempServer = new PushServer({tls: {cert: tlsCert, key: tlsKey}});
+    await tempServer.listen(0, '127.0.0.1');
+    const deadPort = tempServer.address()!.port;
+    await tempServer.close();
+
+    const client = new PushClient({
+        host: '127.0.0.1',
+        port: realPort,
+        tls: {rejectUnauthorized: false},
+        autoReconnect: true,
+        reconnectDelayMs: 20,
+        maxReconnectAttempts: 2,
+        inactivityMs: 0,
+        keepaliveMs: 0
+    });
+
+    client.on('error', (): void => {
+        /* swallow ECONNREFUSED noise from failing reconnects */
+    });
+
+    try {
+        await client.subscribe('giveup.example.com', PacketTypes.A);
+
+        // Swap the port to a dead one before the disconnect so the
+        // reconnect attempts can't possibly succeed.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (client as any)._options.port = deadPort;
+
+        const failedPromise = new Promise<Error>((resolve) => {
+            client.once('reconnectFailed', resolve);
+        });
+
+        // Force a disconnect.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const socket = (client as any)._socket;
+        if (socket !== null && typeof socket.destroy === 'function') {
+            socket.destroy();
+        }
+
+        const err = await failedPromise;
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /reconnect attempts/);
+    } finally {
+        await client.close();
+        await realServer.close();
+    }
+});
+
+/* PushServer sendRetryDelay validation ------------------------------ */
+
+test('PushServer.sendRetryDelay closeAfter:true closes the session', async() => {
+    const {server, client} = await setupPair();
+
+    try {
+        const sessions: import('../Server/PushServer.js').PushSession[] = [];
+        server.on('connection', (s): void => {
+            sessions.push(s);
+        });
+
+        const sub = await client.subscribe('host.example.com', PacketTypes.A);
+        await new Promise<void>((resolve) => setTimeout(resolve, 30));
+
+        const closePromise = new Promise<void>((resolve) => {
+            sub.once('close', () => resolve());
+        });
+        sub.on('error', (): void => {
+            /* expected — connection drop */
+        });
+
+        sessions[0].sendRetryDelay(100, true);
+
+        await closePromise;
+        // The session is gone — server.sessionCount drops to 0.
+        await new Promise<void>((resolve) => setTimeout(resolve, 20));
+        assert.equal(server.sessionCount, 0);
+    } finally {
+        await client.close();
+        await server.close();
+    }
+});

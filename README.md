@@ -154,8 +154,14 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   and `notify(records)` fans out unilateral PUSH messages to every
   session whose `(name, type, class)` matches. Subscriptions match
   case-insensitively; `qtype = 255` (ANY) acts as a wildcard.
-  Underlying DSO wire format is exposed in `Lib/Dso` as typed TLV
-  classes plus `DsoMessage`.
+  Production-ready session management: periodic KEEPALIVE
+  heartbeats (re-armed on every outbound message), client-side
+  RECONFIRM (RFC 8765 §6.5), server-side RETRY_DELAY load shedding
+  (RFC 8490 §7.2), and opt-in auto-reconnect that honours the
+  server's RETRY_DELAY value and re-issues SUBSCRIBE for every
+  active subscription on the new connection. Underlying DSO wire
+  format is exposed in `Lib/Dso` as typed TLV classes plus
+  `DsoMessage`.
 
 ### DNS Client (default UDP)
 

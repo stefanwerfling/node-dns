@@ -2,7 +2,7 @@ import {Buffer} from 'buffer';
 import {EventEmitter} from 'events';
 import net from 'net';
 import tls from 'tls';
-import {DsoMessage, KeepaliveTlv, PushTlv, ReconfirmTlv, SubscribeTlv, UnsubscribeTlv} from '../Lib/Dso.js';
+import {DsoMessage, KeepaliveTlv, PushTlv, ReconfirmTlv, RetryDelayTlv, SubscribeTlv, UnsubscribeTlv} from '../Lib/Dso.js';
 import {PacketResource} from '../Packet/PacketResource.js';
 
 export type PushServerOptions = {
@@ -87,6 +87,23 @@ class PushSession extends EventEmitter {
         this.socket.write(frame);
     }
 
+    /**
+     * Send a unilateral RETRY_DELAY TLV (RFC 8490 §7.2) telling this
+     * client to back off for `retryDelayMs` before reconnecting. The
+     * server typically follows this with a session close — pass
+     * `closeAfter: true` to chain the close after the bytes flush.
+     */
+    public sendRetryDelay(retryDelayMs: number, closeAfter: boolean = false): void {
+        const message = DsoMessage.unilateral(new RetryDelayTlv(retryDelayMs));
+        this.sendMessage(message);
+
+        if (closeAfter) {
+            // Let the kernel flush the frame before tearing down so
+            // the RETRY_DELAY actually reaches the client.
+            setImmediate((): void => this._teardown());
+        }
+    }
+
     public close(): void {
         this._teardown();
     }
@@ -165,12 +182,13 @@ class PushSession extends EventEmitter {
         // UNSUBSCRIBE is unacknowledged — no response.
     }
 
-    protected _handleKeepalive(messageId: number, _tlv: KeepaliveTlv): void {
+    protected _handleKeepalive(messageId: number, tlv: KeepaliveTlv): void {
         // Echo our configured window. The smaller of {client request,
         // server policy} wins (RFC 8490 §7.1.1) — caller policy is
         // simpler: just reply with our values.
         const reply = new KeepaliveTlv(this._server.inactivityMs, this._server.keepaliveMs);
         this.sendMessage(DsoMessage.response(messageId, 0, [reply]));
+        this._server.emit('keepalive', tlv, this);
     }
 
     protected _teardown(err?: Error): void {

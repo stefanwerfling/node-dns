@@ -112,17 +112,90 @@ pointers can never leak.
 For exact wire shapes, see the encode/decode methods on each TLV
 class in `Lib/Dso.ts`.
 
+## Long-lived sessions
+
+A real-world push session typically outlives any single TCP
+connection. Two ingredients keep it healthy:
+
+### Periodic KEEPALIVE heartbeats
+
+After the initial KEEPALIVE TLV (which advertises the client's
+preferred inactivity/keepalive window), the client schedules a
+heartbeat every `keepaliveMs` of socket inactivity. Each outbound
+message — including PUSH responses, SUBSCRIBE, UNSUBSCRIBE,
+RECONFIRM — resets the timer, so an active session never wastes a
+heartbeat. Pass `keepaliveMs: 0` to disable both the initial KEEPALIVE
+and the periodic refresh.
+
+### Auto-reconnect with `RETRY_DELAY`
+
+Opt in with `autoReconnect: true`. When the server closes the session
+(by sending `RETRY_DELAY` + closing, or just closing), the client:
+
+1. Waits for either the server's most recent `RETRY_DELAY` value or
+   `reconnectDelayMs` (default 1000ms).
+2. Re-opens a fresh TLS connection.
+3. Re-issues SUBSCRIBE for every active subscription — the same
+   `PushSubscription` instances continue receiving `'push'` events,
+   their `messageId` is re-keyed under the hood.
+
+Events to watch:
+
+| Client event       | Payload                | When                                                              |
+| ------------------ | ---------------------- | ----------------------------------------------------------------- |
+| `'retryDelay'`     | `(ms: number)`         | Server sent a RETRY_DELAY TLV — observable even without auto-reconnect.   |
+| `'reconnect'`      | `()`                   | After all active subscriptions were re-issued successfully.       |
+| `'reconnectFailed'`| `(err: Error)`         | Hit `maxReconnectAttempts` (default `Infinity`) — subscriptions are torn down. |
+| `'error'`          | `(err: Error)`         | Individual reconnect attempt failed. Subsequent attempts are still queued unless the cap is reached. |
+
+```ts
+const client = new PushClient({
+  host: 'dns-push.example.net',
+  autoReconnect: true,
+  reconnectDelayMs: 2_000,         // fallback when no RETRY_DELAY
+  maxReconnectAttempts: 5,         // give up after 5 consecutive fails
+});
+
+client.on('reconnect', () => console.log('back online'));
+client.on('reconnectFailed', (err) => alert('giving up: ' + err.message));
+```
+
+## RECONFIRM
+
+When a client suspects a cached PUSH-delivered record is no longer
+correct (e.g. an A-record's target host is unreachable), it can ask
+the server to re-verify via `client.reconfirm(name, type, class,
+rdata)`. RFC 8765 §6.5: the message is unacknowledged — the server's
+follow-up (re-push the same RRset, push a corrected one, or do
+nothing) shows up as a future `'push'` event on the relevant
+subscription.
+
+```ts
+import {Buffer} from 'node:buffer';
+
+await client.reconfirm(
+  'app.example.com', PacketTypes.A, PacketClass.IN,
+  Buffer.from([192, 0, 2, 5])      // the rdata you want re-checked
+);
+```
+
+## Server-side load shedding via `RETRY_DELAY`
+
+`PushSession.sendRetryDelay(ms, closeAfter?)` ships a unilateral
+RETRY_DELAY TLV. Pass `closeAfter: true` to also tear down the
+session once the bytes have flushed — RFC 8490 §7.2: the canonical
+pattern for "I'm too busy, come back later".
+
+```ts
+server.on('connection', (session) => {
+  if (currentLoad > threshold) {
+    session.sendRetryDelay(60_000, true);  // 1 minute, then close
+  }
+});
+```
+
 ## What's not implemented yet
 
-- **Periodic KEEPALIVE heartbeats from the client.** The initial
-  KEEPALIVE TLV is sent during connection setup to advertise the
-  client's preferred window, but the client doesn't yet schedule
-  periodic heartbeats. Long-lived idle connections will be closed by
-  servers enforcing their inactivity timeout — wrap the client with
-  a reconnect loop if your sessions outlast it.
-- **Automatic reconnect on `RETRY_DELAY`.** The server can ask
-  clients to back off via the RETRY_DELAY TLV; the current client
-  parses it but doesn't act on it.
 - **Server-side RECONFIRM policy.** Clients can send RECONFIRM but
   the server only emits a `'reconfirm'` event — the app decides
   whether to re-push, refuse, or silently ignore.

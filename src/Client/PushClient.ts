@@ -1,7 +1,7 @@
 import {Buffer} from 'buffer';
 import {EventEmitter} from 'events';
 import tls from 'tls';
-import {DSO_UNILATERAL_MESSAGE_ID, DsoMessage, KeepaliveTlv, PushTlv, SubscribeTlv, UnsubscribeTlv} from '../Lib/Dso.js';
+import {DSO_UNILATERAL_MESSAGE_ID, DsoMessage, KeepaliveTlv, PushTlv, ReconfirmTlv, RetryDelayTlv, SubscribeTlv, UnsubscribeTlv} from '../Lib/Dso.js';
 import {PacketClass} from '../Packet/PacketClass.js';
 import {PacketResource} from '../Packet/PacketResource.js';
 import {PacketTypes} from '../Packet/PacketTypes.js';
@@ -41,14 +41,40 @@ export type PushClientOptions = {
     inactivityMs?: number;
 
     /**
-     * Keepalive interval advertised to the server in the initial
-     * KEEPALIVE TLV. The client SHOULD send a `KEEPALIVE` heartbeat
-     * within this window when otherwise idle. Default: 15 seconds
-     * (15_000ms). Tracked here for completeness; the client doesn't
-     * yet send periodic heartbeats automatically — passive presence
-     * over TLS is enough for tests and short-lived clients.
+     * Keepalive interval (ms) advertised in the initial KEEPALIVE TLV
+     * and used to schedule periodic client-side heartbeats. After
+     * each outbound message the heartbeat timer is reset; if
+     * `keepaliveMs` elapses with the socket otherwise idle, the
+     * client sends a fresh KEEPALIVE message so the server's
+     * inactivity timer (RFC 8490 §6.5.2) stays armed. Default: 15
+     * seconds. Pass `0` to disable heartbeats entirely (no advertised
+     * window, no periodic refresh).
      */
     keepaliveMs?: number;
+
+    /**
+     * When `true`, reconnect after the server closes the session and
+     * re-issue SUBSCRIBE for every still-active subscription. The
+     * reconnect honours the server's most recently advertised
+     * `RETRY_DELAY` TLV (RFC 8490 §7.2); falls back to
+     * `reconnectDelayMs` when none has been seen. Default: `false`
+     * (callers manage reconnects themselves on `'close'`).
+     */
+    autoReconnect?: boolean;
+
+    /**
+     * Default delay (ms) before reconnecting when `autoReconnect:
+     * true` and the server hasn't sent a `RETRY_DELAY` TLV. Default:
+     * 1000ms.
+     */
+    reconnectDelayMs?: number;
+
+    /**
+     * Cap on consecutive reconnect attempts. Counter resets after a
+     * successful reconnect (subscriptions re-acknowledged). Default:
+     * `Infinity`.
+     */
+    maxReconnectAttempts?: number;
 };
 
 /**
@@ -77,7 +103,14 @@ export class PushSubscription extends EventEmitter {
     public readonly name: string;
     public readonly qtype: number;
     public readonly qclass: number;
-    public readonly messageId: number;
+
+    /**
+     * Current 16-bit DSO message ID owning this subscription. Mutated
+     * by the client on auto-reconnect, since each SUBSCRIBE on the
+     * fresh connection allocates a new ID. Callers should not write
+     * to this field — it's exposed for debugging / instrumentation.
+     */
+    public messageId: number;
 
     /** @internal */
     public _active: boolean;
@@ -159,6 +192,44 @@ export class PushClient extends EventEmitter {
     protected _subscriptions: Map<number, PushSubscription>;
     protected _closed: boolean;
 
+    /**
+     * Periodic-heartbeat timer. Re-armed by `_sendMessage` after every
+     * outbound write; fires `keepaliveMs` of socket inactivity later
+     * with a fresh KEEPALIVE message.
+     * @protected
+     */
+    protected _keepaliveTimer: NodeJS.Timeout | null;
+
+    /**
+     * Scheduled reconnect handle while we're waiting out a
+     * `RETRY_DELAY` window. Null when no reconnect is pending.
+     * @protected
+     */
+    protected _reconnectTimer: NodeJS.Timeout | null;
+
+    /**
+     * Most-recent `RETRY_DELAY` value the server advertised, in ms.
+     * `null` when none has been seen — the next reconnect falls back
+     * to `options.reconnectDelayMs`.
+     * @protected
+     */
+    protected _pendingRetryDelayMs: number | null;
+
+    /**
+     * Consecutive reconnect attempts. Resets to 0 after a successful
+     * SUBSCRIBE re-acknowledgement.
+     * @protected
+     */
+    protected _reconnectAttempts: number;
+
+    /**
+     * `true` while a planned reconnect is in flight — suppresses the
+     * normal `_teardown` (which would clear subscriptions). Cleared
+     * once reconnect completes or fails terminally.
+     * @protected
+     */
+    protected _reconnecting: boolean;
+
     public constructor(options: PushClientOptions) {
         super();
 
@@ -172,7 +243,10 @@ export class PushClient extends EventEmitter {
             tls: options.tls ?? {},
             requestTimeoutMs: options.requestTimeoutMs ?? 5_000,
             inactivityMs: options.inactivityMs ?? 1_800_000,
-            keepaliveMs: options.keepaliveMs ?? 15_000
+            keepaliveMs: options.keepaliveMs ?? 15_000,
+            autoReconnect: options.autoReconnect ?? false,
+            reconnectDelayMs: options.reconnectDelayMs ?? 1_000,
+            maxReconnectAttempts: options.maxReconnectAttempts ?? Infinity
         };
 
         this._socket = null;
@@ -183,6 +257,11 @@ export class PushClient extends EventEmitter {
         this._pending = new Map();
         this._subscriptions = new Map();
         this._closed = false;
+        this._keepaliveTimer = null;
+        this._reconnectTimer = null;
+        this._pendingRetryDelayMs = null;
+        this._reconnectAttempts = 0;
+        this._reconnecting = false;
     }
 
     /**
@@ -222,8 +301,38 @@ export class PushClient extends EventEmitter {
     }
 
     /**
+     * Send a RECONFIRM TLV (RFC 8765 §6.5) — the client telling the
+     * server "I think this record is stale, please verify". The
+     * message is unacknowledged: this method returns once the bytes
+     * have been written to the socket; the server's response (if
+     * any) shows up as a future PUSH on the matching subscription.
+     *
+     * Connects lazily on the first call. Throws when the client has
+     * been closed.
+     */
+    public async reconfirm(
+        name: string,
+        qtype: PacketTypes | number,
+        qclass: PacketClass | number,
+        rdata: Buffer
+    ): Promise<void> {
+        if (this._closed) {
+            throw new Error('PushClient: client is closed');
+        }
+
+        await this._ensureConnected();
+
+        const tlv = new ReconfirmTlv(name, qtype as number, qclass as number, rdata);
+        // RECONFIRM is unacknowledged — use a fresh message ID per
+        // RFC 8490 §5.3 but don't wait on a response.
+        const message = DsoMessage.request(this._allocateMessageId(), tlv);
+        this._sendMessage(message);
+    }
+
+    /**
      * Close the connection. Pending SUBSCRIBE requests reject; active
-     * subscriptions emit `'error'` and `'close'`. Idempotent.
+     * subscriptions emit `'error'` (when a listener is registered)
+     * and `'close'`. Cancels any pending reconnect. Idempotent.
      */
     public async close(): Promise<void> {
         if (this._closed) {
@@ -231,6 +340,13 @@ export class PushClient extends EventEmitter {
         }
 
         this._closed = true;
+
+        if (this._reconnectTimer !== null) {
+            clearTimeout(this._reconnectTimer);
+            this._reconnectTimer = null;
+        }
+
+        this._reconnecting = false;
         this._teardown(new Error('PushClient: connection closed by caller'));
     }
 
@@ -261,7 +377,7 @@ export class PushClient extends EventEmitter {
      * Open the TLS connection (lazy). Sends the optional initial
      * KEEPALIVE TLV once `secureConnect` fires so the server knows
      * the inactivity / keepalive window. Resolves when the socket is
-     * ready to use.
+     * ready to use. Arms the periodic-heartbeat timer on success.
      *
      * @protected
      */
@@ -286,12 +402,13 @@ export class PushClient extends EventEmitter {
             });
 
             socket.once('error', (err): void => {
-                this._teardown(err);
-                reject(err);
+                if (!this._handleConnectionDrop(err)) {
+                    reject(err);
+                }
             });
 
             socket.once('close', (): void => {
-                this._teardown(new Error('PushClient: connection closed by peer'));
+                this._handleConnectionDrop(new Error('PushClient: connection closed by peer'));
             });
 
             socket.once('secureConnect', (): void => {
@@ -314,6 +431,7 @@ export class PushClient extends EventEmitter {
                     }, 1_000).unref?.();
                 }
 
+                this._armKeepaliveTimer();
                 resolve();
             });
         });
@@ -328,7 +446,178 @@ export class PushClient extends EventEmitter {
     }
 
     /**
+     * Dispatch a connection drop. If `autoReconnect` is on and there
+     * are still-active subscriptions, schedule a reconnect instead of
+     * tearing down. Returns `true` when a reconnect was scheduled —
+     * the caller should NOT propagate the rejection (the drop is
+     * handled).
+     *
+     * @param {Error} err
+     * @return {boolean}
+     * @protected
+     */
+    protected _handleConnectionDrop(err: Error): boolean {
+        // Already torn down or in the middle of a planned reconnect —
+        // nothing to do. (Reconnect logic owns the socket lifecycle
+        // while it's in flight.)
+        if (this._closed || this._reconnecting) {
+            this._clearKeepaliveTimer();
+            return false;
+        }
+
+        if (this._options.autoReconnect && this._subscriptions.size > 0) {
+            this._clearKeepaliveTimer();
+            this._scheduleReconnect();
+            return true;
+        }
+
+        this._teardown(err);
+        return false;
+    }
+
+    /**
+     * Schedule a reconnect attempt after the appropriate delay (last
+     * `RETRY_DELAY` from the server, else `reconnectDelayMs`). Runs
+     * the actual reconnect inside `_doReconnect` so failures can
+     * recursively re-schedule until `maxReconnectAttempts` is hit.
+     *
+     * @protected
+     */
+    protected _scheduleReconnect(): void {
+        if (this._reconnectAttempts >= this._options.maxReconnectAttempts) {
+            this.emit('reconnectFailed', new Error(
+                `PushClient: gave up after ${this._reconnectAttempts} reconnect attempts`
+            ));
+            this._teardown(new Error('PushClient: reconnect attempts exhausted'));
+            return;
+        }
+
+        // Drop the old socket reference; it's already dead by the time
+        // we get here.
+        this._socket = null;
+        this._ready = null;
+        this._readBuffer = Buffer.alloc(0);
+        this._expected = null;
+        this._reconnecting = true;
+
+        const delay = this._pendingRetryDelayMs ?? this._options.reconnectDelayMs;
+        this._pendingRetryDelayMs = null;
+        this._reconnectAttempts++;
+
+        this._reconnectTimer = setTimeout((): void => {
+            this._reconnectTimer = null;
+            void this._doReconnect();
+        }, delay);
+        this._reconnectTimer.unref?.();
+    }
+
+    /**
+     * Reconnect: open a fresh TLS connection then re-issue SUBSCRIBE
+     * for every active subscription. On success, reset the attempt
+     * counter and emit `'reconnect'`. On failure, fall back to
+     * `_scheduleReconnect` for another retry.
+     *
+     * @protected
+     */
+    protected async _doReconnect(): Promise<void> {
+        try {
+            await this._ensureConnected();
+
+            // Re-subscribe every still-active subscription. Take a
+            // snapshot of the entries — we're going to re-key the map
+            // as we go.
+            const subs = Array.from(this._subscriptions.values());
+            this._subscriptions.clear();
+
+            for (const sub of subs) {
+                if (!sub._active) {
+                    continue;
+                }
+
+                const newId = this._allocateMessageId();
+                const subscribeTlv = new SubscribeTlv(sub.name, sub.qtype, sub.qclass);
+                const message = DsoMessage.request(newId, subscribeTlv);
+                const responsePromise = this._awaitResponse(newId);
+                this._sendMessage(message);
+
+                const response = await responsePromise;
+
+                if (response.header.rcode !== 0) {
+                    throw new Error(`PushClient.reconnect: server rejected re-SUBSCRIBE (rcode ${response.header.rcode})`);
+                }
+
+                sub.messageId = newId;
+                this._subscriptions.set(newId, sub);
+            }
+
+            this._reconnecting = false;
+            this._reconnectAttempts = 0;
+            this.emit('reconnect');
+        } catch (err) {
+            this._reconnecting = false;
+            // The TLS socket is dead; schedule another attempt.
+            this._scheduleReconnect();
+            this.emit('error', err);
+        }
+    }
+
+    /**
+     * Arm (or re-arm) the periodic-heartbeat timer.
+     *
+     * @protected
+     */
+    protected _armKeepaliveTimer(): void {
+        this._clearKeepaliveTimer();
+
+        if (this._options.keepaliveMs <= 0) {
+            return;
+        }
+
+        this._keepaliveTimer = setTimeout((): void => {
+            this._keepaliveTimer = null;
+            this._sendHeartbeat();
+        }, this._options.keepaliveMs);
+        this._keepaliveTimer.unref?.();
+    }
+
+    /**
+     * Cancel the periodic-heartbeat timer.
+     *
+     * @protected
+     */
+    protected _clearKeepaliveTimer(): void {
+        if (this._keepaliveTimer !== null) {
+            clearTimeout(this._keepaliveTimer);
+            this._keepaliveTimer = null;
+        }
+    }
+
+    /**
+     * Send a fresh KEEPALIVE TLV as a heartbeat. Re-arms the timer
+     * afterwards via `_sendMessage`. Silently swallows send failures
+     * — the underlying socket will fire `'error'` separately, and
+     * that's the right place to react.
+     *
+     * @protected
+     */
+    protected _sendHeartbeat(): void {
+        if (this._socket === null || this._socket.destroyed) {
+            return;
+        }
+
+        try {
+            const keepalive = new KeepaliveTlv(this._options.inactivityMs, this._options.keepaliveMs);
+            const message = DsoMessage.request(this._allocateMessageId(), keepalive);
+            this._sendMessage(message);
+        } catch {
+            // ignore — connection-drop path will pick it up.
+        }
+    }
+
+    /**
      * Send a `DsoMessage` over the socket with length-prefix framing.
+     * Re-arms the periodic-heartbeat timer so that another outbound
+     * message defers the next heartbeat by `keepaliveMs`.
      *
      * @param {DsoMessage} message
      * @protected
@@ -343,6 +632,8 @@ export class PushClient extends EventEmitter {
         frame.writeUInt16BE(body.length, 0);
         body.copy(frame, 2);
         this._socket.write(frame);
+
+        this._armKeepaliveTimer();
     }
 
     /**
@@ -408,12 +699,28 @@ export class PushClient extends EventEmitter {
             return;
         }
 
-        // Unilateral PUSH from server — dispatch to subscriptions.
+        // Unilateral PUSH / RETRY_DELAY from server.
         for (const tlv of message.tlvs) {
             if (tlv instanceof PushTlv) {
                 this._dispatchPush(tlv);
+            } else if (tlv instanceof RetryDelayTlv) {
+                this._handleRetryDelay(tlv);
             }
         }
+    }
+
+    /**
+     * Record the server's advertised RETRY_DELAY and emit the event
+     * so callers can observe shedding decisions even when not using
+     * `autoReconnect`. The value will be picked up by the next
+     * `_scheduleReconnect` call.
+     *
+     * @param {RetryDelayTlv} tlv
+     * @protected
+     */
+    protected _handleRetryDelay(tlv: RetryDelayTlv): void {
+        this._pendingRetryDelayMs = tlv.retryDelayMs;
+        this.emit('retryDelay', tlv.retryDelayMs);
     }
 
     /**
@@ -547,6 +854,13 @@ export class PushClient extends EventEmitter {
      * @protected
      */
     protected _teardown(err: Error): void {
+        this._clearKeepaliveTimer();
+
+        if (this._reconnectTimer !== null) {
+            clearTimeout(this._reconnectTimer);
+            this._reconnectTimer = null;
+        }
+
         for (const pending of this._pending.values()) {
             clearTimeout(pending.timer);
             pending.reject(err);

@@ -1,7 +1,7 @@
 import { Buffer } from 'buffer';
 import { EventEmitter } from 'events';
 import tls from 'tls';
-import { DSO_UNILATERAL_MESSAGE_ID, DsoMessage, KeepaliveTlv, PushTlv, SubscribeTlv, UnsubscribeTlv } from '../Lib/Dso.js';
+import { DSO_UNILATERAL_MESSAGE_ID, DsoMessage, KeepaliveTlv, PushTlv, ReconfirmTlv, RetryDelayTlv, SubscribeTlv, UnsubscribeTlv } from '../Lib/Dso.js';
 import { PacketClass } from '../Packet/PacketClass.js';
 export class PushSubscription extends EventEmitter {
     name;
@@ -37,6 +37,11 @@ export class PushClient extends EventEmitter {
     _pending;
     _subscriptions;
     _closed;
+    _keepaliveTimer;
+    _reconnectTimer;
+    _pendingRetryDelayMs;
+    _reconnectAttempts;
+    _reconnecting;
     constructor(options) {
         super();
         if (typeof options?.host !== 'string' || options.host.length === 0) {
@@ -48,7 +53,10 @@ export class PushClient extends EventEmitter {
             tls: options.tls ?? {},
             requestTimeoutMs: options.requestTimeoutMs ?? 5_000,
             inactivityMs: options.inactivityMs ?? 1_800_000,
-            keepaliveMs: options.keepaliveMs ?? 15_000
+            keepaliveMs: options.keepaliveMs ?? 15_000,
+            autoReconnect: options.autoReconnect ?? false,
+            reconnectDelayMs: options.reconnectDelayMs ?? 1_000,
+            maxReconnectAttempts: options.maxReconnectAttempts ?? Infinity
         };
         this._socket = null;
         this._ready = null;
@@ -58,6 +66,11 @@ export class PushClient extends EventEmitter {
         this._pending = new Map();
         this._subscriptions = new Map();
         this._closed = false;
+        this._keepaliveTimer = null;
+        this._reconnectTimer = null;
+        this._pendingRetryDelayMs = null;
+        this._reconnectAttempts = 0;
+        this._reconnecting = false;
     }
     async subscribe(name, qtype, qclass = PacketClass.IN) {
         if (this._closed) {
@@ -77,11 +90,25 @@ export class PushClient extends EventEmitter {
         this._subscriptions.set(messageId, subscription);
         return subscription;
     }
+    async reconfirm(name, qtype, qclass, rdata) {
+        if (this._closed) {
+            throw new Error('PushClient: client is closed');
+        }
+        await this._ensureConnected();
+        const tlv = new ReconfirmTlv(name, qtype, qclass, rdata);
+        const message = DsoMessage.request(this._allocateMessageId(), tlv);
+        this._sendMessage(message);
+    }
     async close() {
         if (this._closed) {
             return;
         }
         this._closed = true;
+        if (this._reconnectTimer !== null) {
+            clearTimeout(this._reconnectTimer);
+            this._reconnectTimer = null;
+        }
+        this._reconnecting = false;
         this._teardown(new Error('PushClient: connection closed by caller'));
     }
     get subscriptionCount() {
@@ -112,11 +139,12 @@ export class PushClient extends EventEmitter {
                 this._drainFrames();
             });
             socket.once('error', (err) => {
-                this._teardown(err);
-                reject(err);
+                if (!this._handleConnectionDrop(err)) {
+                    reject(err);
+                }
             });
             socket.once('close', () => {
-                this._teardown(new Error('PushClient: connection closed by peer'));
+                this._handleConnectionDrop(new Error('PushClient: connection closed by peer'));
             });
             socket.once('secureConnect', () => {
                 if (this._options.inactivityMs > 0) {
@@ -132,12 +160,106 @@ export class PushClient extends EventEmitter {
                         }
                     }, 1_000).unref?.();
                 }
+                this._armKeepaliveTimer();
                 resolve();
             });
         });
         this._ready.catch(() => {
         });
         return this._ready;
+    }
+    _handleConnectionDrop(err) {
+        if (this._closed || this._reconnecting) {
+            this._clearKeepaliveTimer();
+            return false;
+        }
+        if (this._options.autoReconnect && this._subscriptions.size > 0) {
+            this._clearKeepaliveTimer();
+            this._scheduleReconnect();
+            return true;
+        }
+        this._teardown(err);
+        return false;
+    }
+    _scheduleReconnect() {
+        if (this._reconnectAttempts >= this._options.maxReconnectAttempts) {
+            this.emit('reconnectFailed', new Error(`PushClient: gave up after ${this._reconnectAttempts} reconnect attempts`));
+            this._teardown(new Error('PushClient: reconnect attempts exhausted'));
+            return;
+        }
+        this._socket = null;
+        this._ready = null;
+        this._readBuffer = Buffer.alloc(0);
+        this._expected = null;
+        this._reconnecting = true;
+        const delay = this._pendingRetryDelayMs ?? this._options.reconnectDelayMs;
+        this._pendingRetryDelayMs = null;
+        this._reconnectAttempts++;
+        this._reconnectTimer = setTimeout(() => {
+            this._reconnectTimer = null;
+            void this._doReconnect();
+        }, delay);
+        this._reconnectTimer.unref?.();
+    }
+    async _doReconnect() {
+        try {
+            await this._ensureConnected();
+            const subs = Array.from(this._subscriptions.values());
+            this._subscriptions.clear();
+            for (const sub of subs) {
+                if (!sub._active) {
+                    continue;
+                }
+                const newId = this._allocateMessageId();
+                const subscribeTlv = new SubscribeTlv(sub.name, sub.qtype, sub.qclass);
+                const message = DsoMessage.request(newId, subscribeTlv);
+                const responsePromise = this._awaitResponse(newId);
+                this._sendMessage(message);
+                const response = await responsePromise;
+                if (response.header.rcode !== 0) {
+                    throw new Error(`PushClient.reconnect: server rejected re-SUBSCRIBE (rcode ${response.header.rcode})`);
+                }
+                sub.messageId = newId;
+                this._subscriptions.set(newId, sub);
+            }
+            this._reconnecting = false;
+            this._reconnectAttempts = 0;
+            this.emit('reconnect');
+        }
+        catch (err) {
+            this._reconnecting = false;
+            this._scheduleReconnect();
+            this.emit('error', err);
+        }
+    }
+    _armKeepaliveTimer() {
+        this._clearKeepaliveTimer();
+        if (this._options.keepaliveMs <= 0) {
+            return;
+        }
+        this._keepaliveTimer = setTimeout(() => {
+            this._keepaliveTimer = null;
+            this._sendHeartbeat();
+        }, this._options.keepaliveMs);
+        this._keepaliveTimer.unref?.();
+    }
+    _clearKeepaliveTimer() {
+        if (this._keepaliveTimer !== null) {
+            clearTimeout(this._keepaliveTimer);
+            this._keepaliveTimer = null;
+        }
+    }
+    _sendHeartbeat() {
+        if (this._socket === null || this._socket.destroyed) {
+            return;
+        }
+        try {
+            const keepalive = new KeepaliveTlv(this._options.inactivityMs, this._options.keepaliveMs);
+            const message = DsoMessage.request(this._allocateMessageId(), keepalive);
+            this._sendMessage(message);
+        }
+        catch {
+        }
     }
     _sendMessage(message) {
         if (this._socket === null || this._socket.destroyed) {
@@ -148,6 +270,7 @@ export class PushClient extends EventEmitter {
         frame.writeUInt16BE(body.length, 0);
         body.copy(frame, 2);
         this._socket.write(frame);
+        this._armKeepaliveTimer();
     }
     _drainFrames() {
         while (true) {
@@ -191,7 +314,14 @@ export class PushClient extends EventEmitter {
             if (tlv instanceof PushTlv) {
                 this._dispatchPush(tlv);
             }
+            else if (tlv instanceof RetryDelayTlv) {
+                this._handleRetryDelay(tlv);
+            }
         }
+    }
+    _handleRetryDelay(tlv) {
+        this._pendingRetryDelayMs = tlv.retryDelayMs;
+        this.emit('retryDelay', tlv.retryDelayMs);
     }
     _dispatchPush(tlv) {
         const buckets = new Map();
@@ -263,6 +393,11 @@ export class PushClient extends EventEmitter {
         });
     }
     _teardown(err) {
+        this._clearKeepaliveTimer();
+        if (this._reconnectTimer !== null) {
+            clearTimeout(this._reconnectTimer);
+            this._reconnectTimer = null;
+        }
         for (const pending of this._pending.values()) {
             clearTimeout(pending.timer);
             pending.reject(err);
