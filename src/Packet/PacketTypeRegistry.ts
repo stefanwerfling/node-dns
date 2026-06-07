@@ -6,20 +6,25 @@ import {AAAA} from './Types/AAAA.js';
 import {CAA} from './Types/CAA.js';
 import {CDNSKEY} from './Types/CDNSKEY.js';
 import {CDS} from './Types/CDS.js';
+import {CERT} from './Types/CERT.js';
 import {CNAME} from './Types/CNAME.js';
 import {DNAME} from './Types/DNAME.js';
 import {DNSKEY} from './Types/DNSKEY.js';
 import {DS} from './Types/DS.js';
 import {EDNS} from './Types/EDNS.js';
+import {HINFO} from './Types/HINFO.js';
 import {HTTPS} from './Types/HTTPS.js';
+import {LOC} from './Types/LOC.js';
 import {MX} from './Types/MX.js';
 import {NAPTR} from './Types/NAPTR.js';
 import {NS} from './Types/NS.js';
 import {NSEC} from './Types/NSEC.js';
 import {NSEC3} from './Types/NSEC3.js';
 import {NSEC3PARAM} from './Types/NSEC3PARAM.js';
+import {OPENPGPKEY} from './Types/OPENPGPKEY.js';
 import {PTR} from './Types/PTR.js';
 import {RRSIG} from './Types/RRSIG.js';
+import {SMIMEA} from './Types/SMIMEA.js';
 import {SOA} from './Types/SOA.js';
 import {SPF} from './Types/SPF.js';
 import {SRV} from './Types/SRV.js';
@@ -28,6 +33,8 @@ import {SVCB} from './Types/SVCB.js';
 import {TLSA} from './Types/TLSA.js';
 import {TSIG} from './Types/TSIG.js';
 import {TXT} from './Types/TXT.js';
+import {URI} from './Types/URI.js';
+import {ZONEMD} from './Types/ZONEMD.js';
 
 /**
  * PacketType Registry Type
@@ -83,6 +90,13 @@ export class PacketTypeRegistry {
             PacketTypeRegistry._instance.registerPacket(PacketTypes.HTTPS, HTTPS);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.TSIG, TSIG);
             PacketTypeRegistry._instance.registerPacket(PacketTypes.CAA, CAA);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.HINFO, HINFO);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.URI, URI);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.ZONEMD, ZONEMD);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.OPENPGPKEY, OPENPGPKEY);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.SMIMEA, SMIMEA);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.CERT, CERT);
+            PacketTypeRegistry._instance.registerPacket(PacketTypes.LOC, LOC);
         }
 
         return PacketTypeRegistry._instance;

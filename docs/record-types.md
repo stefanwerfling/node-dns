@@ -1,6 +1,6 @@
 # Record types
 
-dns2ts implements 24 RR types as classes that extend `PacketType`. Each one
+dns2ts implements 31 RR types as classes that extend `PacketType`. Each one
 has the same lifecycle: a constructor for outbound records, a static
 `decode(reader, length)` for inbound parsing, and an instance `encode(...)`
 that writes the wire format. You normally only interact with the constructor.
@@ -11,32 +11,41 @@ unknown RR survives a roundtrip through the library.
 
 ## Quick reference
 
-| Type     | Code   | Class             | RDATA fields                                       |
-| -------- | -----: | ----------------- | -------------------------------------------------- |
-| A        | 1      | `A`               | `address: string` (IPv4 dotted)                    |
-| NS       | 2      | `NS`              | `ns: string` (FQDN)                                |
-| CNAME    | 5      | `CNAME`           | `domain: string`                                   |
-| SOA      | 6      | `SOA`             | `primary, admin, serial, refresh, retry, expiration, minimum` |
-| PTR      | 12     | `PTR`             | `domain: string`                                   |
-| MX       | 15     | `MX`              | `exchange, priority`                               |
-| TXT      | 16     | `TXT`             | `data: string \| string[]`                         |
-| AAAA     | 28     | `AAAA`            | `address: string` (IPv6 colon)                     |
-| SRV      | 33     | `SRV`             | `priority, weight, port, target`                   |
-| NAPTR    | 35     | `NAPTR`           | `order, preference, flags, services, regexp, replacement` |
-| DNAME    | 39     | `DNAME`           | `target: string` (RFC 6672 — redirects whole subtree) |
-| EDNS     | 41     | `EDNS`            | `rdata: EdnsOption[]` (see [EDNS guide](edns.md))  |
-| DS       | 43     | `DS`              | `keyTag, algorithm, digestType, digest`            |
-| SSHFP    | 44     | `SSHFP`           | `algorithm, fpType, fingerprint`                   |
-| RRSIG    | 46     | `RRSIG`           | DNSSEC signature record                            |
-| NSEC     | 47     | `NSEC`            | `nextDomain, rdtypes`                              |
-| DNSKEY   | 48     | `DNSKEY`          | `flags, protocol, algorithm, key`                  |
-| NSEC3    | 50     | `NSEC3`           | `hashAlgorithm, flags, iterations, salt, nextHashedOwner, rdtypes` |
-| TLSA     | 52     | `TLSA`            | `usage, selector, matchingType, certificate`       |
-| SVCB     | 64     | `SVCB`            | `priority, target, params` (RFC 9460)              |
-| HTTPS    | 65     | `HTTPS`           | same wire format as SVCB, different code           |
-| SPF      | 99     | `SPF`             | `data: string \| string[]`                         |
-| TSIG     | 250    | `TSIG`            | see the [TSIG guide](tsig.md)                      |
-| CAA      | 257    | `CAA`             | `flags, tag, value`                                |
+| Type       | Code   | Class             | RDATA fields                                       |
+| ---------- | -----: | ----------------- | -------------------------------------------------- |
+| A          | 1      | `A`               | `address: string` (IPv4 dotted)                    |
+| NS         | 2      | `NS`              | `ns: string` (FQDN)                                |
+| CNAME      | 5      | `CNAME`           | `domain: string`                                   |
+| SOA        | 6      | `SOA`             | `primary, admin, serial, refresh, retry, expiration, minimum` |
+| PTR        | 12     | `PTR`             | `domain: string`                                   |
+| HINFO      | 13     | `HINFO`           | `cpu, os` (RFC 1035; RFC 8482 minimal-ANY)         |
+| MX         | 15     | `MX`              | `exchange, priority`                               |
+| TXT        | 16     | `TXT`             | `data: string \| string[]`                         |
+| AAAA       | 28     | `AAAA`            | `address: string` (IPv6 colon)                     |
+| LOC        | 29     | `LOC`             | `version, size, horizPre, vertPre, latitude, longitude, altitude` (RFC 1876, raw wire-form ints) |
+| SRV        | 33     | `SRV`             | `priority, weight, port, target`                   |
+| NAPTR      | 35     | `NAPTR`           | `order, preference, flags, services, regexp, replacement` |
+| CERT       | 37     | `CERT`            | `certType, keyTag, algorithm, certificate` (RFC 4398) |
+| DNAME      | 39     | `DNAME`           | `target: string` (RFC 6672 — redirects whole subtree) |
+| EDNS       | 41     | `EDNS`            | `rdata: EdnsOption[]` (see [EDNS guide](edns.md))  |
+| DS         | 43     | `DS`              | `keyTag, algorithm, digestType, digest`            |
+| SSHFP      | 44     | `SSHFP`           | `algorithm, fpType, fingerprint`                   |
+| RRSIG      | 46     | `RRSIG`           | DNSSEC signature record                            |
+| NSEC       | 47     | `NSEC`            | `nextDomain, rdtypes`                              |
+| DNSKEY     | 48     | `DNSKEY`          | `flags, protocol, algorithm, key`                  |
+| NSEC3      | 50     | `NSEC3`           | `hashAlgorithm, flags, iterations, salt, nextHashedOwner, rdtypes` |
+| TLSA       | 52     | `TLSA`            | `usage, selector, matchingType, certificate`       |
+| SMIMEA     | 53     | `SMIMEA`          | same wire as TLSA, different code (RFC 8162)       |
+| CDS        | 59     | `CDS`             | same wire as DS, different code (RFC 7344)         |
+| CDNSKEY    | 60     | `CDNSKEY`         | same wire as DNSKEY, different code (RFC 7344)     |
+| OPENPGPKEY | 61     | `OPENPGPKEY`      | `publicKey` (raw OpenPGP transferable key, hex)   |
+| ZONEMD     | 63     | `ZONEMD`          | `serial, scheme, hashAlgorithm, digest` (RFC 8976) |
+| SVCB       | 64     | `SVCB`            | `priority, target, params` (RFC 9460)              |
+| HTTPS      | 65     | `HTTPS`           | same wire as SVCB, different code                  |
+| SPF        | 99     | `SPF`             | `data: string \| string[]`                         |
+| TSIG       | 250    | `TSIG`            | see the [TSIG guide](tsig.md)                      |
+| URI        | 256    | `URI`             | `priority, weight, target` (RFC 7553)              |
+| CAA        | 257    | `CAA`             | `flags, tag, value`                                |
 
 The constants in `PacketTypes` (e.g. `PacketTypes.AAAA`) match the IANA
 codes in the table above.

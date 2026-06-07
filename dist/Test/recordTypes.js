@@ -5,16 +5,23 @@ import { PacketResource } from '../Packet/PacketResource.js';
 import { PacketTypes } from '../Packet/PacketTypes.js';
 import { CDNSKEY } from '../Packet/Types/CDNSKEY.js';
 import { CDS } from '../Packet/Types/CDS.js';
+import { CERT } from '../Packet/Types/CERT.js';
 import { DNAME } from '../Packet/Types/DNAME.js';
 import { DNSKEY } from '../Packet/Types/DNSKEY.js';
 import { DS } from '../Packet/Types/DS.js';
+import { HINFO } from '../Packet/Types/HINFO.js';
 import { HTTPS } from '../Packet/Types/HTTPS.js';
+import { LOC } from '../Packet/Types/LOC.js';
 import { NAPTR } from '../Packet/Types/NAPTR.js';
 import { NSEC } from '../Packet/Types/NSEC.js';
 import { NSEC3 } from '../Packet/Types/NSEC3.js';
+import { OPENPGPKEY } from '../Packet/Types/OPENPGPKEY.js';
+import { SMIMEA } from '../Packet/Types/SMIMEA.js';
 import { SSHFP } from '../Packet/Types/SSHFP.js';
 import { SVCB } from '../Packet/Types/SVCB.js';
 import { TLSA } from '../Packet/Types/TLSA.js';
+import { URI } from '../Packet/Types/URI.js';
+import { ZONEMD } from '../Packet/Types/ZONEMD.js';
 import { test } from './test.js';
 test('NAPTR#encode+decode', () => {
     const packet = new Packet();
@@ -240,5 +247,92 @@ test('TLSA#encode+decode', () => {
     assert.equal(tlsa.selector, 1);
     assert.equal(tlsa.matchingType, 1);
     assert.equal(tlsa.certificate, 'aabbccddee0011223344556677889900');
+});
+test('HINFO#encode+decode', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('host.example.com', new HINFO('x86_64', 'Linux'), PacketClass.IN, 300));
+    const parsed = Packet.parse(packet.toBuffer());
+    const hinfo = parsed.answers[0].packetType;
+    assert.equal(hinfo.cpu, 'x86_64');
+    assert.equal(hinfo.os, 'Linux');
+});
+test('HINFO: RFC 8482 minimal-ANY pattern', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('example.com', new HINFO('RFC8482', ''), PacketClass.IN, 3789));
+    const parsed = Packet.parse(packet.toBuffer());
+    const hinfo = parsed.answers[0].packetType;
+    assert.equal(hinfo.cpu, 'RFC8482');
+    assert.equal(hinfo.os, '');
+});
+test('URI#encode+decode', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('_ftp._tcp.example.com', new URI(10, 1, 'ftp://ftp.example.com/public'), PacketClass.IN, 3600));
+    const parsed = Packet.parse(packet.toBuffer());
+    const uri = parsed.answers[0].packetType;
+    assert.equal(uri.priority, 10);
+    assert.equal(uri.weight, 1);
+    assert.equal(uri.target, 'ftp://ftp.example.com/public');
+});
+test('ZONEMD#encode+decode (SHA-384)', () => {
+    const digest = '0102030405060708090a0b0c0d0e0f1011121314151617181920212223242526272829303132333435363738394041424344454647';
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('example.com', new ZONEMD(2024010101, 1, 1, digest), PacketClass.IN, 86400));
+    const parsed = Packet.parse(packet.toBuffer());
+    const zonemd = parsed.answers[0].packetType;
+    assert.equal(zonemd.serial, 2024010101);
+    assert.equal(zonemd.scheme, 1);
+    assert.equal(zonemd.hashAlgorithm, 1);
+    assert.equal(zonemd.digest, digest);
+});
+test('OPENPGPKEY#encode+decode', () => {
+    const blob = '99020d04abcdef0102030405060708090a0b0c0d0e0f1011';
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('c93f1e400f26708f98cb19d936620da35eec8f72e57f9eec01c1afd6._openpgpkey.example.com', new OPENPGPKEY(blob), PacketClass.IN, 3600));
+    const parsed = Packet.parse(packet.toBuffer());
+    const key = parsed.answers[0].packetType;
+    assert.equal(key.publicKey, blob);
+});
+test('SMIMEA#encode+decode and is a TLSA subclass', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('c93f1e400f26708f98cb19d936620da35eec8f72e57f9eec01c1afd6._smimecert.example.com', new SMIMEA(3, 1, 1, 'aabbccdd00112233'), PacketClass.IN, 3600));
+    const parsed = Packet.parse(packet.toBuffer());
+    const smimea = parsed.answers[0].packetType;
+    assert.equal(smimea.usage, 3);
+    assert.equal(smimea.selector, 1);
+    assert.equal(smimea.matchingType, 1);
+    assert.equal(smimea.certificate, 'aabbccdd00112233');
+    assert.ok(smimea instanceof TLSA, 'SMIMEA is a TLSA');
+});
+test('CERT#encode+decode', () => {
+    const certBytes = 'aabbccddeeff0011223344556677889900';
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('cert.example.com', new CERT(3, 12345, 8, certBytes), PacketClass.IN, 3600));
+    const parsed = Packet.parse(packet.toBuffer());
+    const cert = parsed.answers[0].packetType;
+    assert.equal(cert.certType, 3);
+    assert.equal(cert.keyTag, 12345);
+    assert.equal(cert.algorithm, 8);
+    assert.equal(cert.certificate, certBytes);
+});
+test('LOC#encode+decode (round-trip raw fields)', () => {
+    const packet = new Packet();
+    packet.header.qr = 1;
+    packet.answers.push(new PacketResource('loc.example.com', new LOC(0, 0x12, 0x16, 0x13, 2_295_968_000, 1_404_416_000, 10_000_500), PacketClass.IN, 3600));
+    const parsed = Packet.parse(packet.toBuffer());
+    const loc = parsed.answers[0].packetType;
+    assert.equal(loc.version, 0);
+    assert.equal(loc.size, 0x12);
+    assert.equal(loc.horizPre, 0x16);
+    assert.equal(loc.vertPre, 0x13);
+    assert.equal(loc.latitude, 2_295_968_000);
+    assert.equal(loc.longitude, 1_404_416_000);
+    assert.equal(loc.altitude, 10_000_500);
 });
 //# sourceMappingURL=recordTypes.js.map
