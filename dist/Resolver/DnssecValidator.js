@@ -34,6 +34,12 @@ export class DnssecValidator {
         builtResponse.header.z = validity === 'secure'
             ? builtResponse.header.z | 0b010
             : builtResponse.header.z & ~0b010;
+        if (validity === 'secure') {
+            const nsecCache = this._host.nsecCache?.();
+            if (nsecCache) {
+                nsecCache.storeFromResponse(rawResponse, signingZone);
+            }
+        }
         return builtResponse;
     }
     async _validateResponse(response, signingZone, ctx) {

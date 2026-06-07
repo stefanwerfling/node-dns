@@ -148,6 +148,14 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   and-rename, and mutates the file in place so the already-wired
   `asResolverBackend` closure picks up the new entries
   automatically.
+- **[`/etc/networks` parser](docs/networks-file.md)** —
+  `NetworksFile` reads `networks(5)`-format files and exposes
+  `lookupByName(name)` (case-insensitive + alias-aware) and
+  `lookupByAddress(addr)` (string or 4-byte Buffer). Handles
+  abbreviated addresses (`127` ↦ `127.0.0.0`). Standalone
+  utility — `/etc/networks` is not on the DNS resolution path,
+  but the parser is useful for observability stacks and routing
+  tools that classify IP traffic by symbolic network name.
 - **[Recursive resolver](docs/recursive-resolver.md)** — iterative
   `RecursiveResolver` with `DnsCache` (TTL + RFC 2308 negative caching) and
   bundled `RootHints`. NS chasing, glueless delegation, CNAME chains,
@@ -155,8 +163,11 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   RFC 7766 §5 TCP fallback on TC=1, RFC 6891 EDNS(0) buffer negotiation,
   RFC 9156 QNAME minimization (default on — root sees only the TLD,
   TLD sees only the SLD, full qname only to the auth), opt-in DNSSEC
-  validation. Injectable UDP and TCP transports for testing and
-  forwarding setups.
+  validation. RFC 8198 aggressive NSEC caching when DNSSEC is on —
+  validated NSEC / NSEC3 records are retained per zone and
+  synthesize NXDOMAIN / NODATA replies for cached ranges without
+  hitting the upstream. Injectable UDP and TCP transports for
+  testing and forwarding setups.
 - **[mDNS client + server + probing](docs/mdns.md)** — `MdnsClient`
   for RFC 6762 multicast DNS, `MdnsServer` for the responder side
   (with `announce` / `goodbye` §10 primitives), `MdnsProbe` for §8

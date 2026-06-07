@@ -8,6 +8,7 @@ export { Rrl } from './Lib/Rrl.js';
 export { IpBytes } from './Lib/IpBytes.js';
 export { ResolvConf } from './Lib/ResolvConf.js';
 export { HostsFile, HostsFileWatchHandle } from './Lib/HostsFile.js';
+export { NetworksFile } from './Lib/NetworksFile.js';
 export { Dnssec, DnssecAlgorithm, DnssecDigest } from './Lib/Dnssec.js';
 export { DSO_UNILATERAL_MESSAGE_ID, DsoMessage, DsoTlvType, EncryptionPaddingTlv, KeepaliveTlv, PushTlv, ReconfirmTlv, RetryDelayTlv, SubscribeTlv, UnknownDsoTlv, UnsubscribeTlv } from './Lib/Dso.js';
 export { IP } from './Packet/IP.js';
@@ -90,6 +91,7 @@ export { MdnsClient, MDNS_MULTICAST_IPV4, MDNS_MULTICAST_IPV6, MDNS_PORT, MDNS_Q
 export { ServiceDiscovery } from './Client/ServiceDiscovery.js';
 export { PushClient, PushSubscription } from './Client/PushClient.js';
 export { DnsCache } from './Resolver/DnsCache.js';
+export { NsecCache } from './Resolver/NsecCache.js';
 export { RootHints } from './Resolver/RootHints.js';
 export { RCODE, RecursiveResolver } from './Resolver/RecursiveResolver.js';
 export { TrustAnchors } from './Resolver/TrustAnchor.js';

@@ -5,6 +5,7 @@ import { PacketResource } from '../Packet/PacketResource.js';
 import { PacketTypes } from '../Packet/PacketTypes.js';
 import { DnsCache } from './DnsCache.js';
 import { DnssecValidator, DnssecMode } from './DnssecValidator.js';
+import { NsecCache } from './NsecCache.js';
 import { RootServer } from './RootHints.js';
 import { TrustAnchor } from './TrustAnchor.js';
 export declare const RCODE: {
@@ -40,6 +41,7 @@ export type RecursiveResolverOptions = {
     dnssec?: boolean | DnssecResolverOptions;
     qnameMinimization?: boolean;
     qnameMinimizationLabelsPerStep?: number;
+    aggressiveNsec?: boolean | NsecCache;
 };
 export type ResolveOptions = {
     qclass?: PacketClass;
@@ -68,7 +70,9 @@ export declare class RecursiveResolver {
     protected _dnssecValidator: DnssecValidator | null;
     protected _qnameMinimization: boolean;
     protected _qnameMinimizationLabelsPerStep: number;
+    protected _nsecCache: NsecCache | null;
     constructor(options?: RecursiveResolverOptions);
+    nsecCache(): NsecCache | null;
     cache(): DnsCache;
     resolve(qname: string, qtype: number | PacketTypes, options?: ResolveOptions): Promise<Packet>;
     _resolveOnce(qname: string, qtype: number | PacketTypes, qclass: PacketClass, ctx: ResolveCtx): Promise<Packet>;

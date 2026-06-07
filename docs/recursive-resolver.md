@@ -220,6 +220,69 @@ deployment doesn't model intermediate probes — `qnameMinimization:
 false` reverts to sending the full qname at every hop, the
 pre-RFC-9156 default behaviour.
 
+## Aggressive NSEC caching (RFC 8198)
+
+When DNSSEC validation is enabled, the resolver retains an
+`NsecCache` of validated NSEC / NSEC3 records and synthesizes
+`NXDOMAIN` / `NODATA` replies for cached ranges without going
+back to the upstream. RFC 8198 calls this the "Aggressive Use of
+DNSSEC-Validated Cache" — a signed zone's negative-answer chain
+covers a range of names, and once one name in the range has been
+proven non-existent the rest can be too.
+
+```ts
+new RecursiveResolver({
+  dnssec: true,
+  aggressiveNsec: true,            // default when dnssec is enabled
+});
+```
+
+Pass an `NsecCache` instance to share the store across multiple
+resolvers, or `false` to disable. The cache is fed only with
+records from responses whose DNSSEC validation returned
+`secure`; insecure / bogus responses are not stored.
+
+### Synthesis rules
+
+This implementation ships the conservative subset of §5 that is
+safe by construction:
+
+1. **NODATA via owner-match NSEC** — when an NSEC's owner is
+   exactly the qname and the query type is absent from the NSEC's
+   type bit map, the resolver synthesizes `NOERROR` with empty
+   answers. The CNAME bit in the bitmap blocks synthesis (RFC
+   4035 §5.4 — a CNAME at the owner would shadow other types).
+2. **NXDOMAIN via range cover + wildcard-absence** — when one
+   cached NSEC strictly covers the qname (canonical range) and
+   another cached NSEC at the closest encloser proves no wildcard
+   exists there, the resolver synthesizes `NXDOMAIN`. Without the
+   wildcard-absence NSEC the synthesis is refused — a wildcard
+   match could otherwise resurrect the name.
+3. **NSEC3 NODATA** — same shape on hashed owners; RFC 5155 §6
+   opt-out blocks synthesis for `DS` / `NS` queries (the bitmap
+   is not authoritative for delegations under opt-out).
+
+NSEC3 NXDOMAIN synthesis (three-NSEC3 closest-encloser proof) is
+not yet implemented — the resolver falls through to a normal
+upstream query for those.
+
+### Cache lifetime + memory
+
+Entries inherit the TTL of the NSEC RR they came from. Expired
+entries are pruned lazily on lookup. `maxEntries` caps the cache
+size (default 5000); excess entries FIFO-evict by insertion
+order. `forgetZone(zone)` drops everything for one zone — useful
+on key-rollover detection. `clear()` wipes the cache.
+
+```ts
+const cache = new NsecCache({maxEntries: 20_000});
+const r1 = new RecursiveResolver({dnssec: true, aggressiveNsec: cache});
+const r2 = new RecursiveResolver({dnssec: true, aggressiveNsec: cache});
+// Both resolvers feed and consult the same cache.
+
+resolver.nsecCache(); // → NsecCache | null
+```
+
 ## Truncation (RFC 7766 §5)
 
 When an upstream replies with `TC=1` (response too large for UDP) the

@@ -6,6 +6,7 @@ import { PacketTypes } from '../Packet/PacketTypes.js';
 import { DS } from '../Packet/Types/DS.js';
 import { DnsCache } from './DnsCache.js';
 import { DnssecValidity } from './DnssecChain.js';
+import { NsecCache } from './NsecCache.js';
 import type { ResolveCtx } from './RecursiveResolver.js';
 import { TrustAnchor } from './TrustAnchor.js';
 export type DnssecMode = 'strict' | 'permissive';
@@ -16,6 +17,7 @@ export type DnssecValidatorOptions = {
 };
 export interface DnssecResolverHost {
     cache(): DnsCache;
+    nsecCache?(): NsecCache | null;
     _resolveOnce(qname: string, qtype: number | PacketTypes, qclass: PacketClass, ctx: ResolveCtx): Promise<Packet>;
     _queryServer(serverIp: string, qname: string, qtype: number | PacketTypes, qclass: PacketClass, ctx: ResolveCtx): Promise<Packet>;
     _findClosestNs(qname: string, qclass: PacketClass): {

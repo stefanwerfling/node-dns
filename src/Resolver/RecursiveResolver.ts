@@ -14,6 +14,7 @@ import {DNAME} from '../Packet/Types/DNAME.js';
 import {NS} from '../Packet/Types/NS.js';
 import {DnsCache} from './DnsCache.js';
 import {DnssecValidator, DnssecMode} from './DnssecValidator.js';
+import {NsecCache} from './NsecCache.js';
 import {RootHints, RootServer} from './RootHints.js';
 import {defaultTcpTransport, defaultUdpTransport} from './Transports.js';
 import {TrustAnchor, TrustAnchors} from './TrustAnchor.js';
@@ -218,6 +219,19 @@ export type RecursiveResolverOptions = {
      * strictest privacy setting.
      */
     qnameMinimizationLabelsPerStep?: number;
+
+    /**
+     * Aggressive Use of DNSSEC-Validated Cache (RFC 8198). When
+     * `true` (the default when `dnssec` is enabled), the resolver
+     * holds an `NsecCache` of validated NSEC / NSEC3 records and
+     * synthesizes NXDOMAIN / NODATA replies for cached ranges
+     * without hitting the upstream. No-op when `dnssec` is disabled
+     * — synthesis requires validated proof.
+     *
+     * Pass an `NsecCache` instance to share the cache across
+     * resolvers (rare). Pass `false` to disable.
+     */
+    aggressiveNsec?: boolean | NsecCache;
 };
 
 /**
@@ -380,6 +394,14 @@ export class RecursiveResolver {
     protected _qnameMinimizationLabelsPerStep: number;
 
     /**
+     * Aggressive NSEC cache (RFC 8198). `null` when disabled. Only
+     * fed when DNSSEC validation succeeds, only consulted before
+     * issuing the first iterative query for `(qname, qtype)`.
+     * @protected
+     */
+    protected _nsecCache: NsecCache | null;
+
+    /**
      * @param {RecursiveResolverOptions} options
      */
     public constructor(options: RecursiveResolverOptions = {}) {
@@ -416,7 +438,25 @@ export class RecursiveResolver {
             this._dnssecValidator = null;
         }
 
+        const aggressive = options.aggressiveNsec;
+        if (this._dnssecEnabled && aggressive !== false) {
+            this._nsecCache = aggressive instanceof NsecCache ? aggressive : new NsecCache();
+        } else {
+            this._nsecCache = null;
+        }
+
         RootHints.seedCache(this._cache, options.rootHints);
+    }
+
+    /**
+     * Underlying NSEC cache (RFC 8198). `null` when aggressive NSEC
+     * caching is disabled (DNSSEC off, or `aggressiveNsec: false`).
+     * Exposed so callers can inspect / pre-seed / share across
+     * resolvers.
+     * @return {NsecCache|null}
+     */
+    public nsecCache(): NsecCache | null {
+        return this._nsecCache;
     }
 
     /**
@@ -518,6 +558,24 @@ export class RecursiveResolver {
                     }
 
                     return this._followCnameFromCache(qname, qtype, qclass, ctx, cnameHit.records);
+                }
+            }
+
+            // RFC 8198 — aggressive NSEC cache: cached validated NSEC /
+            // NSEC3 records may already prove non-existence for this
+            // (qname, qtype). Skip for auth-chain sub-resolutions to
+            // avoid synthesizing inside the validator's own queries.
+            if (this._nsecCache !== null && ctx.inAuthChain !== true) {
+                const proof = this._nsecCache.proveNegative(qname, qtype);
+
+                if (proof !== null) {
+                    const rcode = proof.kind === 'nxdomain' ? RCODE.NXDOMAIN : RCODE.NOERROR;
+                    const response = RecursiveResolver._buildResponse(ctx, rcode, [], []);
+                    response.header.aa = 0;
+                    // RFC 4035 §3.2 — AD bit on validated negative.
+                    // eslint-disable-next-line no-bitwise
+                    response.header.z = response.header.z | 0b010;
+                    return response;
                 }
             }
         }

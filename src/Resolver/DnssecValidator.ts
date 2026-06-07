@@ -8,6 +8,7 @@ import {DS} from '../Packet/Types/DS.js';
 import {DnsCache} from './DnsCache.js';
 import {DnssecChain, DnssecValidity} from './DnssecChain.js';
 import {NegativeProof} from './NegativeProof.js';
+import {NsecCache} from './NsecCache.js';
 import {RCODE} from './RecursiveResolver.js';
 import type {ResolveCtx} from './RecursiveResolver.js';
 import {TrustAnchor, TrustAnchors} from './TrustAnchor.js';
@@ -49,6 +50,13 @@ export type DnssecValidatorOptions = {
  */
 export interface DnssecResolverHost {
     cache(): DnsCache;
+
+    /**
+     * RFC 8198 aggressive NSEC cache, or `null` when disabled.
+     * Optional on the interface so non-RecursiveResolver hosts
+     * don't have to implement it.
+     */
+    nsecCache?(): NsecCache | null;
 
     /** @internal */
     _resolveOnce(qname: string, qtype: number | PacketTypes, qclass: PacketClass, ctx: ResolveCtx): Promise<Packet>;
@@ -185,6 +193,18 @@ export class DnssecValidator {
             ? builtResponse.header.z | 0b010
             // eslint-disable-next-line no-bitwise
             : builtResponse.header.z & ~0b010;
+
+        // RFC 8198 — feed the aggressive NSEC cache with the
+        // freshly-validated NSEC / NSEC3 records so subsequent
+        // queries can be answered without an upstream round-trip.
+        if (validity === 'secure') {
+            const nsecCache = this._host.nsecCache?.();
+
+            if (nsecCache) {
+                nsecCache.storeFromResponse(rawResponse, signingZone);
+            }
+        }
+
         return builtResponse;
     }
 

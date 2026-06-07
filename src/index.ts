@@ -13,6 +13,8 @@ export {ResolvConf} from './Lib/ResolvConf.js';
 export type {ParsedResolvConf, ResolvConfOptions} from './Lib/ResolvConf.js';
 export {HostsFile, HostsFileWatchHandle} from './Lib/HostsFile.js';
 export type {HostsEntry, HostsLookupResult, HostsFileOptions, HostsFileWatchOptions} from './Lib/HostsFile.js';
+export {NetworksFile} from './Lib/NetworksFile.js';
+export type {NetworksEntry, NetworksFileOptions} from './Lib/NetworksFile.js';
 export {Dnssec, DnssecAlgorithm, DnssecDigest} from './Lib/Dnssec.js';
 export {
     DSO_UNILATERAL_MESSAGE_ID,
@@ -195,6 +197,8 @@ export type {PushClientOptions} from './Client/PushClient.js';
 // Resolver
 export {DnsCache} from './Resolver/DnsCache.js';
 export type {DnsCacheEntry, DnsCacheOptions, DnsCacheRcode} from './Resolver/DnsCache.js';
+export {NsecCache} from './Resolver/NsecCache.js';
+export type {CachedNsec, CachedNsec3, Nsec3Params, NsecCacheOptions, SynthesizedNegative} from './Resolver/NsecCache.js';
 export {RootHints} from './Resolver/RootHints.js';
 export type {RootServer, RootHintRecords} from './Resolver/RootHints.js';
 export {RCODE, RecursiveResolver} from './Resolver/RecursiveResolver.js';

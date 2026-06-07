@@ -10,6 +10,7 @@ import { DNAME } from '../Packet/Types/DNAME.js';
 import { NS } from '../Packet/Types/NS.js';
 import { DnsCache } from './DnsCache.js';
 import { DnssecValidator } from './DnssecValidator.js';
+import { NsecCache } from './NsecCache.js';
 import { RootHints } from './RootHints.js';
 import { defaultTcpTransport, defaultUdpTransport } from './Transports.js';
 import { TrustAnchors } from './TrustAnchor.js';
@@ -42,6 +43,7 @@ export class RecursiveResolver {
     _dnssecValidator;
     _qnameMinimization;
     _qnameMinimizationLabelsPerStep;
+    _nsecCache;
     constructor(options = {}) {
         this._cache = options.cache ?? new DnsCache();
         this._transport = options.transport ?? defaultUdpTransport;
@@ -73,7 +75,17 @@ export class RecursiveResolver {
         else {
             this._dnssecValidator = null;
         }
+        const aggressive = options.aggressiveNsec;
+        if (this._dnssecEnabled && aggressive !== false) {
+            this._nsecCache = aggressive instanceof NsecCache ? aggressive : new NsecCache();
+        }
+        else {
+            this._nsecCache = null;
+        }
         RootHints.seedCache(this._cache, options.rootHints);
+    }
+    nsecCache() {
+        return this._nsecCache;
     }
     cache() {
         return this._cache;
@@ -117,6 +129,16 @@ export class RecursiveResolver {
                         this._scheduleRefresh(qname, PacketTypes.CNAME, qclass);
                     }
                     return this._followCnameFromCache(qname, qtype, qclass, ctx, cnameHit.records);
+                }
+            }
+            if (this._nsecCache !== null && ctx.inAuthChain !== true) {
+                const proof = this._nsecCache.proveNegative(qname, qtype);
+                if (proof !== null) {
+                    const rcode = proof.kind === 'nxdomain' ? RCODE.NXDOMAIN : RCODE.NOERROR;
+                    const response = RecursiveResolver._buildResponse(ctx, rcode, [], []);
+                    response.header.aa = 0;
+                    response.header.z = response.header.z | 0b010;
+                    return response;
                 }
             }
         }
