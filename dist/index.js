@@ -68,6 +68,7 @@ export { DnsServer } from './Server/DnsServer.js';
 export { TCPServer } from './Server/TCPServer.js';
 export { TLSServer } from './Server/TLSServer.js';
 export { UDPServer } from './Server/UDPServer.js';
+export { CookieGuard, BADCOOKIE_RCODE } from './Server/CookieGuard.js';
 export { DohServer } from './Server/DohServer.js';
 export { MdnsServer } from './Server/MdnsServer.js';
 export { MdnsProbe } from './Server/MdnsProbe.js';

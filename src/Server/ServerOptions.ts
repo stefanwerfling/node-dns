@@ -124,6 +124,17 @@ export type ServerTcpOptions = {
      * DNS data is read). Typical use: PROXY protocol header stripping.
      */
     preConnection?: ServerPreConnection<tcp.Socket>;
+
+    /**
+     * Optional DNS Cookie validation (RFC 7873 + RFC 9018). On TCP the
+     * cookie is mostly an identity / policy mechanism: a client that
+     * fell back from UDP to TCP keeps its existing cookie pair, and a
+     * deployment with `mode: 'strict'` rejects cookieless connections
+     * consistently across both transports. The handshake already
+     * defeats off-path spoofing, so cookies add no extra anti-spoofing
+     * value on top.
+     */
+    cookies?: ServerCookieOptions;
 };
 
 /**
@@ -155,6 +166,11 @@ export type ServerTlsOptions = {
      * Per-connection processor. Same semantics as `tcp.preConnection`.
      */
     preConnection?: ServerPreConnection<tls.TLSSocket>;
+
+    /**
+     * Optional DNS Cookie validation. Same semantics as `tcp.cookies`.
+     */
+    cookies?: ServerCookieOptions;
 };
 
 /**

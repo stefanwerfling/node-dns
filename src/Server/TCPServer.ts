@@ -2,6 +2,7 @@ import {Buffer} from 'buffer';
 import tcp from 'net';
 import {SocketReader} from '../Lib/SocketReader.js';
 import {Packet} from '../Packet/Packet.js';
+import {CookieGuard, CookieRejectionReason} from './CookieGuard.js';
 import {ServerOptions} from './ServerOptions.js';
 import {ServerPreConnection} from './ServerPreConnection.js';
 import {ServerPreRequest} from './ServerPreRequest.js';
@@ -36,6 +37,7 @@ export type TCPServerEvents = {
     requestError: (error: Error) => void;
     listening: () => void;
     close: () => void;
+    cookieRejected: (msg: Packet, client: tcp.Socket, reason: CookieRejectionReason) => void;
 };
 
 /**
@@ -68,6 +70,12 @@ export class TCPServer {
     protected _preConnection?: ServerPreConnection<tcp.Socket>;
 
     /**
+     * Optional DNS Cookie validator (RFC 7873).
+     * @protected
+     */
+    protected _cookies?: CookieGuard;
+
+    /**
      * Constructor
      * @param {ServerOptions|null} options
      */
@@ -98,6 +106,10 @@ export class TCPServer {
 
             if (opt.preConnection) {
                 this._preConnection = opt.preConnection;
+            }
+
+            if (opt.cookies) {
+                this._cookies = new CookieGuard(opt.cookies);
             }
         }
     }
@@ -183,6 +195,34 @@ export class TCPServer {
 
             const message = Packet.parse(data);
 
+            if (this._cookies) {
+                const clientAddress = emitClient.remoteAddress ?? client.remoteAddress ?? '';
+                const decision = this._cookies.evaluate(message, clientAddress);
+
+                if (decision.action === 'badcookie') {
+                    this._response(client, this._cookies.buildBadCookieResponse(
+                        message,
+                        decision.clientCookie,
+                        decision.freshServerCookie
+                    ));
+                    this._tcpServer.emit('cookieRejected', message, emitClient, decision.reason);
+                    return;
+                }
+
+                if (decision.action === 'refused') {
+                    this._response(client, this._cookies.buildRefusedResponse(message));
+                    this._tcpServer.emit('cookieRejected', message, emitClient, decision.reason);
+                    return;
+                }
+
+                const send = decision.freshServerCookie !== null && decision.clientCookie !== null
+                    ? this._cookieAwareSend(client, decision.clientCookie, decision.freshServerCookie)
+                    : this._response.bind(this, client);
+
+                this._tcpServer.emit('request', message, send, emitClient, data);
+                return;
+            }
+
             // Response writes go to the real socket (transport peer), while the
             // emitted client reference may be overridden by the pre-request processor.
             // The 4th arg is the raw post-preRequest buffer for TSIG verification.
@@ -191,6 +231,35 @@ export class TCPServer {
             this._tcpServer.emit('requestError', e instanceof Error ? e : new Error(String(e)));
             client.destroy();
         }
+    }
+
+    /**
+     * Wrap `_response` so that any Packet (or single-packet array)
+     * carries the refreshed server cookie. Buffer responses (TSIG-
+     * signed, pre-encoded) and multi-message arrays containing Buffers
+     * pass through verbatim — re-encoding would invalidate the MAC,
+     * and AXFR-style streams have their own framing concerns.
+     *
+     * @param {tcp.Socket} client
+     * @param {Buffer} clientCookie
+     * @param {Buffer} freshServerCookie
+     * @return {(msg: TCPSendable) => void}
+     * @protected
+     */
+    protected _cookieAwareSend(
+        client: tcp.Socket,
+        clientCookie: Buffer,
+        freshServerCookie: Buffer
+    ): (msg: TCPSendable) => void {
+        return (msg: TCPSendable): void => {
+            if (msg instanceof Packet) {
+                this._cookies!.attachOrReplaceCookieOpt(msg, clientCookie, freshServerCookie);
+            } else if (Array.isArray(msg) && msg.length === 1 && msg[0] instanceof Packet) {
+                this._cookies!.attachOrReplaceCookieOpt(msg[0], clientCookie, freshServerCookie);
+            }
+
+            this._response(client, msg);
+        };
     }
 
     /**

@@ -1,5 +1,6 @@
 import tcp from 'net';
 import tls from 'tls';
+import {CookieGuard} from './CookieGuard.js';
 import {ServerOptions} from './ServerOptions.js';
 import {ServerPreConnection} from './ServerPreConnection.js';
 import {ServerPreRequest} from './ServerPreRequest.js';
@@ -41,6 +42,10 @@ export class TLSServer extends TCPServer {
 
             if (opt.preConnection) {
                 this._preConnection = opt.preConnection as ServerPreConnection<tcp.Socket>;
+            }
+
+            if (opt.cookies) {
+                this._cookies = new CookieGuard(opt.cookies);
             }
         }
     }

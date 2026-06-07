@@ -86,7 +86,8 @@ export type { DnsServerAddresses, DnsServerListenOptions } from './Server/DnsSer
 export { TCPServerEvents, TCPServer } from './Server/TCPServer.js';
 export { TLSServer } from './Server/TLSServer.js';
 export { UDPServer } from './Server/UDPServer.js';
-export type { CookieRejectionReason } from './Server/UDPServer.js';
+export { CookieGuard, BADCOOKIE_RCODE } from './Server/CookieGuard.js';
+export type { CookieRejectionReason, CookieDecision } from './Server/CookieGuard.js';
 export { DohServer } from './Server/DohServer.js';
 export { MdnsServer } from './Server/MdnsServer.js';
 export type { MdnsServerOptions, MdnsRequestListener, MdnsSendable, MdnsResponseTarget } from './Server/MdnsServer.js';

@@ -109,16 +109,20 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   on authoritative servers; configurable rate, prefix granularity, and
   TC=1 slip ratio.
 - **[DNS Cookies](docs/server-cookies.md)** — RFC 7873 + RFC 9018
-  anti-spoofing layer on both ends. **Server**: opt-in via
-  `udp.cookies: {secret, mode?, maxAgeSeconds?}` on `UDPServer`;
-  HMAC-keyed cookies bound to the client cookie + source IP, off-path
-  spoofers can't form a valid follow-up query. BADCOOKIE for
-  client-only / invalid cookies, optional strict mode that REFUSES
-  cookieless queries. **Client**: `UDPClient.request({cookies: true})`
-  attaches an EDNS cookie per upstream, learns the server cookie out
-  of each response, and retries once on BADCOOKIE. Pass a
-  `ClientCookieJar` instance to share cookies across multiple
-  resolver factories.
+  anti-spoofing + cross-transport-identity layer on both ends.
+  **Server**: `udp.cookies` / `tcp.cookies` / `tls.cookies:
+  {secret, mode?, maxAgeSeconds?}` on `UDPServer`, `TCPServer`,
+  `TLSServer` (and `DnsServer`) — all transports delegate to a
+  shared `CookieGuard`. HMAC-keyed cookies bound to client cookie
+  + source IP, off-path spoofers can't form a valid follow-up
+  query on UDP; on TCP/TLS the value is cross-transport identity
+  and uniform `strict`-mode policy. BADCOOKIE for client-only /
+  invalid cookies, optional strict mode that REFUSES cookieless
+  queries. **Client**: `UDPClient` and `TCPClient` (incl. DoT)
+  both accept `cookies: true | ClientCookieJar` — attach per
+  upstream, learn from response, retry once on BADCOOKIE. A
+  shared jar across UDP+TCP for the same upstream reuses the same
+  cookie pair (cross-transport identity per RFC 7873 §5.1).
 - **[DNSSEC validation](docs/dnssec.md)** — `Dnssec.verifyRrsig`,
   `Dnssec.verifyDs`, `Dnssec.computeKeyTag`, `Dnssec.computeDsDigest`. RFC
   4034/4035 algorithms 8/10/13/14/15, DS digest types 1/2/4. Stateless —

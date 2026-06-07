@@ -1,6 +1,7 @@
 import { Buffer } from 'buffer';
 import tcp from 'net';
 import { Packet } from '../Packet/Packet.js';
+import { CookieGuard, CookieRejectionReason } from './CookieGuard.js';
 import { ServerOptions } from './ServerOptions.js';
 import { ServerPreConnection } from './ServerPreConnection.js';
 import { ServerPreRequest } from './ServerPreRequest.js';
@@ -10,12 +11,14 @@ export type TCPServerEvents = {
     requestError: (error: Error) => void;
     listening: () => void;
     close: () => void;
+    cookieRejected: (msg: Packet, client: tcp.Socket, reason: CookieRejectionReason) => void;
 };
 export declare class TCPServer {
     protected _tcpServer: tcp.Server;
     protected _options: ServerOptions | null;
     protected _preRequest?: ServerPreRequest<tcp.Socket>;
     protected _preConnection?: ServerPreConnection<tcp.Socket>;
+    protected _cookies?: CookieGuard;
     constructor(options?: ServerOptions | null);
     protected _loadHooks(): void;
     protected _createInternalServer(listener: (socket: tcp.Socket) => void): tcp.Server;
@@ -24,6 +27,7 @@ export declare class TCPServer {
     on<K extends keyof TCPServerEvents>(event: K, listener: TCPServerEvents[K]): this;
     once<K extends keyof TCPServerEvents>(event: K, listener: TCPServerEvents[K]): this;
     protected _handle(client: tcp.Socket): Promise<void>;
+    protected _cookieAwareSend(client: tcp.Socket, clientCookie: Buffer, freshServerCookie: Buffer): (msg: TCPSendable) => void;
     protected _response(client: tcp.Socket, message: TCPSendable): void;
     address(): tcp.AddressInfo | string | null;
 }

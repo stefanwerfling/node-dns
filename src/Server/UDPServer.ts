@@ -1,34 +1,15 @@
 import dgram from 'dgram';
 import {Buffer} from 'buffer';
 import {AddressInfo} from 'net';
-import {IpBytes} from '../Lib/IpBytes.js';
 import {Rrl, RrlDecision} from '../Lib/Rrl.js';
 import {Packet} from '../Packet/Packet.js';
 import {PacketQuestion} from '../Packet/PacketQuestion.js';
-import {PacketResource} from '../Packet/PacketResource.js';
 import {PacketTypes} from '../Packet/PacketTypes.js';
-import {EDNS} from '../Packet/Types/EDNS.js';
-import {EdnsCookie} from '../Packet/Types/EdnsCookie.js';
-import {ServerCookieOptions, ServerOptions} from './ServerOptions.js';
+import {CookieGuard, CookieRejectionReason} from './CookieGuard.js';
+import {ServerOptions} from './ServerOptions.js';
 import {ServerPreRequest} from './ServerPreRequest.js';
 
-/**
- * Extended RCODE 23 (RFC 7873 §5.4) — "I see your cookie attempt but
- * cannot accept it; here is a fresh server cookie, retry". 4 bits of
- * the rcode live in the DNS header (the low nibble: 7); the upper 8
- * bits live in the OPT RR's TTL EXTENDED-RCODE byte (1).
- */
-const BADCOOKIE_RCODE: number = 23;
-
-/**
- * Reason a query was rejected by the cookie validator. Emitted on
- * `'cookieRejected'` for observability — typically wired to a metric
- * counter so operators can detect spoofing pressure.
- */
-export type CookieRejectionReason =
-    | 'no-server-cookie'
-    | 'invalid-cookie'
-    | 'no-cookie-strict';
+export type {CookieRejectionReason} from './CookieGuard.js';
 
 /**
  * Reply payload accepted by the UDP `send` callback. UDP cannot stream
@@ -78,10 +59,10 @@ export class UDPServer {
     protected _rrl?: Rrl;
 
     /**
-     * Optional DNS Cookie validation config (RFC 7873).
+     * Optional DNS Cookie validator (RFC 7873).
      * @protected
      */
-    protected _cookies?: Required<Omit<ServerCookieOptions, 'secret'>> & {secret: Buffer};
+    protected _cookies?: CookieGuard;
 
     /**
      * constructor
@@ -104,12 +85,7 @@ export class UDPServer {
             }
 
             if (options.udp.cookies) {
-                this._cookies = {
-                    secret: options.udp.cookies.secret,
-                    mode: options.udp.cookies.mode ?? 'lenient',
-                    maxAgeSeconds: options.udp.cookies.maxAgeSeconds ?? 3600,
-                    udpPayloadSize: options.udp.cookies.udpPayloadSize ?? 1232
-                };
+                this._cookies = new CookieGuard(options.udp.cookies);
             }
         }
 
@@ -224,16 +200,20 @@ export class UDPServer {
             }
 
             if (this._cookies) {
-                const decision = this._evaluateCookie(message, emitRinfo.address);
+                const decision = this._cookies.evaluate(message, emitRinfo.address);
 
                 if (decision.action === 'badcookie') {
-                    await this._sendCookieReject(rinfo, message, BADCOOKIE_RCODE, decision.clientCookie, decision.freshServerCookie);
+                    await this._response(rinfo, this._cookies.buildBadCookieResponse(
+                        message,
+                        decision.clientCookie,
+                        decision.freshServerCookie
+                    ));
                     this._socket.emit('cookieRejected', message, emitRinfo, decision.reason);
                     return;
                 }
 
                 if (decision.action === 'refused') {
-                    await this._sendCookieReject(rinfo, message, 5 /* REFUSED */, null, null);
+                    await this._response(rinfo, this._cookies.buildRefusedResponse(message));
                     this._socket.emit('cookieRejected', message, emitRinfo, decision.reason);
                     return;
                 }
@@ -256,134 +236,6 @@ export class UDPServer {
         } catch (e) {
             this._socket.emit('requestError', e instanceof Error ? e : new Error(String(e)));
         }
-    }
-
-    /**
-     * Decide what to do with an incoming query under the configured
-     * cookie policy. Returns an action discriminator + the cookie
-     * material the calling code needs to act on it.
-     *
-     * @param {Packet} message
-     * @param {string} clientAddress
-     * @return {{action: 'allow'|'badcookie'|'refused'; reason?: CookieRejectionReason; clientCookie: Buffer | null; freshServerCookie: Buffer | null;}}
-     * @protected
-     */
-    protected _evaluateCookie(
-        message: Packet,
-        clientAddress: string
-    ): {
-        action: 'allow' | 'badcookie' | 'refused';
-        reason?: CookieRejectionReason;
-        clientCookie: Buffer | null;
-        freshServerCookie: Buffer | null;
-    } {
-        const incoming = UDPServer._findCookieOption(message);
-
-        if (incoming === null) {
-            if (this._cookies!.mode === 'strict') {
-                return {action: 'refused', reason: 'no-cookie-strict', clientCookie: null, freshServerCookie: null};
-            }
-
-            return {action: 'allow', clientCookie: null, freshServerCookie: null};
-        }
-
-        let clientIpBytes: Buffer;
-
-        try {
-            clientIpBytes = IpBytes.parse(clientAddress);
-        } catch {
-            // Malformed source address — drop the query rather than
-            // baking a degenerate IP into a cookie that we can't
-            // verify next time.
-            return {action: 'refused', reason: 'invalid-cookie', clientCookie: null, freshServerCookie: null};
-        }
-
-        const fresh = EdnsCookie.computeServerCookie(
-            incoming.clientCookie,
-            clientIpBytes,
-            this._cookies!.secret
-        );
-
-        if (incoming.serverCookie === null) {
-            // Client has never seen us — issue a server cookie + reject
-            // this query. RFC 7873 §5.2.3: the client retries with the
-            // returned server cookie.
-            return {
-                action: 'badcookie',
-                reason: 'no-server-cookie',
-                clientCookie: incoming.clientCookie,
-                freshServerCookie: fresh
-            };
-        }
-
-        const valid = EdnsCookie.verifyServerCookie(
-            incoming.serverCookie,
-            incoming.clientCookie,
-            clientIpBytes,
-            this._cookies!.secret,
-            this._cookies!.maxAgeSeconds > 0 ? {maxAgeSeconds: this._cookies!.maxAgeSeconds} : {}
-        );
-
-        if (!valid) {
-            return {
-                action: 'badcookie',
-                reason: 'invalid-cookie',
-                clientCookie: incoming.clientCookie,
-                freshServerCookie: fresh
-            };
-        }
-
-        return {
-            action: 'allow',
-            clientCookie: incoming.clientCookie,
-            freshServerCookie: fresh
-        };
-    }
-
-    /**
-     * Build + send a short DNS response that carries an EDNS cookie
-     * for the client. Used for both BADCOOKIE (RFC 7873) and
-     * strict-mode REFUSED.
-     *
-     * @param {dgram.RemoteInfo} rinfo
-     * @param {Packet} request
-     * @param {number} rcode 5 (REFUSED) or 23 (BADCOOKIE)
-     * @param {Buffer|null} clientCookie
-     * @param {Buffer|null} freshServerCookie
-     * @return {Promise<Buffer|void>}
-     * @protected
-     */
-    protected _sendCookieReject(
-        rinfo: dgram.RemoteInfo,
-        request: Packet,
-        rcode: number,
-        clientCookie: Buffer | null,
-        freshServerCookie: Buffer | null
-    ): Promise<Buffer|void> {
-        const response = new Packet();
-        response.header.id = request.header.id;
-        response.header.qr = 1;
-        response.header.opcode = request.header.opcode;
-        response.header.rd = request.header.rd;
-        response.questions = request.questions.map((q) => new PacketQuestion(q.name, q.type, q.class));
-
-        if (rcode === BADCOOKIE_RCODE) {
-            // Low 4 bits → header.rcode; upper 8 bits → OPT TTL.
-            response.header.rcode = rcode & 0x0F;
-            response.additionals.push(this._buildCookieOpt(
-                clientCookie,
-                freshServerCookie,
-                (rcode >> 4) << 24
-            ));
-        } else {
-            response.header.rcode = rcode;
-
-            if (clientCookie !== null && freshServerCookie !== null) {
-                response.additionals.push(this._buildCookieOpt(clientCookie, freshServerCookie, 0));
-            }
-        }
-
-        return this._response(rinfo, response);
     }
 
     /**
@@ -413,90 +265,11 @@ export class UDPServer {
             }
 
             if (payload instanceof Packet) {
-                this._attachOrReplaceCookieOpt(payload, clientCookie, freshServerCookie);
+                this._cookies!.attachOrReplaceCookieOpt(payload, clientCookie, freshServerCookie);
             }
 
             return this._response(rinfo, payload);
         };
-    }
-
-    /**
-     * Build an OPT pseudo-RR carrying a single COOKIE option. `extTtl`
-     * lets the caller stamp an extended RCODE into the TTL (BADCOOKIE
-     * = 23 → upper 8 bits = 1).
-     *
-     * @param {Buffer|null} clientCookie
-     * @param {Buffer|null} serverCookie
-     * @param {number} extTtl
-     * @return {PacketResource}
-     * @protected
-     */
-    protected _buildCookieOpt(
-        clientCookie: Buffer | null,
-        serverCookie: Buffer | null,
-        extTtl: number
-    ): PacketResource {
-        const rdata = clientCookie !== null
-            ? [new EdnsCookie(clientCookie, serverCookie ?? undefined)]
-            : [];
-
-        return new PacketResource(
-            '',
-            new EDNS(rdata),
-            this._cookies!.udpPayloadSize,
-            extTtl
-        );
-    }
-
-    /**
-     * Mutate `response` so its OPT RR carries the given cookie option.
-     * Replaces any existing cookie option to avoid drift; preserves
-     * other OPT options (ECS, NSID, padding, ...) untouched.
-     *
-     * @param {Packet} response
-     * @param {Buffer} clientCookie
-     * @param {Buffer} serverCookie
-     * @protected
-     */
-    protected _attachOrReplaceCookieOpt(
-        response: Packet,
-        clientCookie: Buffer,
-        serverCookie: Buffer
-    ): void {
-        const existingIdx = response.additionals.findIndex((r) => r.packetType.type === PacketTypes.EDNS);
-
-        if (existingIdx === -1) {
-            response.additionals.push(this._buildCookieOpt(clientCookie, serverCookie, 0));
-            return;
-        }
-
-        const opt = response.additionals[existingIdx].packetType as EDNS;
-        const otherOptions = opt.rdata.filter((o) => !(o instanceof EdnsCookie));
-        opt.rdata = [...otherOptions, new EdnsCookie(clientCookie, serverCookie)];
-    }
-
-    /**
-     * Scan an incoming message's additionals for an EDNS OPT RR
-     * carrying a COOKIE option. Returns the cookie option or `null`.
-     *
-     * @param {Packet} message
-     * @return {EdnsCookie|null}
-     * @protected
-     */
-    protected static _findCookieOption(message: Packet): EdnsCookie | null {
-        for (const r of message.additionals) {
-            if (r.packetType.type !== PacketTypes.EDNS) {
-                continue;
-            }
-
-            for (const opt of (r.packetType as EDNS).rdata) {
-                if (opt instanceof EdnsCookie) {
-                    return opt;
-                }
-            }
-        }
-
-        return null;
     }
 
     /**

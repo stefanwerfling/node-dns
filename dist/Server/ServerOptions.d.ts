@@ -25,6 +25,7 @@ export type ServerUdpOptions = {
 export type ServerTcpOptions = {
     preRequest?: ServerPreRequest<tcp.Socket>;
     preConnection?: ServerPreConnection<tcp.Socket>;
+    cookies?: ServerCookieOptions;
 };
 export type ServerDohOptions = {
     ssl?: boolean;
@@ -36,6 +37,7 @@ export type ServerTlsOptions = {
     options: tls.TlsOptions;
     preRequest?: ServerPreRequest<tls.TLSSocket>;
     preConnection?: ServerPreConnection<tls.TLSSocket>;
+    cookies?: ServerCookieOptions;
 };
 export type ServerOptions = {
     udp?: boolean | ServerUdpOptions;

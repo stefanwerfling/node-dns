@@ -2,11 +2,13 @@ import { Buffer } from 'buffer';
 import tcp from 'net';
 import { SocketReader } from '../Lib/SocketReader.js';
 import { Packet } from '../Packet/Packet.js';
+import { CookieGuard } from './CookieGuard.js';
 export class TCPServer {
     _tcpServer;
     _options = null;
     _preRequest;
     _preConnection;
+    _cookies;
     constructor(options = null) {
         this._options = options;
         this._loadHooks();
@@ -24,6 +26,9 @@ export class TCPServer {
             }
             if (opt.preConnection) {
                 this._preConnection = opt.preConnection;
+            }
+            if (opt.cookies) {
+                this._cookies = new CookieGuard(opt.cookies);
             }
         }
     }
@@ -65,12 +70,42 @@ export class TCPServer {
                 }
             }
             const message = Packet.parse(data);
+            if (this._cookies) {
+                const clientAddress = emitClient.remoteAddress ?? client.remoteAddress ?? '';
+                const decision = this._cookies.evaluate(message, clientAddress);
+                if (decision.action === 'badcookie') {
+                    this._response(client, this._cookies.buildBadCookieResponse(message, decision.clientCookie, decision.freshServerCookie));
+                    this._tcpServer.emit('cookieRejected', message, emitClient, decision.reason);
+                    return;
+                }
+                if (decision.action === 'refused') {
+                    this._response(client, this._cookies.buildRefusedResponse(message));
+                    this._tcpServer.emit('cookieRejected', message, emitClient, decision.reason);
+                    return;
+                }
+                const send = decision.freshServerCookie !== null && decision.clientCookie !== null
+                    ? this._cookieAwareSend(client, decision.clientCookie, decision.freshServerCookie)
+                    : this._response.bind(this, client);
+                this._tcpServer.emit('request', message, send, emitClient, data);
+                return;
+            }
             this._tcpServer.emit('request', message, this._response.bind(this, client), emitClient, data);
         }
         catch (e) {
             this._tcpServer.emit('requestError', e instanceof Error ? e : new Error(String(e)));
             client.destroy();
         }
+    }
+    _cookieAwareSend(client, clientCookie, freshServerCookie) {
+        return (msg) => {
+            if (msg instanceof Packet) {
+                this._cookies.attachOrReplaceCookieOpt(msg, clientCookie, freshServerCookie);
+            }
+            else if (Array.isArray(msg) && msg.length === 1 && msg[0] instanceof Packet) {
+                this._cookies.attachOrReplaceCookieOpt(msg[0], clientCookie, freshServerCookie);
+            }
+            this._response(client, msg);
+        };
     }
     _response(client, message) {
         const messages = Array.isArray(message) ? message : [message];

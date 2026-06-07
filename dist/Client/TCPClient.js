@@ -6,16 +6,20 @@ import { Packet } from '../Packet/Packet.js';
 import { PacketQuestion } from '../Packet/PacketQuestion.js';
 import { EDNS, EdnsECS } from '../Packet/Types/EDNS.js';
 import { AClient } from './AClient.js';
+import { ClientCookieJar } from './ClientCookieJar.js';
 import { ClientOptionsProtocol } from './ClientOptions.js';
 export class TCPClient extends AClient {
     static makeQuery(name, type, cls, clientIp = null, recursive = true) {
+        return TCPClient.makeQueryPacket(name, type, cls, clientIp, recursive).toBuffer();
+    }
+    static makeQueryPacket(name, type, cls, clientIp = null, recursive = true) {
         const packet = new Packet();
         packet.header.rd = recursive ? 1 : 0;
         if (clientIp !== null) {
             packet.additionals.push(EDNS.createResource([new EdnsECS(clientIp)]));
         }
         packet.questions.push(new PacketQuestion(name, type, cls));
-        return packet.toBuffer();
+        return packet;
     }
     static getClient(protocol, host, port) {
         switch (protocol) {
@@ -52,6 +56,40 @@ export class TCPClient extends AClient {
         if (option.port !== undefined) {
             port = option.port;
         }
+        const cookieJar = option.cookies === true
+            ? new ClientCookieJar()
+            : (option.cookies instanceof ClientCookieJar ? option.cookies : null);
+        const [host] = option.dns.split(':');
+        const poolTarget = {
+            protocol: protocol === ClientOptionsProtocol.tls ? 'tls' : 'tcp',
+            host: host,
+            port: port,
+            tlsOptions: option.poolDefaults?.tlsOptions
+        };
+        const sendOnce = async (query) => {
+            if (cookieJar !== null) {
+                cookieJar.attachTo(query, host, port);
+            }
+            const message = query.toBuffer();
+            let data;
+            if (option.pool !== undefined) {
+                data = await option.pool.send(poolTarget, message);
+            }
+            else {
+                const client = TCPClient.getClient(protocol, host, port);
+                TCPClient.sendQuery(client, message);
+                data = await SocketReader.readStream(client);
+                client.end();
+            }
+            if (!data.length) {
+                throw new Error('Empty response');
+            }
+            const response = Packet.parse(data);
+            if (cookieJar !== null) {
+                cookieJar.learnFromResponse(response, host, port);
+            }
+            return response;
+        };
         return async (name, type, cls, options) => {
             let clientIp = null;
             let recursive = true;
@@ -64,28 +102,12 @@ export class TCPClient extends AClient {
                 }
             }
             const sentName = option.use0x20 === true ? Random0x20.scramble(name) : name;
-            const message = TCPClient.makeQuery(sentName, type, cls, clientIp, recursive);
-            const [host] = option.dns.split(':');
-            let data;
-            if (option.pool !== undefined) {
-                const target = {
-                    protocol: protocol === ClientOptionsProtocol.tls ? 'tls' : 'tcp',
-                    host: host,
-                    port: port,
-                    tlsOptions: option.poolDefaults?.tlsOptions
-                };
-                data = await option.pool.send(target, message);
+            const query = TCPClient.makeQueryPacket(sentName, type, cls, clientIp, recursive);
+            let response = await sendOnce(query);
+            if (cookieJar !== null && ClientCookieJar.isBadCookie(response)) {
+                const retryQuery = TCPClient.makeQueryPacket(sentName, type, cls, clientIp, recursive);
+                response = await sendOnce(retryQuery);
             }
-            else {
-                const client = TCPClient.getClient(protocol, host, port);
-                TCPClient.sendQuery(client, message);
-                data = await SocketReader.readStream(client);
-                client.end();
-            }
-            if (!data.length) {
-                throw new Error('Empty response');
-            }
-            const response = Packet.parse(data);
             if (option.use0x20 === true && response.questions.length > 0) {
                 if (!Random0x20.matches(sentName, response.questions[0].name)) {
                     throw new Error(`0x20 mismatch: sent "${sentName}", got "${response.questions[0].name}" — response may be spoofed`);
