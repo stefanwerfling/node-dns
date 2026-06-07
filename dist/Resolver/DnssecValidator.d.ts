@@ -12,6 +12,7 @@ import { TrustAnchor } from './TrustAnchor.js';
 export type DnssecMode = 'strict' | 'permissive';
 export type DnssecValidatorOptions = {
     trustAnchors: ReadonlyArray<TrustAnchor>;
+    trustAnchorProvider?: (zone: string) => ReadonlyArray<TrustAnchor>;
     mode: DnssecMode;
     verifyOptions: DnssecVerifyOptions;
 };
@@ -39,10 +40,12 @@ type ZoneSecurity = {
 export declare class DnssecValidator {
     protected _host: DnssecResolverHost;
     protected _trustAnchors: ReadonlyArray<TrustAnchor>;
+    protected _trustAnchorProvider?: (zone: string) => ReadonlyArray<TrustAnchor>;
     protected _mode: DnssecMode;
     protected _verifyOptions: DnssecVerifyOptions;
     protected _zoneSecurity: Map<string, ZoneSecurity>;
     constructor(host: DnssecResolverHost, options: DnssecValidatorOptions);
+    protected _anchorsFor(zone: string): ReadonlyArray<TrustAnchor>;
     finalize(builtResponse: Packet, rawResponse: Packet, signingZone: string, ctx: ResolveCtx): Promise<Packet>;
     protected _validateResponse(response: Packet, signingZone: string, ctx: ResolveCtx): Promise<DnssecValidity>;
     protected _authenticateZone(zone: string, ctx: ResolveCtx): Promise<ZoneSecurity>;

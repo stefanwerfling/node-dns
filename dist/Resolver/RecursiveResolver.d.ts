@@ -8,6 +8,7 @@ import { DnssecValidator, DnssecMode } from './DnssecValidator.js';
 import { NsecCache } from './NsecCache.js';
 import { RootServer } from './RootHints.js';
 import { TrustAnchor } from './TrustAnchor.js';
+import { TrustAnchorManager } from './TrustAnchorManager.js';
 export declare const RCODE: {
     readonly NOERROR: 0;
     readonly FORMERR: 1;
@@ -20,6 +21,7 @@ export type RecursiveResolverTransport = (serverIp: string, port: number, query:
 export type { DnssecMode };
 export type DnssecResolverOptions = {
     trustAnchors?: ReadonlyArray<TrustAnchor>;
+    trustAnchorManager?: TrustAnchorManager;
     mode?: DnssecMode;
     verifyOptions?: DnssecVerifyOptions;
 };

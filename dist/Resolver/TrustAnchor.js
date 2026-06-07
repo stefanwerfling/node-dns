@@ -14,20 +14,28 @@ export class TrustAnchors {
         });
     }
     static findFor(anchors, name) {
+        const all = TrustAnchors.findAllFor(anchors, name);
+        return all.length === 0 ? undefined : all[0];
+    }
+    static findAllFor(anchors, name) {
         const target = TrustAnchors._normalize(name);
-        let best;
+        const matches = [];
         let bestLabels = -1;
         for (const a of anchors) {
             const z = TrustAnchors._normalize(a.zone);
             if (z === '' || target === z || target.endsWith(`.${z}`)) {
                 const labels = z === '' ? 0 : z.split('.').length;
                 if (labels > bestLabels) {
-                    best = a;
+                    matches.length = 0;
+                    matches.push(a);
                     bestLabels = labels;
+                }
+                else if (labels === bestLabels) {
+                    matches.push(a);
                 }
             }
         }
-        return best;
+        return matches;
     }
     static _normalize(name) {
         if (name === '.' || name === '') {

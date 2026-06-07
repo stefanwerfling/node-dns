@@ -103,6 +103,7 @@ export { NsecCache } from './Resolver/NsecCache.js';
 export { RootHints } from './Resolver/RootHints.js';
 export { RCODE, RecursiveResolver } from './Resolver/RecursiveResolver.js';
 export { TrustAnchors } from './Resolver/TrustAnchor.js';
+export { TrustAnchorManager } from './Resolver/TrustAnchorManager.js';
 export { DnssecChain } from './Resolver/DnssecChain.js';
 export { NegativeProof } from './Resolver/NegativeProof.js';
 export { StubResolver } from './Resolver/StubResolver.js';

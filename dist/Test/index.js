@@ -43,4 +43,5 @@ import './clientCookies.js';
 import './tcpCookies.js';
 import './networksFile.js';
 import './nsecCache.js';
+import './trustAnchorManager.js';
 //# sourceMappingURL=index.js.map

@@ -10,15 +10,26 @@ import { chainPath, isStrictlyDeeper, normZone, parentOf } from './utils.js';
 export class DnssecValidator {
     _host;
     _trustAnchors;
+    _trustAnchorProvider;
     _mode;
     _verifyOptions;
     _zoneSecurity;
     constructor(host, options) {
         this._host = host;
         this._trustAnchors = options.trustAnchors;
+        this._trustAnchorProvider = options.trustAnchorProvider;
         this._mode = options.mode;
         this._verifyOptions = options.verifyOptions;
         this._zoneSecurity = new Map();
+    }
+    _anchorsFor(zone) {
+        if (this._trustAnchorProvider) {
+            const dynamic = this._trustAnchorProvider(zone);
+            if (dynamic.length > 0) {
+                return dynamic;
+            }
+        }
+        return this._trustAnchors;
     }
     async finalize(builtResponse, rawResponse, signingZone, ctx) {
         if (ctx.inAuthChain) {
@@ -90,14 +101,16 @@ export class DnssecValidator {
         if (cached !== undefined) {
             return cached;
         }
-        const anchor = TrustAnchors.findFor(this._trustAnchors, zone);
-        if (anchor === undefined) {
+        const anchors = this._anchorsFor(zone);
+        const liveAnchors = TrustAnchors.findAllFor(anchors, zone);
+        if (liveAnchors.length === 0) {
             const out = { validity: 'indeterminate', reason: 'no trust anchor covers zone' };
             this._zoneSecurity.set(norm, out);
             return out;
         }
+        const anchor = liveAnchors[0];
         const path = chainPath(anchor.zone, zone);
-        let parentDsList = [anchor.ds];
+        let parentDsList = liveAnchors.map((a) => a.ds);
         const subCtx = { ...ctx, inAuthChain: true };
         let result = { validity: 'indeterminate' };
         for (let i = 0; i < path.length; i++) {

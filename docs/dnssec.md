@@ -487,3 +487,94 @@ that matter most:
 
 `Dnssec.buildSigningInput` is the reference implementation — read it if
 you're adding canonical RDATA support for a new type.
+
+## Trust anchor lifecycle (RFC 5011)
+
+A long-running recursive resolver should track operator-published
+KSK rollovers automatically. The IANA root key has rotated once
+(KSK-2010 → KSK-2017) and will rotate again; deployments that ship
+with a static `TrustAnchors.DEFAULT` array stop validating when the
+key in production no longer matches their compiled-in anchor.
+
+`TrustAnchorManager` implements the RFC 5011 state machine:
+
+- **AddPending** — newly observed KSK. Held under add-hold-down
+  (default 30 days) before promotion.
+- **Valid** — current trust anchor; `currentAnchors(zone)` returns it.
+- **Missing** — was Valid, absent in last refresh. Removed after
+  remove-hold-down (default 30 days).
+- **Revoked** — RFC 5011 §2.1 REVOKE bit observed. Permanent — a
+  revoked key never re-promotes.
+- **Removed** — terminal; garbage-collected.
+
+### Wiring it up
+
+```ts
+import {RecursiveResolver, TrustAnchorManager, TrustAnchors, PacketTypes} from 'dns2ts';
+
+const manager = new TrustAnchorManager({
+  initialAnchors: TrustAnchors.DEFAULT,
+  // tweak hold-down for tests; defaults match RFC 5011.
+  // addHoldDownMs: 30 * 86400 * 1000,
+  // removeHoldDownMs: 30 * 86400 * 1000,
+});
+
+const resolver = new RecursiveResolver({
+  dnssec: {trustAnchorManager: manager},
+});
+
+// Periodic refresh (typically daily). The DNSKEY answer is
+// validated by the resolver against the *current* anchor set;
+// the manager applies the state machine to the result.
+setInterval(async () => {
+  const answer = await resolver.resolve('.', PacketTypes.DNSKEY);
+
+  if (answer.header.rcode === 0) {
+    manager.update('.', answer.answers);
+  }
+}, 24 * 60 * 60 * 1000);
+```
+
+### Surviving restarts
+
+Hold-down timers must not reset on every process bounce — RFC 5011
+§2.4.1 explicitly says state must persist. Serialise on shutdown,
+restore on startup:
+
+```ts
+import fs from 'node:fs';
+
+// On shutdown:
+fs.writeFileSync('/var/lib/dns2ts/trust-anchors.json',
+  JSON.stringify(manager.serialize()));
+
+// On startup:
+const snapshot = JSON.parse(fs.readFileSync('/var/lib/dns2ts/trust-anchors.json', 'utf8'));
+const manager = TrustAnchorManager.fromSerialized(snapshot, {
+  initialAnchors: TrustAnchors.DEFAULT,
+});
+```
+
+### Events
+
+```ts
+manager.on('added',    (e) => log(`new KSK seen at ${e.zone} keyTag=${e.keyTag}`));
+manager.on('promoted', (e) => log(`KSK ${e.keyTag} promoted to Valid`));
+manager.on('missing',  (e) => log(`KSK ${e.keyTag} disappeared from RRset`));
+manager.on('restored', (e) => log(`KSK ${e.keyTag} reappeared`));
+manager.on('revoked',  (e) => log(`KSK ${e.keyTag} REVOKED`));
+manager.on('removed',  (e) => log(`KSK ${e.keyTag} dropped`));
+```
+
+### What's not done by the manager
+
+- **Periodic scheduling** — pick `setInterval`, cron, or the
+  app's own scheduler. The manager is a passive state machine.
+- **Validation** — the manager trusts that the records you hand it
+  passed DNSSEC validation against the *current* anchor set. The
+  resolver guarantees that, so the natural pattern is "resolve
+  DNSKEY then call update".
+- **REVOKE-bit self-signature verification** (RFC 5011 §2.1
+  requires the revoked key to sign its own DNSKEY RRset under the
+  new key tag) — covered transitively because the validator
+  refuses to accept the response if no Valid key verifies it.

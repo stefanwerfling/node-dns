@@ -18,6 +18,7 @@ import {NsecCache} from './NsecCache.js';
 import {RootHints, RootServer} from './RootHints.js';
 import {defaultTcpTransport, defaultUdpTransport} from './Transports.js';
 import {TrustAnchor, TrustAnchors} from './TrustAnchor.js';
+import {TrustAnchorManager} from './TrustAnchorManager.js';
 import {
     extractSoa,
     isStrictlyDeeper,
@@ -86,6 +87,17 @@ export type DnssecResolverOptions = {
      * local-root deployments.
      */
     trustAnchors?: ReadonlyArray<TrustAnchor>;
+
+    /**
+     * Optional RFC 5011 trust-anchor manager. When set, the validator
+     * reads live anchors via `trustAnchorManager.currentAnchors(zone)`
+     * so key rollovers (KSK-2024 alongside KSK-2017, future
+     * successors) propagate without re-instantiating the resolver.
+     * The caller schedules periodic DNSKEY refreshes and feeds the
+     * validated answers back into the manager via
+     * `manager.update(zone, records)`.
+     */
+    trustAnchorManager?: TrustAnchorManager;
 
     /**
      * Failure policy. Default: `permissive`.
@@ -429,8 +441,12 @@ export class RecursiveResolver {
 
         if (this._dnssecEnabled) {
             const dnssecObj = typeof dnssecOpt === 'object' ? dnssecOpt : {};
+            const manager = dnssecObj.trustAnchorManager;
             this._dnssecValidator = new DnssecValidator(this, {
                 trustAnchors: dnssecObj.trustAnchors ?? TrustAnchors.DEFAULT,
+                trustAnchorProvider: manager !== undefined
+                    ? (zone: string): ReadonlyArray<TrustAnchor> => manager.currentAnchors(zone)
+                    : undefined,
                 mode: dnssecObj.mode ?? 'permissive',
                 verifyOptions: dnssecObj.verifyOptions ?? {}
             });

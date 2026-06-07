@@ -92,8 +92,25 @@ export class TrustAnchors {
      * @return {TrustAnchor|undefined}
      */
     public static findFor(anchors: ReadonlyArray<TrustAnchor>, name: string): TrustAnchor | undefined {
+        const all = TrustAnchors.findAllFor(anchors, name);
+        return all.length === 0 ? undefined : all[0];
+    }
+
+    /**
+     * Same closest-ancestor lookup as `findFor`, but returns every
+     * anchor that ties for the deepest matching zone. RFC 5011 key
+     * rollover overlap publishes multiple KSKs at the same zone for
+     * up to the add-hold-down window; the validator needs to know
+     * about all of them so a chain that signs against any one of
+     * them is accepted.
+     *
+     * @param {ReadonlyArray<TrustAnchor>} anchors
+     * @param {string} name
+     * @return {TrustAnchor[]}
+     */
+    public static findAllFor(anchors: ReadonlyArray<TrustAnchor>, name: string): TrustAnchor[] {
         const target = TrustAnchors._normalize(name);
-        let best: TrustAnchor | undefined;
+        const matches: TrustAnchor[] = [];
         let bestLabels = -1;
 
         for (const a of anchors) {
@@ -103,13 +120,16 @@ export class TrustAnchors {
                 const labels = z === '' ? 0 : z.split('.').length;
 
                 if (labels > bestLabels) {
-                    best = a;
+                    matches.length = 0;
+                    matches.push(a);
                     bestLabels = labels;
+                } else if (labels === bestLabels) {
+                    matches.push(a);
                 }
             }
         }
 
-        return best;
+        return matches;
     }
 
     /**

@@ -32,6 +32,16 @@ export type DnssecValidatorOptions = {
     /** Trust anchors covering the answer's signing zone. */
     trustAnchors: ReadonlyArray<TrustAnchor>;
 
+    /**
+     * Optional dynamic trust-anchor source (RFC 5011 manager). When
+     * set, `_authenticateZone` reads anchors via `provider(zone)`
+     * instead of the static `trustAnchors` array — so key rollover
+     * updates land in the validator without re-instantiating it. The
+     * manager is responsible for keeping the returned list in sync
+     * with the RFC 5011 state machine.
+     */
+    trustAnchorProvider?: (zone: string) => ReadonlyArray<TrustAnchor>;
+
     /** Failure policy. */
     mode: DnssecMode;
 
@@ -119,6 +129,11 @@ export class DnssecValidator {
     /**
      * @protected
      */
+    protected _trustAnchorProvider?: (zone: string) => ReadonlyArray<TrustAnchor>;
+
+    /**
+     * @protected
+     */
     protected _mode: DnssecMode;
 
     /**
@@ -139,9 +154,34 @@ export class DnssecValidator {
     public constructor(host: DnssecResolverHost, options: DnssecValidatorOptions) {
         this._host = host;
         this._trustAnchors = options.trustAnchors;
+        this._trustAnchorProvider = options.trustAnchorProvider;
         this._mode = options.mode;
         this._verifyOptions = options.verifyOptions;
         this._zoneSecurity = new Map();
+    }
+
+    /**
+     * Resolve the live trust anchor set for `zone`. Reads from the
+     * dynamic provider when configured (RFC 5011 manager), otherwise
+     * from the static array. Concatenates the static array on top of
+     * the provider's output as a safety net — if the manager has
+     * accidentally evicted an anchor mid-rollover the static
+     * fallback keeps validation running.
+     *
+     * @param {string} zone
+     * @return {ReadonlyArray<TrustAnchor>}
+     * @protected
+     */
+    protected _anchorsFor(zone: string): ReadonlyArray<TrustAnchor> {
+        if (this._trustAnchorProvider) {
+            const dynamic = this._trustAnchorProvider(zone);
+
+            if (dynamic.length > 0) {
+                return dynamic;
+            }
+        }
+
+        return this._trustAnchors;
     }
 
     /**
@@ -300,17 +340,23 @@ export class DnssecValidator {
             return cached;
         }
 
-        const anchor = TrustAnchors.findFor(this._trustAnchors, zone);
+        const anchors = this._anchorsFor(zone);
+        const liveAnchors = TrustAnchors.findAllFor(anchors, zone);
 
-        if (anchor === undefined) {
+        if (liveAnchors.length === 0) {
             const out: ZoneSecurity = {validity: 'indeterminate', reason: 'no trust anchor covers zone'};
             this._zoneSecurity.set(norm, out);
             return out;
         }
 
+        // All anchors at this depth share the same zone — pick the
+        // first for the path-walk and feed every DS into parentDsList
+        // so a chain that signs against any of them is accepted.
+        const anchor = liveAnchors[0];
+
         // Path from anchor down to zone, e.g. ['', 'com', 'example.com'].
         const path = chainPath(anchor.zone, zone);
-        let parentDsList: DS[] = [anchor.ds as DS];
+        let parentDsList: DS[] = liveAnchors.map((a) => a.ds as DS);
 
         const subCtx: ResolveCtx = {...ctx, inAuthChain: true};
 

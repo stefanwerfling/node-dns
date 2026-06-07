@@ -66,8 +66,12 @@ export class RecursiveResolver {
         this._dnssecEnabled = dnssecOpt !== undefined && dnssecOpt !== false;
         if (this._dnssecEnabled) {
             const dnssecObj = typeof dnssecOpt === 'object' ? dnssecOpt : {};
+            const manager = dnssecObj.trustAnchorManager;
             this._dnssecValidator = new DnssecValidator(this, {
                 trustAnchors: dnssecObj.trustAnchors ?? TrustAnchors.DEFAULT,
+                trustAnchorProvider: manager !== undefined
+                    ? (zone) => manager.currentAnchors(zone)
+                    : undefined,
                 mode: dnssecObj.mode ?? 'permissive',
                 verifyOptions: dnssecObj.verifyOptions ?? {}
             });

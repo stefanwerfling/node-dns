@@ -219,6 +219,14 @@ export type {
 } from './Resolver/RecursiveResolver.js';
 export {TrustAnchors} from './Resolver/TrustAnchor.js';
 export type {TrustAnchor} from './Resolver/TrustAnchor.js';
+export {TrustAnchorManager} from './Resolver/TrustAnchorManager.js';
+export type {
+    KeyState,
+    ManagedKey,
+    RolloverEvent,
+    TrustAnchorManagerOptions,
+    SerializedTrustAnchorState
+} from './Resolver/TrustAnchorManager.js';
 export {DnssecChain} from './Resolver/DnssecChain.js';
 export type {DnssecValidity, DnssecValidationResult} from './Resolver/DnssecChain.js';
 export {NegativeProof} from './Resolver/NegativeProof.js';
