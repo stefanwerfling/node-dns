@@ -1,3 +1,4 @@
+import type {ClientCookieJar} from './ClientCookieJar.js';
 import type {TcpConnectionPool, TcpConnectionPoolTransportDefaults} from './TcpConnectionPool.js';
 
 export enum ClientOptionsProtocol {
@@ -52,4 +53,19 @@ export type ClientOptions = {
      * would break with `use0x20: true`.
      */
     use0x20?: boolean;
+
+    /**
+     * UDPClient only. Attach a DNS Cookie (RFC 7873) EDNS option to
+     * every outgoing query and learn the upstream's server cookie from
+     * each response. On BADCOOKIE (extended rcode 23) the client retries
+     * the query exactly once with the freshly-issued server cookie, so
+     * cookie-aware recursors stop rate-limiting the connection.
+     *
+     * `true` allocates a private `ClientCookieJar` for this client.
+     * Passing a `ClientCookieJar` instance shares the jar across
+     * multiple clients — useful when the same process talks to a fixed
+     * pool of upstreams over several `UDPClient.request(...)` factories.
+     * Off by default.
+     */
+    cookies?: boolean | ClientCookieJar;
 };

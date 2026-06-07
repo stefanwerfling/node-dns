@@ -108,13 +108,17 @@ In-depth guides per topic live under [`docs/`](docs/README.md):
   the `udp.rrl` server option. Mitigates UDP reflection / amplification
   on authoritative servers; configurable rate, prefix granularity, and
   TC=1 slip ratio.
-- **[Server-side DNS Cookies](docs/server-cookies.md)** — opt-in via
-  `udp.cookies: {secret, mode?, maxAgeSeconds?}` on `UDPServer`.
-  RFC 7873 + RFC 9018 anti-spoofing layer: server issues HMAC-keyed
-  cookies bound to the client cookie + source IP; off-path spoofers
-  can't form a valid follow-up query. BADCOOKIE for client-only /
-  invalid cookies, optional strict mode that REFUSES queries without
-  a cookie option. Observable via `'cookieRejected'` event.
+- **[DNS Cookies](docs/server-cookies.md)** — RFC 7873 + RFC 9018
+  anti-spoofing layer on both ends. **Server**: opt-in via
+  `udp.cookies: {secret, mode?, maxAgeSeconds?}` on `UDPServer`;
+  HMAC-keyed cookies bound to the client cookie + source IP, off-path
+  spoofers can't form a valid follow-up query. BADCOOKIE for
+  client-only / invalid cookies, optional strict mode that REFUSES
+  cookieless queries. **Client**: `UDPClient.request({cookies: true})`
+  attaches an EDNS cookie per upstream, learns the server cookie out
+  of each response, and retries once on BADCOOKIE. Pass a
+  `ClientCookieJar` instance to share cookies across multiple
+  resolver factories.
 - **[DNSSEC validation](docs/dnssec.md)** — `Dnssec.verifyRrsig`,
   `Dnssec.verifyDs`, `Dnssec.computeKeyTag`, `Dnssec.computeDsDigest`. RFC
   4034/4035 algorithms 8/10/13/14/15, DS digest types 1/2/4. Stateless —

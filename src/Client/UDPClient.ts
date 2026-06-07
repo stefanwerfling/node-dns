@@ -6,6 +6,7 @@ import {PacketQuestion} from '../Packet/PacketQuestion.js';
 import {PacketTypes} from '../Packet/PacketTypes.js';
 import {EDNS, EdnsECS} from '../Packet/Types/EDNS.js';
 import {AClient} from './AClient.js';
+import {ClientCookieJar} from './ClientCookieJar.js';
 import {ClientOptions} from './ClientOptions.js';
 import {ClientRequest} from './ClientRequest.js';
 import {TCPClient} from './TCPClient.js';
@@ -59,6 +60,39 @@ export class UDPClient extends AClient {
         const socketType: 'udp4' | 'udp6' = 'udp4';
         const tcpFallback = option.tcpFallback !== false;
         const tcpFallbackPort = option.tcpFallbackPort === undefined ? port : option.tcpFallbackPort;
+        const cookieJar: ClientCookieJar | null = option.cookies === true
+            ? new ClientCookieJar()
+            : (option.cookies instanceof ClientCookieJar ? option.cookies : null);
+
+        const sendOnce = async(query: Packet): Promise<Packet> => {
+            if (cookieJar !== null) {
+                cookieJar.attachTo(query, dns, port);
+            }
+
+            const client = dgram.createSocket(socketType);
+
+            const response = await new Promise<Packet>((resolve, reject) => {
+                client.once('message', (message: Buffer) => {
+                    client.close();
+                    resolve(Packet.parse(message));
+                });
+
+                const buffer = query.toBuffer();
+
+                client.send(buffer, port, dns, (err) => {
+                    if (err) {
+                        client.close();
+                        reject(err);
+                    }
+                });
+            });
+
+            if (cookieJar !== null) {
+                cookieJar.learnFromResponse(response, dns, port);
+            }
+
+            return response;
+        };
 
         return async(name, type, cls, options): Promise<Packet> => {
             let clientIp: string|null = null;
@@ -79,23 +113,16 @@ export class UDPClient extends AClient {
             const sentName = option.use0x20 === true ? Random0x20.scramble(name) : name;
 
             const query = UDPClient.makeQuery(sentName, type, cls, clientIp, recursive);
-            const client = dgram.createSocket(socketType);
+            let response = await sendOnce(query);
 
-            const response = await new Promise<Packet>((resolve, reject) => {
-                client.once('message', (message: Buffer) => {
-                    client.close();
-                    resolve(Packet.parse(message));
-                });
-
-                const buffer = query.toBuffer();
-
-                client.send(buffer, port, dns, (err) => {
-                    if (err) {
-                        client.close();
-                        reject(err);
-                    }
-                });
-            });
+            // RFC 7873 §5.3 — BADCOOKIE means the upstream issued a fresh
+            // server cookie alongside the rejection. Retry the same query
+            // exactly once; the jar has already learned the new cookie.
+            if (cookieJar !== null && ClientCookieJar.isBadCookie(response)) {
+                const retryQuery = UDPClient.makeQuery(sentName, type, cls, clientIp, recursive);
+                retryQuery.header.id = query.header.id;
+                response = await sendOnce(retryQuery);
+            }
 
             if (option.use0x20 === true && response.questions.length > 0) {
                 if (!Random0x20.matches(sentName, response.questions[0].name)) {

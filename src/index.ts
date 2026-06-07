@@ -157,6 +157,8 @@ export {ClientRequestOptions, ClientRequest} from './Client/ClientRequest.js';
 export {ClientCreateResolver} from './Client/ClientCreateResolver.js';
 export {TCPClient} from './Client/TCPClient.js';
 export {UDPClient} from './Client/UDPClient.js';
+export {ClientCookieJar} from './Client/ClientCookieJar.js';
+export type {ClientCookieEntry} from './Client/ClientCookieJar.js';
 export {TcpConnectionPool} from './Client/TcpConnectionPool.js';
 export type {
     TcpConnectionPoolOptions,

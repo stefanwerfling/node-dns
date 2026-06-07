@@ -4,6 +4,7 @@ import { Packet } from '../Packet/Packet.js';
 import { PacketQuestion } from '../Packet/PacketQuestion.js';
 import { EDNS, EdnsECS } from '../Packet/Types/EDNS.js';
 import { AClient } from './AClient.js';
+import { ClientCookieJar } from './ClientCookieJar.js';
 import { TCPClient } from './TCPClient.js';
 export class UDPClient extends AClient {
     static makeQuery(name, type, cls, clientIp = null, recursive = true) {
@@ -22,19 +23,13 @@ export class UDPClient extends AClient {
         const socketType = 'udp4';
         const tcpFallback = option.tcpFallback !== false;
         const tcpFallbackPort = option.tcpFallbackPort === undefined ? port : option.tcpFallbackPort;
-        return async (name, type, cls, options) => {
-            let clientIp = null;
-            let recursive = true;
-            if (options) {
-                if (options.clientIp !== undefined) {
-                    clientIp = options.clientIp;
-                }
-                if (options.recursive !== undefined) {
-                    recursive = options.recursive;
-                }
+        const cookieJar = option.cookies === true
+            ? new ClientCookieJar()
+            : (option.cookies instanceof ClientCookieJar ? option.cookies : null);
+        const sendOnce = async (query) => {
+            if (cookieJar !== null) {
+                cookieJar.attachTo(query, dns, port);
             }
-            const sentName = option.use0x20 === true ? Random0x20.scramble(name) : name;
-            const query = UDPClient.makeQuery(sentName, type, cls, clientIp, recursive);
             const client = dgram.createSocket(socketType);
             const response = await new Promise((resolve, reject) => {
                 client.once('message', (message) => {
@@ -49,6 +44,30 @@ export class UDPClient extends AClient {
                     }
                 });
             });
+            if (cookieJar !== null) {
+                cookieJar.learnFromResponse(response, dns, port);
+            }
+            return response;
+        };
+        return async (name, type, cls, options) => {
+            let clientIp = null;
+            let recursive = true;
+            if (options) {
+                if (options.clientIp !== undefined) {
+                    clientIp = options.clientIp;
+                }
+                if (options.recursive !== undefined) {
+                    recursive = options.recursive;
+                }
+            }
+            const sentName = option.use0x20 === true ? Random0x20.scramble(name) : name;
+            const query = UDPClient.makeQuery(sentName, type, cls, clientIp, recursive);
+            let response = await sendOnce(query);
+            if (cookieJar !== null && ClientCookieJar.isBadCookie(response)) {
+                const retryQuery = UDPClient.makeQuery(sentName, type, cls, clientIp, recursive);
+                retryQuery.header.id = query.header.id;
+                response = await sendOnce(retryQuery);
+            }
             if (option.use0x20 === true && response.questions.length > 0) {
                 if (!Random0x20.matches(sentName, response.questions[0].name)) {
                     throw new Error(`0x20 mismatch: sent "${sentName}", got "${response.questions[0].name}" — response may be spoofed`);

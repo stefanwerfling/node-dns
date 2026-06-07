@@ -110,6 +110,49 @@ clients automatically retry with the new cookie.
 For strict-mode REFUSED: header rcode = 5; no cookie issued (no
 client cookie to bind one to).
 
+## Client side — `ClientCookieJar`
+
+`UDPClient` can hold the other end of the conversation: attach a
+client cookie to every outgoing query, learn the server cookie out
+of each response, and retry once on BADCOOKIE with the freshly
+issued cookie. Enable it with `cookies` on `ClientOptions`:
+
+```ts
+import {UDPClient, ClientCookieJar, PacketTypes, PacketClass} from 'dns2ts';
+
+// `true` allocates a private jar for this client.
+const resolve = UDPClient.request({
+  dns: '198.51.100.10',
+  cookies: true,
+});
+
+await resolve('example.com', PacketTypes.A, PacketClass.IN);
+// First call: server replies BADCOOKIE, client retries with the
+// learned server cookie. Subsequent calls go straight through.
+```
+
+Pass a `ClientCookieJar` instance to share cookies across multiple
+`UDPClient.request(...)` factories (e.g. when one process talks to
+several upstreams via different resolvers):
+
+```ts
+const jar = new ClientCookieJar();
+
+const primary = UDPClient.request({dns: '198.51.100.10', cookies: jar});
+const secondary = UDPClient.request({dns: '198.51.100.20', cookies: jar});
+```
+
+The jar is keyed on `${host}:${port}` and stores a stable client
+cookie per upstream (RFC 7873 §5.1). Useful methods:
+
+- `jar.peek(host, port)` — read entry without allocating.
+- `jar.forget(host, port)` — drop one upstream (e.g. after secret
+  rotation on the server side).
+- `jar.clear()` — wipe everything.
+- `ClientCookieJar.isBadCookie(response)` — predicate that combines
+  the header rcode and OPT TTL upper byte (RFC 6891 §6.1.3) into
+  the 12-bit extended rcode 23 check.
+
 ## What's not implemented yet
 
 - Server-side cookies are UDP-only right now. TCP/TLS sessions are
@@ -118,6 +161,6 @@ client cookie to bind one to).
   them for policy reasons (e.g. ensure cookie-aware client across
   transports), wire `EdnsCookie.verifyServerCookie` into your TCP
   handler manually.
-- Cookie-aware client-side automation. `EdnsCookie.generateClientCookie`
-  and `verifyServerCookie` work, but UDPClient doesn't yet
-  remember server cookies across queries.
+- Client-side cookies on `TCPClient` / TLS — same reasoning, plus
+  pooled TCP connections already correlate by transport ID, so
+  cookies bring no extra defence there.

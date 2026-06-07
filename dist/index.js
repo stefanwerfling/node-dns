@@ -77,6 +77,7 @@ export { AClient } from './Client/AClient.js';
 export { ClientOptionsProtocol } from './Client/ClientOptions.js';
 export { TCPClient } from './Client/TCPClient.js';
 export { UDPClient } from './Client/UDPClient.js';
+export { ClientCookieJar } from './Client/ClientCookieJar.js';
 export { TcpConnectionPool } from './Client/TcpConnectionPool.js';
 export { AxfrClient } from './Client/AxfrClient.js';
 export { IxfrClient } from './Client/IxfrClient.js';

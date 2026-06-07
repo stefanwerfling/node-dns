@@ -1,3 +1,4 @@
+import type { ClientCookieJar } from './ClientCookieJar.js';
 import type { TcpConnectionPool, TcpConnectionPoolTransportDefaults } from './TcpConnectionPool.js';
 export declare enum ClientOptionsProtocol {
     udp = 0,
@@ -15,4 +16,5 @@ export type ClientOptions = {
     tcpFallback?: boolean;
     tcpFallbackPort?: number;
     use0x20?: boolean;
+    cookies?: boolean | ClientCookieJar;
 };
