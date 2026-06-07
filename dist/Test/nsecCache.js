@@ -1,4 +1,5 @@
 import assert from 'assert';
+import { Buffer } from 'buffer';
 import { Dnssec } from '../Lib/Dnssec.js';
 import { Packet } from '../Packet/Packet.js';
 import { PacketClass } from '../Packet/PacketClass.js';
@@ -185,6 +186,86 @@ test('NsecCache: trailing-dot tolerant on qname lookup', () => {
     ]), 'example.com.');
     assert.ok(cache.proveNegative('host.example.com', PacketTypes.MX) !== null);
     assert.ok(cache.proveNegative('host.example.com.', PacketTypes.MX) !== null);
+});
+test('NsecCache: NSEC3 NXDOMAIN via closest-encloser + next-closer + wildcard cover', () => {
+    const cache = new NsecCache();
+    const zone = 'example.com';
+    const params = { salt: 'aabb', iterations: 5 };
+    const ceHash = Dnssec.nsec3Hash(zone, params.salt, params.iterations);
+    const ceLabel = Dnssec.base32hexEncode(ceHash).toLowerCase();
+    const qname = 'doesnotexist.example.com';
+    const nextCloser = qname;
+    const ncHash = Dnssec.nsec3Hash(nextCloser, params.salt, params.iterations);
+    const wcHash = Dnssec.nsec3Hash('*.example.com', params.salt, params.iterations);
+    const before = (h) => {
+        const out = Buffer.from(h);
+        if (out[out.length - 1] === 0) {
+            out[out.length - 1] = 0xff;
+        }
+        else {
+            out[out.length - 1] -= 1;
+        }
+        return out;
+    };
+    const after = (h) => {
+        const out = Buffer.from(h);
+        if (out[out.length - 1] === 0xff) {
+            out[out.length - 1] = 0;
+        }
+        else {
+            out[out.length - 1] += 1;
+        }
+        return out;
+    };
+    const ceOwnerName = `${ceLabel}.${zone}`;
+    const ncOwnerHash = before(ncHash);
+    const ncOwnerLabel = Dnssec.base32hexEncode(ncOwnerHash).toLowerCase();
+    const ncOwnerName = `${ncOwnerLabel}.${zone}`;
+    const ncNextHex = after(ncHash).toString('hex');
+    const wcOwnerHash = before(wcHash);
+    const wcOwnerLabel = Dnssec.base32hexEncode(wcOwnerHash).toLowerCase();
+    const wcOwnerName = `${wcOwnerLabel}.${zone}`;
+    const wcNextHex = after(wcHash).toString('hex');
+    cache.storeFromResponse(buildNegativePacket([
+        nsec3Record(ceOwnerName, after(ceHash).toString('hex'), [PacketTypes.SOA, PacketTypes.NS], 0, 3600, params.salt, params.iterations),
+        nsec3Record(ncOwnerName, ncNextHex, [], 0, 3600, params.salt, params.iterations),
+        nsec3Record(wcOwnerName, wcNextHex, [], 0, 3600, params.salt, params.iterations)
+    ]), zone);
+    const proof = cache.proveNegative(qname, PacketTypes.A);
+    assert.ok(proof !== null);
+    assert.equal(proof.kind, 'nxdomain');
+});
+test('NsecCache: NSEC3 NXDOMAIN refused when next-closer cover is opt-out', () => {
+    const cache = new NsecCache();
+    const zone = 'example.com';
+    const params = { salt: '', iterations: 0 };
+    const ceHash = Dnssec.nsec3Hash(zone, params.salt, params.iterations);
+    const ceLabel = Dnssec.base32hexEncode(ceHash).toLowerCase();
+    const qname = 'unsigneddeleg.example.com';
+    const ncHash = Dnssec.nsec3Hash(qname, params.salt, params.iterations);
+    const wcHash = Dnssec.nsec3Hash('*.example.com', params.salt, params.iterations);
+    const before = (h) => {
+        const out = Buffer.from(h);
+        if (out[out.length - 1] === 0)
+            out[out.length - 1] = 0xff;
+        else
+            out[out.length - 1] -= 1;
+        return out;
+    };
+    const after = (h) => {
+        const out = Buffer.from(h);
+        if (out[out.length - 1] === 0xff)
+            out[out.length - 1] = 0;
+        else
+            out[out.length - 1] += 1;
+        return out;
+    };
+    cache.storeFromResponse(buildNegativePacket([
+        nsec3Record(`${ceLabel}.${zone}`, after(ceHash).toString('hex'), [PacketTypes.SOA, PacketTypes.NS], 0, 3600, params.salt, params.iterations),
+        nsec3Record(`${Dnssec.base32hexEncode(before(ncHash)).toLowerCase()}.${zone}`, after(ncHash).toString('hex'), [], 0x01, 3600, params.salt, params.iterations),
+        nsec3Record(`${Dnssec.base32hexEncode(before(wcHash)).toLowerCase()}.${zone}`, after(wcHash).toString('hex'), [], 0, 3600, params.salt, params.iterations)
+    ]), zone);
+    assert.equal(cache.proveNegative(qname, PacketTypes.A), null);
 });
 test('NsecCache: nxdomain TTL is min of cover and wildcard NSEC TTLs', () => {
     const cache = new NsecCache();

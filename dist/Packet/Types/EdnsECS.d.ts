@@ -6,6 +6,7 @@ export declare enum EdnsOptionCode {
     COOKIE = 10,
     KEEPALIVE = 11,
     PADDING = 12,
+    CHAIN = 13,
     EDE = 15
 }
 export interface EdnsOption {

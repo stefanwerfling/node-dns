@@ -11,6 +11,7 @@ export enum EdnsOptionCode {
     COOKIE = 0x0A,
     KEEPALIVE = 0x0B,
     PADDING = 0x0C,
+    CHAIN = 0x0D,
     EDE = 0x0F
 }
 

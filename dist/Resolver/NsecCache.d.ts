@@ -57,6 +57,7 @@ export declare class NsecCache {
     protected _evictIfNeeded(): void;
     protected _proveNodataViaNsec(qname: string, qtype: number): SynthesizedNegative | null;
     protected _proveNxdomainViaNsec(qname: string): SynthesizedNegative | null;
+    protected _proveNxdomainViaNsec3(qname: string): SynthesizedNegative | null;
     protected _proveNodataViaNsec3(qname: string, qtype: number): SynthesizedNegative | null;
     protected static _closestEncloser(qname: string, owner: string, next: string, zone: string): string | null;
     protected static _decodeBase32Hex(input: string): Buffer | null;

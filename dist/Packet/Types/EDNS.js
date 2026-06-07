@@ -3,6 +3,7 @@ import { BufferWriter } from '../../Lib/BufferWriter.js';
 import { PacketResource } from '../PacketResource.js';
 import { PacketType } from '../PacketType.js';
 import { PacketTypes } from '../PacketTypes.js';
+import { EdnsChain } from './EdnsChain.js';
 import { EdnsCookie } from './EdnsCookie.js';
 import { EdnsECS, EdnsOptionCode } from './EdnsECS.js';
 import { EdnsExtendedError } from './EdnsExtendedError.js';
@@ -63,6 +64,8 @@ export class EDNS extends PacketType {
                 return EdnsNsid.decode(reader, length);
             case EdnsOptionCode.KEEPALIVE:
                 return EdnsKeepalive.decode(reader, length);
+            case EdnsOptionCode.CHAIN:
+                return EdnsChain.decode(reader, length);
             case EdnsOptionCode.EDE:
                 return EdnsExtendedError.decode(reader, length);
             default:

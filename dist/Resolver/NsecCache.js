@@ -59,6 +59,10 @@ export class NsecCache {
         if (nxdomainNsec !== null) {
             return nxdomainNsec;
         }
+        const nxdomainNsec3 = this._proveNxdomainViaNsec3(qname);
+        if (nxdomainNsec3 !== null) {
+            return nxdomainNsec3;
+        }
         return null;
     }
     setNsec3Params(zone, params) {
@@ -198,6 +202,76 @@ export class NsecCache {
             }
             const minRemaining = Math.min(NsecCache._remainingSeconds(cover.expiresAt, now), NsecCache._remainingSeconds(wildcardCover.expiresAt, now));
             return { kind: 'nxdomain', ttl: minRemaining };
+        }
+        return null;
+    }
+    _proveNxdomainViaNsec3(qname) {
+        const qkey = NsecCache._nameKey(qname);
+        const now = this._now();
+        const qLabels = qkey.split('.').filter((l) => l.length > 0);
+        for (const [zoneKey, bucket] of this._nsec3ByZone) {
+            const params = this._nsec3Params.get(zoneKey);
+            if (!params) {
+                continue;
+            }
+            const zoneLabels = zoneKey.split('.').filter((l) => l.length > 0);
+            if (qLabels.length <= zoneLabels.length) {
+                continue;
+            }
+            for (let depth = 1; depth <= qLabels.length - zoneLabels.length; depth++) {
+                const candidateLabels = qLabels.slice(depth);
+                const candidate = candidateLabels.join('.');
+                if (candidate.length === 0) {
+                    continue;
+                }
+                let ceHash;
+                try {
+                    ceHash = Dnssec.nsec3Hash(candidate, params.salt, params.iterations);
+                }
+                catch {
+                    continue;
+                }
+                const ceMatch = bucket.find((e) => e.expiresAt > now &&
+                    Buffer.compare(e.ownerHash, ceHash) === 0);
+                if (!ceMatch) {
+                    continue;
+                }
+                const nextCloserLabels = qLabels.slice(depth - 1);
+                const nextCloser = nextCloserLabels.join('.');
+                let ncHash;
+                try {
+                    ncHash = Dnssec.nsec3Hash(nextCloser, params.salt, params.iterations);
+                }
+                catch {
+                    continue;
+                }
+                const ncCover = bucket.find((e) => e.expiresAt > now &&
+                    Dnssec.nsec3CoversHash(e.ownerHash, e.nextHash, ncHash));
+                if (!ncCover) {
+                    continue;
+                }
+                if ((ncCover.flags & 0x01) === 1) {
+                    continue;
+                }
+                const wildcardName = `*.${candidate}`;
+                let wcHash;
+                try {
+                    wcHash = Dnssec.nsec3Hash(wildcardName, params.salt, params.iterations);
+                }
+                catch {
+                    continue;
+                }
+                const wcCover = bucket.find((e) => e.expiresAt > now &&
+                    Dnssec.nsec3CoversHash(e.ownerHash, e.nextHash, wcHash));
+                if (!wcCover) {
+                    continue;
+                }
+                if ((wcCover.flags & 0x01) === 1) {
+                    continue;
+                }
+                const minRemaining = Math.min(NsecCache._remainingSeconds(ceMatch.expiresAt, now), NsecCache._remainingSeconds(ncCover.expiresAt, now), NsecCache._remainingSeconds(wcCover.expiresAt, now));
+                return { kind: 'nxdomain', ttl: minRemaining };
+            }
         }
         return null;
     }

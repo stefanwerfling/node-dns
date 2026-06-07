@@ -5,6 +5,7 @@ export var EdnsOptionCode;
     EdnsOptionCode[EdnsOptionCode["COOKIE"] = 10] = "COOKIE";
     EdnsOptionCode[EdnsOptionCode["KEEPALIVE"] = 11] = "KEEPALIVE";
     EdnsOptionCode[EdnsOptionCode["PADDING"] = 12] = "PADDING";
+    EdnsOptionCode[EdnsOptionCode["CHAIN"] = 13] = "CHAIN";
     EdnsOptionCode[EdnsOptionCode["EDE"] = 15] = "EDE";
 })(EdnsOptionCode || (EdnsOptionCode = {}));
 export class EdnsECS {

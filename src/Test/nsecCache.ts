@@ -260,6 +260,133 @@ test('NsecCache: trailing-dot tolerant on qname lookup', () => {
     assert.ok(cache.proveNegative('host.example.com.', PacketTypes.MX) !== null);
 });
 
+test('NsecCache: NSEC3 NXDOMAIN via closest-encloser + next-closer + wildcard cover', () => {
+    const cache = new NsecCache();
+    const zone = 'example.com';
+    const params = {salt: 'aabb', iterations: 5};
+
+    // Closest encloser: example.com (the apex). Hash it.
+    const ceHash = Dnssec.nsec3Hash(zone, params.salt, params.iterations);
+    const ceLabel = Dnssec.base32hexEncode(ceHash).toLowerCase();
+
+    // Next closer: directly under example.com — say a label that doesn't
+    // exist. We build the qname as `<random>.example.com` and want to
+    // synthesize NXDOMAIN for it.
+    const qname = 'doesnotexist.example.com';
+    const nextCloser = qname;
+    const ncHash = Dnssec.nsec3Hash(nextCloser, params.salt, params.iterations);
+
+    // Wildcard: *.example.com
+    const wcHash = Dnssec.nsec3Hash('*.example.com', params.salt, params.iterations);
+
+    // For each hash, find a "covering" range by picking owner just before
+    // and next just after. We'll use byte-arithmetic to construct ranges.
+    const before = (h: Buffer): Buffer => {
+        const out = Buffer.from(h);
+        if (out[out.length - 1] === 0) {
+            out[out.length - 1] = 0xff;
+        } else {
+            out[out.length - 1] -= 1;
+        }
+        return out;
+    };
+    const after = (h: Buffer): Buffer => {
+        const out = Buffer.from(h);
+        if (out[out.length - 1] === 0xff) {
+            out[out.length - 1] = 0;
+        } else {
+            out[out.length - 1] += 1;
+        }
+        return out;
+    };
+
+    // Owner-match NSEC3 for the closest encloser.
+    const ceOwnerName = `${ceLabel}.${zone}`;
+
+    // Next-closer cover: NSEC3 with owner = before(ncHash), next = after(ncHash).
+    const ncOwnerHash = before(ncHash);
+    const ncOwnerLabel = Dnssec.base32hexEncode(ncOwnerHash).toLowerCase();
+    const ncOwnerName = `${ncOwnerLabel}.${zone}`;
+    const ncNextHex = after(ncHash).toString('hex');
+
+    // Wildcard cover: NSEC3 with owner = before(wcHash), next = after(wcHash).
+    const wcOwnerHash = before(wcHash);
+    const wcOwnerLabel = Dnssec.base32hexEncode(wcOwnerHash).toLowerCase();
+    const wcOwnerName = `${wcOwnerLabel}.${zone}`;
+    const wcNextHex = after(wcHash).toString('hex');
+
+    cache.storeFromResponse(buildNegativePacket([
+        nsec3Record(ceOwnerName, after(ceHash).toString('hex'), [PacketTypes.SOA, PacketTypes.NS], 0, 3600, params.salt, params.iterations),
+        nsec3Record(ncOwnerName, ncNextHex, [], 0, 3600, params.salt, params.iterations),
+        nsec3Record(wcOwnerName, wcNextHex, [], 0, 3600, params.salt, params.iterations)
+    ]), zone);
+
+    const proof = cache.proveNegative(qname, PacketTypes.A);
+    assert.ok(proof !== null);
+    assert.equal(proof!.kind, 'nxdomain');
+});
+
+test('NsecCache: NSEC3 NXDOMAIN refused when next-closer cover is opt-out', () => {
+    const cache = new NsecCache();
+    const zone = 'example.com';
+    const params = {salt: '', iterations: 0};
+
+    const ceHash = Dnssec.nsec3Hash(zone, params.salt, params.iterations);
+    const ceLabel = Dnssec.base32hexEncode(ceHash).toLowerCase();
+
+    const qname = 'unsigneddeleg.example.com';
+    const ncHash = Dnssec.nsec3Hash(qname, params.salt, params.iterations);
+    const wcHash = Dnssec.nsec3Hash('*.example.com', params.salt, params.iterations);
+
+    const before = (h: Buffer): Buffer => {
+        const out = Buffer.from(h);
+        if (out[out.length - 1] === 0) out[out.length - 1] = 0xff; else out[out.length - 1] -= 1;
+        return out;
+    };
+    const after = (h: Buffer): Buffer => {
+        const out = Buffer.from(h);
+        if (out[out.length - 1] === 0xff) out[out.length - 1] = 0; else out[out.length - 1] += 1;
+        return out;
+    };
+
+    cache.storeFromResponse(buildNegativePacket([
+        // CE NSEC3 — owner-match, narrow non-overlapping range so it
+        // can't accidentally cover the next-closer hash.
+        nsec3Record(
+            `${ceLabel}.${zone}`,
+            after(ceHash).toString('hex'),
+            [PacketTypes.SOA, PacketTypes.NS],
+            0,
+            3600,
+            params.salt,
+            params.iterations
+        ),
+        // next-closer cover with OPT-OUT flag set
+        nsec3Record(
+            `${Dnssec.base32hexEncode(before(ncHash)).toLowerCase()}.${zone}`,
+            after(ncHash).toString('hex'),
+            [],
+            0x01,
+            3600,
+            params.salt,
+            params.iterations
+        ),
+        nsec3Record(
+            `${Dnssec.base32hexEncode(before(wcHash)).toLowerCase()}.${zone}`,
+            after(wcHash).toString('hex'),
+            [],
+            0,
+            3600,
+            params.salt,
+            params.iterations
+        )
+    ]), zone);
+
+    // Opt-out means the next-closer might be an unsigned delegation
+    // that actually exists — synthesis must refuse.
+    assert.equal(cache.proveNegative(qname, PacketTypes.A), null);
+});
+
 test('NsecCache: nxdomain TTL is min of cover and wildcard NSEC TTLs', () => {
     const cache = new NsecCache();
     cache.storeFromResponse(buildNegativePacket([

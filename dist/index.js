@@ -43,6 +43,7 @@ export { EdnsNsid } from './Packet/Types/EdnsNsid.js';
 export { EdnsKeepalive } from './Packet/Types/EdnsKeepalive.js';
 export { EdnsExtendedError, ExtendedDnsErrorCode } from './Packet/Types/EdnsExtendedError.js';
 export { EdnsCookie } from './Packet/Types/EdnsCookie.js';
+export { EdnsChain } from './Packet/Types/EdnsChain.js';
 export { DNSKEY } from './Packet/Types/DNSKEY.js';
 export { DS } from './Packet/Types/DS.js';
 export { CDS } from './Packet/Types/CDS.js';

@@ -548,4 +548,58 @@ test('zone#$INCLUDE wraps resolver errors with line number context', () => {
 test('zone#$INCLUDE without filename errors', () => {
     assert.throws(() => ZoneParser.parse('$INCLUDE\n'), /\$INCLUDE requires a file name/u);
 });
+test('zone#HINFO parses cpu and os', () => {
+    const { records } = ZoneParser.parse('host 60 IN HINFO "x86_64" "Linux"', { origin: 'example.com.' });
+    const hinfo = records[0].packetType;
+    assert.equal(hinfo.cpu, 'x86_64');
+    assert.equal(hinfo.os, 'Linux');
+});
+test('zone#URI parses priority weight target', () => {
+    const { records } = ZoneParser.parse('_ftp._tcp 60 IN URI 10 1 "ftp://ftp.example.com/public"', { origin: 'example.com.' });
+    const uri = records[0].packetType;
+    assert.equal(uri.priority, 10);
+    assert.equal(uri.weight, 1);
+    assert.equal(uri.target, 'ftp://ftp.example.com/public');
+});
+test('zone#ZONEMD parses serial scheme algorithm digest', () => {
+    const digest = '0102030405060708090a0b0c0d0e0f1011121314151617181920212223242526272829303132333435363738394041424344454647';
+    const { records } = ZoneParser.parse(`@ 86400 IN ZONEMD 2024010101 1 1 ${digest}`, { origin: 'example.com.' });
+    const zonemd = records[0].packetType;
+    assert.equal(zonemd.serial, 2024010101);
+    assert.equal(zonemd.scheme, 1);
+    assert.equal(zonemd.hashAlgorithm, 1);
+    assert.equal(zonemd.digest, digest);
+});
+test('zone#OPENPGPKEY parses base64 to hex', () => {
+    const { records } = ZoneParser.parse('c93f1e4._openpgpkey 3600 IN OPENPGPKEY SGVsbG8h', { origin: 'example.com.' });
+    const key = records[0].packetType;
+    assert.equal(key.publicKey, '48656c6c6f21');
+});
+test('zone#SMIMEA parses usage selector matching cert', () => {
+    const { records } = ZoneParser.parse('c93f1e4._smimecert 3600 IN SMIMEA 3 1 1 aabbccdd00112233', { origin: 'example.com.' });
+    const smimea = records[0].packetType;
+    assert.equal(smimea.usage, 3);
+    assert.equal(smimea.selector, 1);
+    assert.equal(smimea.matchingType, 1);
+    assert.equal(smimea.certificate, 'aabbccdd00112233');
+});
+test('zone#CERT parses type keyTag algorithm base64-cert', () => {
+    const { records } = ZoneParser.parse('cert 3600 IN CERT 3 12345 8 SGVsbG8h', { origin: 'example.com.' });
+    const cert = records[0].packetType;
+    assert.equal(cert.certType, 3);
+    assert.equal(cert.keyTag, 12345);
+    assert.equal(cert.algorithm, 8);
+    assert.equal(cert.certificate, '48656c6c6f21');
+});
+test('zone#LOC parses raw seven-field integer form', () => {
+    const { records } = ZoneParser.parse('loc 3600 IN LOC 0 18 22 19 2295968000 1404416000 10000500', { origin: 'example.com.' });
+    const loc = records[0].packetType;
+    assert.equal(loc.version, 0);
+    assert.equal(loc.size, 18);
+    assert.equal(loc.horizPre, 22);
+    assert.equal(loc.vertPre, 19);
+    assert.equal(loc.latitude, 2_295_968_000);
+    assert.equal(loc.longitude, 1_404_416_000);
+    assert.equal(loc.altitude, 10_000_500);
+});
 //# sourceMappingURL=zoneParser.js.map

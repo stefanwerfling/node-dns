@@ -1,6 +1,7 @@
 import assert from 'assert';
 import {BufferReader} from '../Lib/BufferReader.js';
 import {PacketResource} from '../Packet/PacketResource.js';
+import {EdnsChain} from '../Packet/Types/EdnsChain.js';
 import {EdnsCookie} from '../Packet/Types/EdnsCookie.js';
 import {EDNS, EdnsECS} from '../Packet/Types/EDNS.js';
 import {EdnsExtendedError, ExtendedDnsErrorCode} from '../Packet/Types/EdnsExtendedError.js';
@@ -256,4 +257,26 @@ test('EDNS#createResource encodes the DO bit into the TTL field', () => {
         0x00, 0x00, 0x80, 0x00, // ttl with DO bit set
         0x00, 0x00              // RDLEN = 0 (no options)
     ]));
+});
+
+test('EDNS.Chain#empty signals root (RFC 7901)', () => {
+    const resource = EDNS.createResource([new EdnsChain()]);
+    const decoded = PacketResource.decode(PacketResource.encode(resource));
+    const opt = (decoded.packetType as EDNS).rdata[0] as EdnsChain;
+    assert.equal(opt.ednsCode, 13);
+    assert.equal(opt.closestTrustPoint, '');
+});
+
+test('EDNS.Chain#carries a closest trust point', () => {
+    const resource = EDNS.createResource([new EdnsChain('example.com')]);
+    const decoded = PacketResource.decode(PacketResource.encode(resource));
+    const opt = (decoded.packetType as EDNS).rdata[0] as EdnsChain;
+    assert.equal(opt.closestTrustPoint, 'example.com');
+});
+
+test('EDNS.Chain#round-trips deep names', () => {
+    const resource = EDNS.createResource([new EdnsChain('deep.sub.zone.example.com')]);
+    const decoded = PacketResource.decode(PacketResource.encode(resource));
+    const opt = (decoded.packetType as EDNS).rdata[0] as EdnsChain;
+    assert.equal(opt.closestTrustPoint, 'deep.sub.zone.example.com');
 });

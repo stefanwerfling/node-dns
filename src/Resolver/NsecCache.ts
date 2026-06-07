@@ -214,6 +214,12 @@ export class NsecCache {
             return nxdomainNsec;
         }
 
+        const nxdomainNsec3 = this._proveNxdomainViaNsec3(qname);
+
+        if (nxdomainNsec3 !== null) {
+            return nxdomainNsec3;
+        }
+
         return null;
     }
 
@@ -419,6 +425,135 @@ export class NsecCache {
             );
 
             return {kind: 'nxdomain', ttl: minRemaining};
+        }
+
+        return null;
+    }
+
+    /**
+     * NSEC3 NXDOMAIN synthesis (RFC 8198 §5.4 over RFC 5155 §8.4):
+     * walk ancestors of `qname` looking for one whose hash matches a
+     * cached NSEC3 (= closest encloser exists), then verify the
+     * `next-closer` (one label deeper) is covered by a cached NSEC3
+     * and the synthesised wildcard `*.<closest-encloser>` is also
+     * covered.
+     *
+     * Opt-out (RFC 5155 §6 / RFC 7129 §5.5): a name covered by an
+     * opt-out NSEC3 might still exist as an unsigned delegation, so
+     * the synthesis is refused whenever the next-closer or wildcard
+     * cover comes from an opt-out NSEC3.
+     *
+     * @param {string} qname
+     * @return {SynthesizedNegative|null}
+     * @protected
+     */
+    protected _proveNxdomainViaNsec3(qname: string): SynthesizedNegative | null {
+        const qkey = NsecCache._nameKey(qname);
+        const now = this._now();
+        const qLabels = qkey.split('.').filter((l) => l.length > 0);
+
+        for (const [zoneKey, bucket] of this._nsec3ByZone) {
+            const params = this._nsec3Params.get(zoneKey);
+
+            if (!params) {
+                continue;
+            }
+
+            const zoneLabels = zoneKey.split('.').filter((l) => l.length > 0);
+
+            if (qLabels.length <= zoneLabels.length) {
+                continue;
+            }
+
+            // Walk ancestors qname → zone apex. depth = labels stripped
+            // from the left. depth=1 → immediate parent; depth=N → root.
+            for (let depth = 1; depth <= qLabels.length - zoneLabels.length; depth++) {
+                const candidateLabels = qLabels.slice(depth);
+                const candidate = candidateLabels.join('.');
+
+                if (candidate.length === 0) {
+                    continue;
+                }
+
+                let ceHash: Buffer;
+
+                try {
+                    ceHash = Dnssec.nsec3Hash(candidate, params.salt, params.iterations);
+                } catch {
+                    continue;
+                }
+
+                const ceMatch = bucket.find((e) =>
+                    e.expiresAt > now &&
+                    Buffer.compare(e.ownerHash, ceHash) === 0
+                );
+
+                if (!ceMatch) {
+                    continue;
+                }
+
+                // Next-closer = one label deeper than the closest encloser
+                // (i.e. depth - 1 stripped from the left).
+                const nextCloserLabels = qLabels.slice(depth - 1);
+                const nextCloser = nextCloserLabels.join('.');
+
+                let ncHash: Buffer;
+
+                try {
+                    ncHash = Dnssec.nsec3Hash(nextCloser, params.salt, params.iterations);
+                } catch {
+                    continue;
+                }
+
+                const ncCover = bucket.find((e) =>
+                    e.expiresAt > now &&
+                    Dnssec.nsec3CoversHash(e.ownerHash, e.nextHash, ncHash)
+                );
+
+                if (!ncCover) {
+                    continue;
+                }
+
+                // RFC 5155 §6 — opt-out blocks NXDOMAIN synthesis
+                // because the next closer might be an unsigned
+                // delegation that actually exists.
+                // eslint-disable-next-line no-bitwise
+                if ((ncCover.flags & 0x01) === 1) {
+                    continue;
+                }
+
+                const wildcardName = `*.${candidate}`;
+
+                let wcHash: Buffer;
+
+                try {
+                    wcHash = Dnssec.nsec3Hash(wildcardName, params.salt, params.iterations);
+                } catch {
+                    continue;
+                }
+
+                const wcCover = bucket.find((e) =>
+                    e.expiresAt > now &&
+                    Dnssec.nsec3CoversHash(e.ownerHash, e.nextHash, wcHash)
+                );
+
+                if (!wcCover) {
+                    continue;
+                }
+
+                // eslint-disable-next-line no-bitwise
+                if ((wcCover.flags & 0x01) === 1) {
+                    continue;
+                }
+
+                const minRemaining = Math.min(
+                    NsecCache._remainingSeconds(ceMatch.expiresAt, now),
+                    NsecCache._remainingSeconds(ncCover.expiresAt, now),
+                    NsecCache._remainingSeconds(wcCover.expiresAt, now)
+                );
+
+                return {kind: 'nxdomain', ttl: minRemaining};
+            }
         }
 
         return null;

@@ -7,26 +7,33 @@ import { PacketTypes } from '../Packet/PacketTypes.js';
 import { A } from '../Packet/Types/A.js';
 import { AAAA } from '../Packet/Types/AAAA.js';
 import { CAA } from '../Packet/Types/CAA.js';
+import { CERT } from '../Packet/Types/CERT.js';
 import { CNAME } from '../Packet/Types/CNAME.js';
 import { CDNSKEY } from '../Packet/Types/CDNSKEY.js';
 import { CDS } from '../Packet/Types/CDS.js';
 import { DNAME } from '../Packet/Types/DNAME.js';
 import { DNSKEY } from '../Packet/Types/DNSKEY.js';
 import { DS } from '../Packet/Types/DS.js';
+import { HINFO } from '../Packet/Types/HINFO.js';
 import { HTTPS } from '../Packet/Types/HTTPS.js';
+import { LOC } from '../Packet/Types/LOC.js';
 import { MX } from '../Packet/Types/MX.js';
 import { NAPTR } from '../Packet/Types/NAPTR.js';
 import { NS } from '../Packet/Types/NS.js';
 import { NSEC } from '../Packet/Types/NSEC.js';
 import { NSEC3 } from '../Packet/Types/NSEC3.js';
+import { OPENPGPKEY } from '../Packet/Types/OPENPGPKEY.js';
 import { PTR } from '../Packet/Types/PTR.js';
 import { RRSIG } from '../Packet/Types/RRSIG.js';
+import { SMIMEA } from '../Packet/Types/SMIMEA.js';
 import { SOA } from '../Packet/Types/SOA.js';
 import { SRV } from '../Packet/Types/SRV.js';
 import { SSHFP } from '../Packet/Types/SSHFP.js';
 import { SVCB } from '../Packet/Types/SVCB.js';
 import { TLSA } from '../Packet/Types/TLSA.js';
 import { TXT } from '../Packet/Types/TXT.js';
+import { URI } from '../Packet/Types/URI.js';
+import { ZONEMD } from '../Packet/Types/ZONEMD.js';
 export class ZoneParser {
     static parse(input, options = {}) {
         return ZoneParser._parseInternal(input, options, new Set());
@@ -467,6 +474,52 @@ export class ZoneParser {
                 return ZoneParser._parseSvcb(rdata, origin, lineNumber, false);
             case 'HTTPS':
                 return ZoneParser._parseSvcb(rdata, origin, lineNumber, true);
+            case 'HINFO': {
+                need(2, 'HINFO (cpu os)');
+                return new HINFO(v(0), v(1));
+            }
+            case 'URI': {
+                need(3, 'URI (priority weight "target")');
+                const priority = parseInt(v(0), 10);
+                const weight = parseInt(v(1), 10);
+                const target = rdata.slice(2).map((t) => t.value).join(' ');
+                return new URI(priority, weight, target);
+            }
+            case 'ZONEMD': {
+                need(4, 'ZONEMD (serial scheme hashAlg digest)');
+                const serial = parseInt(v(0), 10);
+                const scheme = parseInt(v(1), 10);
+                const hashAlgorithm = parseInt(v(2), 10);
+                const digest = rdata.slice(3).map((t) => t.value).join('').toLowerCase();
+                return new ZONEMD(serial, scheme, hashAlgorithm, digest);
+            }
+            case 'OPENPGPKEY': {
+                need(1, 'OPENPGPKEY (base64 key)');
+                const b64 = rdata.map((t) => t.value).join('');
+                const keyHex = Buffer.from(b64, 'base64').toString('hex');
+                return new OPENPGPKEY(keyHex);
+            }
+            case 'SMIMEA': {
+                need(4, 'SMIMEA (usage selector matchingType cert)');
+                const usage = parseInt(v(0), 10);
+                const selector = parseInt(v(1), 10);
+                const matchingType = parseInt(v(2), 10);
+                const cert = rdata.slice(3).map((t) => t.value).join('').toLowerCase();
+                return new SMIMEA(usage, selector, matchingType, cert);
+            }
+            case 'CERT': {
+                need(4, 'CERT (type keyTag algorithm cert)');
+                const certType = parseInt(v(0), 10);
+                const keyTag = parseInt(v(1), 10);
+                const algorithm = parseInt(v(2), 10);
+                const b64 = rdata.slice(3).map((t) => t.value).join('');
+                const certHex = Buffer.from(b64, 'base64').toString('hex');
+                return new CERT(certType, keyTag, algorithm, certHex);
+            }
+            case 'LOC': {
+                need(7, 'LOC (version size horizPre vertPre lat lon alt)');
+                return new LOC(parseInt(v(0), 10), parseInt(v(1), 10), parseInt(v(2), 10), parseInt(v(3), 10), parseInt(v(4), 10) >>> 0, parseInt(v(5), 10) >>> 0, parseInt(v(6), 10) >>> 0);
+            }
             default:
                 throw new Error(`line ${lineNumber}: unsupported record type ${typeStr}`);
         }
